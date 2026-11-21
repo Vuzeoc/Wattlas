@@ -2,8 +2,12 @@
 
 **Batteri- og solcellestyring til Home Assistant – med EMHASS som hjerne og en app som ansigt.**
 
+![Wattlas live: energiflow mellem sol, elnet, hus og batteri](docs/billeder/live.png)
+
 > ⚠️ **ALPHA.** Wattlas styrer din inverter og dit batteri. Læs [SIKKERHED.md](docs/SIKKERHED.md), før du slår styringen til.
 > Du bruger det på eget ansvar.
+>
+> Wattlas er under aktiv udvikling og opdateres løbende. Se [CHANGELOG.md](CHANGELOG.md) for, hvad der er nyt.
 
 Wattlas lader [EMHASS](https://emhass.readthedocs.io/) lægge en plan for de næste 24–48 timer. Planen bygger på spotpriser,
 nettarif, solprognose og husets forbrug. Wattlas følger planen hvert 30. sekund og skriver kun til inverteren, når noget skal ændres.
@@ -21,6 +25,14 @@ Hårde grænser for sikringer, batteri og fase-strøm gælder altid, uanset hvad
 | **Fleksibel forbruger** | Lad EMHASS lægge varmtvandsbeholder, elbil eller pool i de bedste timer via en kontakt i HA |
 | **App** | To dashboards: *Wattlas* (live-energiflow, økonomi, historik, elpris, solprognose) og *Wattlas Styring* (styring, regler, planens logik, overvågning, teknik) |
 | **Økonomi** | Sparet i dag/uge/måned/i alt, tilbagebetalingstid, rekorder, ugerapport søndag aften |
+
+## Sådan ser det ud
+
+| Planens logik: hvad EMHASS vil, og hvorfor | Elpris time for time, inkl. tariffer | Solprognose mod målt produktion |
+|---|---|---|
+| ![Planens logik](docs/billeder/plan.png) | ![Elpris](docs/billeder/elpris.png) | ![Solprognose](docs/billeder/sol.png) |
+
+*Billederne er lavet med opdigtede demotal.*
 
 ## Hvilke invertere
 
