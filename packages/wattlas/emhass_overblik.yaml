@@ -1,0 +1,503 @@
+input_boolean:
+  emhass_ui_push:
+    name: EMHASS telefonbeskeder
+    icon: mdi:cellphone-message
+    initial: true
+  emhass_ui_recovery:
+    name: EMHASS besked når fejl er væk
+    initial: true
+input_text:
+  emhass_ui_seneste_besked:
+    name: EMHASS seneste besked
+    max: 255
+template:
+- sensor:
+  - name: EMHASS planens alder
+    unique_id: emhass_ui_plan_alder
+    default_entity_id: sensor.emhass_ui_plan_alder
+    state: '{{ ((as_timestamp(now())-as_timestamp(states(''input_datetime.emhass_plan_tid''),0))/60) | round(1)
+      }}'
+    unit_of_measurement: min
+    availability: '{{ as_timestamp(states(''input_datetime.emhass_plan_tid''),0)>0 }}'
+  - name: EMHASS energi over reserve
+    unique_id: emhass_ui_energi_til_raadighed
+    default_entity_id: sensor.emhass_ui_energi_til_raadighed
+    state: '{{ ([0, states(''sensor.emhass_m_battery_soc'')|float(0)-15]|max * (states(''input_number.wattlas_batteri_kwh'')|float(0))/100)|round(2) }}'
+    unit_of_measurement: kWh
+    availability: '{{ is_number(states(''sensor.emhass_m_battery_soc'')) }}'
+  - name: EMHASS aktiv periode
+    unique_id: emhass_ui_aktiv_periode
+    default_entity_id: sensor.emhass_ui_aktiv_periode
+    state: '{% set p = 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour
+      < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 %}{{ p }}'
+    icon: mdi:clock-outline
+  - name: EMHASS periodens effektgrænse
+    unique_id: emhass_ui_periode_effekt
+    default_entity_id: sensor.emhass_ui_periode_effekt
+    state: '{% set p = 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour
+      < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 %}{{ states(''number.wattlas_program_''
+      ~ p ~ ''_power'') }}'
+    unit_of_measurement: W
+    availability: '{% set p = 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour
+      < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 %}{{ is_number(states(''number.wattlas_program_''
+      ~ p ~ ''_power'')) }}'
+  - name: EMHASS periodens SOC-grænse
+    unique_id: emhass_ui_periode_soc
+    default_entity_id: sensor.emhass_ui_periode_soc
+    state: '{% set p = 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour
+      < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 %}{{ states(''number.wattlas_program_''
+      ~ p ~ ''_soc'') }}'
+    unit_of_measurement: '%'
+    availability: '{% set p = 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour
+      < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 %}{{ is_number(states(''number.wattlas_program_''
+      ~ p ~ ''_soc'')) }}'
+  - name: EMHASS beregnet købspris
+    unique_id: emhass_ui_koebspris
+    default_entity_id: sensor.emhass_ui_koebspris
+    state: |-
+      {% set h=now().hour %}
+      {% set net=(states('input_number.wattlas_nettarif_lav')|float(0)) if h<6 else (states('input_number.wattlas_nettarif_spids')|float(0)) if 17<=h<21 else (states('input_number.wattlas_nettarif_hoej')|float(0)) %}
+      {{ (states('sensor.energi_data_service')|float(0)+(net+(states('input_number.wattlas_elafgift')|float(0)))*1.25+(states('input_number.wattlas_tillaeg')|float(0)))|round(4) }}
+    unit_of_measurement: DKK/kWh
+    availability: '{{ is_number(states(''sensor.energi_data_service'')) }}'
+  - name: EMHASS foreløbig salgspris
+    unique_id: emhass_ui_salgspris
+    default_entity_id: sensor.emhass_ui_salgspris
+    state: '{{ (states(''sensor.energi_data_service'')|float(0)/1.25-(states(''input_number.wattlas_salg_nettarif'')|float(0))*1.25-(states(''input_number.wattlas_salg_gebyr'')|float(0)))|round(4) }}'
+    unit_of_measurement: DKK/kWh
+    availability: '{{ is_number(states(''sensor.energi_data_service'')) }}'
+  - name: EMHASS fase 1 strømestimat
+    unique_id: emhass_ui_fase_1
+    default_entity_id: sensor.emhass_ui_fase_1
+    state: '{{ (states(''sensor.emhass_m_external_ct_w_l1'')|float(0) / states(''sensor.emhass_m_grid_current_v_l1'')|float(1))|round(1)
+      }}'
+    unit_of_measurement: A
+    availability: '{{ is_number(states(''sensor.emhass_m_external_ct_w_l1'')) and states(''sensor.emhass_m_grid_current_v_l1'')|float(0)>0
+      }}'
+  - name: EMHASS fase 2 strømestimat
+    unique_id: emhass_ui_fase_2
+    default_entity_id: sensor.emhass_ui_fase_2
+    state: '{{ (states(''sensor.emhass_m_external_ct_w_l2'')|float(0) / states(''sensor.emhass_m_grid_current_v_l2'')|float(1))|round(1)
+      }}'
+    unit_of_measurement: A
+    availability: '{{ is_number(states(''sensor.emhass_m_external_ct_w_l2'')) and states(''sensor.emhass_m_grid_current_v_l2'')|float(0)>0
+      }}'
+  - name: EMHASS fase 3 strømestimat
+    unique_id: emhass_ui_fase_3
+    default_entity_id: sensor.emhass_ui_fase_3
+    state: '{{ (states(''sensor.emhass_m_external_ct_w_l3'')|float(0) / states(''sensor.emhass_m_grid_current_v_l3'')|float(1))|round(1)
+      }}'
+    unit_of_measurement: A
+    availability: '{{ is_number(states(''sensor.emhass_m_external_ct_w_l3'')) and states(''sensor.emhass_m_grid_current_v_l3'')|float(0)>0
+      }}'
+  - name: EMHASS drift
+    unique_id: emhass_ui_drift
+    default_entity_id: sensor.emhass_ui_drift
+    state: |-
+      {% if not is_state('input_boolean.emhass_styring_aktiv','on') %}Styring slukket
+      {% elif not is_state('input_boolean.emhass_opstart_klar','on') %}Afventer automatisk genoptagelse
+      {% elif is_state('script.emhass_start','on') %}Starter styringen
+      {% elif is_state('script.emhass_test_helios','on') %}Opdaterer planen
+      {% elif not is_state('binary_sensor.emhass_ui_data_frisk','on') %}Styringens målekontrol afviser data
+      {% elif not is_state('binary_sensor.emhass_styrekanal_ok','on') %}Mangler inverterstyring
+      {% elif not is_state('binary_sensor.emhass_plan_brugbar','on') %}Ingen brugbar tidsplan
+      {% elif is_state('binary_sensor.emhass_reserveplan_aktiv','on') %}Kører gemt reserveplan
+      {% elif states('input_number.emhass_plan_batteri_w')|float(0)<-150 %}Planen ønsker opladning
+      {% elif states('input_number.emhass_plan_batteri_w')|float(0)>150 %}Planen ønsker afladning
+      {% else %}Planen ønsker batteriro
+      {% endif %}
+    icon: mdi:state-machine
+  - name: EMHASS afladegrænse W
+    unique_id: emhass_ui_afladegraense_w
+    default_entity_id: sensor.emhass_ui_afladegraense_w
+    unit_of_measurement: W
+    state: |-
+      {% set v=states('sensor.emhass_m_battery_voltage')|float(0) %}
+      {% set a=states('sensor.wattlas_maks_afladestroem')|float(0) %}
+      {{ [states('input_number.wattlas_maks_afladeeffekt_w')|float(0),([states('input_number.wattlas_maks_afladestroem_a')|float(0),a]|min*v*0.95)|round(0,'floor')]|min if 45<=v<=58 and a>0 else 0 }}
+    attributes:
+      stroemgraense_a: '{{ [states(''input_number.wattlas_maks_afladestroem_a'')|float(0),states(''sensor.wattlas_maks_afladestroem'')|float(0)]|min
+        }}'
+      forklaring: AC-loft fra den aflæste afladegrænse, højst wattlas_maks_afladestroem_a, aktuel batterispænding og 95 % effektivitet.
+        Ingen ændring af inverterens installerede amperegrænse.
+  - name: EMHASS plan ladegrænse W
+    unique_id: emhass_ui_plan_ladegraense_w
+    default_entity_id: sensor.emhass_ui_plan_ladegraense_w
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    state: '{% set a=states(''sensor.wattlas_maks_ladestroem'')|float(0) %}{{ ([states(''input_number.wattlas_maks_ladestroem_a'')|float(0),a]|min*45)|round(0,''floor'')
+      if a>0 else 0 }}'
+    attributes:
+      forklaring: Samlet modelgrænse ved 45 V og aflæst maksimum, højst wattlas_maks_ladestroem_a. Netopladning begrænses separat af
+        pladsen på hver fase.
+  - name: EMHASS plan afladegrænse W
+    unique_id: emhass_ui_plan_afladegraense_w
+    default_entity_id: sensor.emhass_ui_plan_afladegraense_w
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    state: |-
+      {% set a=states('sensor.wattlas_maks_afladestroem')|float(0) %}
+      {{ [states('input_number.wattlas_maks_afladeeffekt_w')|float(0),([states('input_number.wattlas_maks_afladestroem_a')|float(0),a]|min*45*0.95)|round(0,'floor')]|min if a>0 else 0 }}
+  - name: EMHASS plan batteri DC W
+    unique_id: emhass_ui_plan_batteri_dc_w
+    default_entity_id: sensor.emhass_ui_plan_batteri_dc_w
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    state: |-
+      {% set b=states('input_number.emhass_plan_batteri_w')|float(0) %}
+      {{ (b/0.95 if b>=0 else b*0.95)|round(1) }}
+    availability: '{{ is_state(''binary_sensor.emhass_plan_brugbar'',''on'') and is_number(states(''input_number.emhass_plan_batteri_w''))
+      }}'
+    attributes:
+      forklaring: Planens AC-effekt omregnet til estimeret batterieffekt med 95 % effektivitet, til sammenligning
+        med rå DC-måling.
+  binary_sensor:
+  - name: EMHASS friske driftsmålinger
+    unique_id: emhass_ui_data_frisk
+    default_entity_id: binary_sensor.emhass_ui_data_frisk
+    state: |-
+      {% set ns=namespace(ok=is_state('binary_sensor.emhass_ui_beskeddata_ok','on')) %}
+      {% for id in ['sensor.emhass_m_load_w_totalpower', 'sensor.emhass_m_grid_out_total_power', 'sensor.emhass_m_external_ct_w_l1', 'sensor.emhass_m_external_ct_w_l2', 'sensor.emhass_m_external_ct_w_l3'] %}
+        {% set s=states[id] %}
+        {% if s is not defined or s is none or not is_number(s.state) %}
+          {% set ns.ok=false %}
+        {% endif %}
+      {% endfor %}
+      {% for i in range(1,4) %}
+        {% if not (210 <= states('sensor.emhass_m_grid_current_v_l' ~ i)|float(0) <= 250) %}
+          {% set ns.ok=false %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.ok and 15 <= states('sensor.emhass_m_battery_soc')|float(-1) <= 100
+         and 15 <= states('sensor.emhass_m_battery_soc')|float(-1) <= 100
+         and (states('sensor.emhass_m_battery_soc')|float(-1)-states('sensor.emhass_m_battery_soc')|float(-1))|abs < 0.1
+         and 45 <= states('sensor.emhass_m_battery_voltage')|float(0) <= 58
+         and is_state('sensor.emhass_m_inverter_status','Normal') }}
+    attributes:
+      forklaring: Samlet målesæt fra styrekanalens målekilde. Rå kildetidsstempler kontrolleres før valg. SOC 15–100
+        %, batteri 45–58 V, faser 210–250 V og Normal status kræves. Styrekanalen kontrolleres separat.
+  - name: EMHASS plan i aktuel halvtime
+    unique_id: emhass_ui_plan_frisk
+    default_entity_id: binary_sensor.emhass_ui_plan_frisk
+    state: '{{ is_state(''sensor.emhass_planvalg'',''Frisk'') and is_state(''binary_sensor.emhass_plan_brugbar'',''on'')
+      }}'
+  - name: EMHASS mangler en aktuel plan
+    unique_id: emhass_ui_planfejl
+    default_entity_id: binary_sensor.emhass_ui_planfejl
+    state: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') and is_state(''input_boolean.emhass_opstart_klar'',''on'')
+      and not is_state(''binary_sensor.emhass_plan_brugbar'',''on'') }}'
+    device_class: problem
+    delay_on:
+      seconds: 180
+    delay_off:
+      seconds: 60
+    attributes:
+      forklaring: Ingen frisk eller brugbar gemt plan i tre minutter. Reserveplan må højst være to timer gammel
+        og skal dække den aktuelle halvtime. Se EMHASS-log og beregningsscriptets spor.
+  - name: EMHASS mangler friske målinger
+    unique_id: emhass_ui_datafejl
+    default_entity_id: binary_sensor.emhass_ui_datafejl
+    state: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') and not is_state(''binary_sensor.emhass_ui_data_frisk'',''on'')
+      }}'
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      minutes: 5
+    attributes:
+      forklaring: '{% if not is_state(''binary_sensor.emhass_ui_data_frisk'',''on'') %}Målekontrollen afviser data:
+        Kontrollér fælles datalivstegn inden for 90 sekunder, numeriske målinger, SOC 15–100 %, SOC-hjælper, batterispænding
+        45–58 V, fasespændinger 210–250 V og Normal inverterstatus. Netopladning stoppes af styringen.{% else %}Ingen
+        aktuel datafejl. Afventer fem sammenhængende minutter med godkendte målinger før OK.{% endif %}'
+  - name: EMHASS høj netbelastning
+    unique_id: emhass_ui_netbelastning
+    default_entity_id: binary_sensor.emhass_ui_netbelastning
+    state: |-
+      {% set b=states('sensor.emhass_m_battery_output_w_power')|float(0) %}
+      {% set pv=states('sensor.emhass_solproduktion_samlet')|float(0) %}
+      {% set load=states('sensor.emhass_m_load_w_totalpower')|float(0) %}
+      {{ is_state('input_boolean.emhass_styring_aktiv','on') and is_state('switch.wattlas_netladning','on')
+       and -b/0.95-([0,pv-load]|max)>500
+       and ([states('sensor.emhass_ui_fase_1')|float(0),states('sensor.emhass_ui_fase_2')|float(0),states('sensor.emhass_ui_fase_3')|float(0)]|max)>25 }}
+    device_class: problem
+    delay_on:
+      minutes: 5
+    delay_off:
+      seconds: 60
+    availability: '{{ is_state(''binary_sensor.emhass_ui_netdata_ok'',''on'') }}'
+    attributes:
+      forklaring: Netopladning fortsætter over 500 W i fem minutter samtidig med faseestimat over 25 A. Reguleringen
+        bør have reduceret opladningen. W/V er et estimat, ikke målt RMS-strøm.
+  - name: EMHASS kontrollér batteritemperatur
+    unique_id: emhass_ui_temperatur
+    default_entity_id: binary_sensor.emhass_ui_temperatur
+    state: '{{ states(''sensor.emhass_m_battery_temperature'')|float(20)>=45 or (states(''sensor.emhass_m_battery_temperature'')|float(20)<5
+      and states(''sensor.emhass_m_battery_output_w_power'')|float(0)<-300) }}'
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 60
+    availability: '{{ is_number(states(''sensor.emhass_m_battery_temperature'')) }}'
+    attributes:
+      forklaring: Rapporteret batteritemperatur er mindst 45 °C, eller batteriet oplader under 5 °C. Det er valgte
+        advarselstærskler. Kontrollér begge batterier og BMS; én fælles sensor dækker ikke nødvendigvis begge.
+  - name: EMHASS kontrollér inverterstatus
+    unique_id: emhass_ui_inverterfejl
+    default_entity_id: binary_sensor.emhass_ui_inverterfejl
+    state: '{{ states(''sensor.emhass_m_inverter_status'')|lower != ''normal'' }}'
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 60
+    availability: '{{ has_value(''sensor.emhass_m_inverter_status'') }}'
+    attributes:
+      forklaring: Inverterens rapporterede status har været forskellig fra Normal i to minutter. Se den konkrete
+        status og inverterens fejllog.
+  - name: EMHASS batteri under reserve
+    unique_id: emhass_ui_lav_soc
+    default_entity_id: binary_sensor.emhass_ui_lav_soc
+    state: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') and states(''sensor.emhass_m_battery_soc'')|float(100)<14
+      }}'
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 60
+    availability: '{{ is_number(states(''sensor.emhass_m_battery_soc'')) }}'
+    attributes:
+      forklaring: Batteriet er under 14 %, selv om styringens reserve er 15 %. Kontrollér SOC-grænser og anden styring.
+  - name: EMHASS periode følger ikke planen
+    unique_id: emhass_ui_indstillingsfejl
+    default_entity_id: binary_sensor.emhass_ui_indstillingsfejl
+    state: |-
+      {% set p = 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 %}
+      {% set b=states('input_number.emhass_plan_batteri_w')|float(0) %}
+      {% set g=states('input_number.emhass_plan_net_w')|float(none) %}
+      {# samme afrunding og regel som "EMHASS – reguler aktiv periode" #}
+      {% set cap=((states('sensor.emhass_ui_afladegraense_w')|float(0)) / 500) | round(0,'floor') * 500 %}
+      {% set soc=states('sensor.emhass_m_battery_soc')|float(-1) %}
+      {% set kap=[100, [15, (states('input_number.emhass_plan_soc')|float(15) / 5) | round(0,'floor') * 5] | max] | min %}
+      {% set expected=cap if (b>150 and g is not none and g|abs<=50) or kap>=100 or soc<=kap
+         else [cap,[0,((b / 100) | round(0,'floor') * 100)]|max]|min %}
+      {{ is_state('input_boolean.emhass_styring_aktiv','on') and not (is_state('script.emhass_start','on') or is_state('script.emhass_test_helios','on')) and is_state('binary_sensor.emhass_plan_brugbar','on')
+       and is_state('binary_sensor.emhass_ui_data_frisk','on') and b>150
+       and (states('number.wattlas_program_' ~ p ~ '_power')|float(-99999)-expected)|abs>100 }}
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 60
+    attributes:
+      forklaring: Effektgrænsen afviger fra den forventede regulering i mindst to minutter. Ved afladning og cirka
+        nul netmål bruges loftet beregnet ud fra aflæst strømgrænse, højst wattlas_maks_afladestroem_a, og aktuel spænding, ellers planlagt
+        effekt begrænset af samme loft. SOC-mål og mindst 15 % reserve gælder.
+  - name: EMHASS netopladning uden ladeeffekt
+    unique_id: emhass_ui_lader_ikke
+    default_entity_id: binary_sensor.emhass_ui_lader_ikke
+    state: |-
+      {% set p = 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 %}
+      {{ is_state('input_boolean.emhass_styring_aktiv','on') and not (is_state('script.emhass_start','on') or is_state('script.emhass_test_helios','on')) and is_state('binary_sensor.emhass_plan_brugbar','on')
+       and is_state('binary_sensor.emhass_ui_data_frisk','on')
+       and is_state('switch.wattlas_netladning','on') and is_state('switch.emhass_netladning_p' ~ p,'on')
+       and states('input_number.emhass_plan_batteri_w')|float(0)<-500
+       and states('sensor.emhass_m_battery_soc')|float(100)+2 < states('sensor.emhass_ui_periode_soc')|float(0)
+       and states('sensor.emhass_m_battery_output_w_power')|float(-99999)>-100 }}
+    device_class: problem
+    delay_on:
+      seconds: 180
+    delay_off:
+      seconds: 60
+    attributes:
+      forklaring: Netopladning er tilladt i den aktive periode, men batteriet tager ikke imod strøm trods afstand
+        til SOC-målet. Kontrollér BMS, inverter og ladeindstillinger.
+  - name: EMHASS netdata til overvågning
+    unique_id: emhass_ui_netdata_ok
+    default_entity_id: binary_sensor.emhass_ui_netdata_ok
+    state: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman'',''SunMate''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      }}'
+  - name: EMHASS målinger til beskedkontrol
+    unique_id: emhass_ui_beskeddata_ok
+    default_entity_id: binary_sensor.emhass_ui_beskeddata_ok
+    state: |-
+      {% set ns=namespace(ok=is_state('binary_sensor.emhass_ui_netdata_ok','on')) %}
+      {% for id in ['sensor.emhass_m_battery_soc', 'sensor.emhass_m_battery_voltage', 'sensor.emhass_m_battery_output_w_power', 'sensor.emhass_m_battery_soc'] %}
+        {% if not is_number(states(id)) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {{ ns.ok and 0<=states('sensor.emhass_m_battery_soc')|float(-1)<=100 and states('sensor.emhass_m_battery_voltage')|float(0)>0 }}
+  - name: EMHASS batteri SOC afvigelse
+    unique_id: emhass_ui_soc_afvigelse
+    default_entity_id: binary_sensor.emhass_ui_soc_afvigelse
+    device_class: problem
+    state: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') and state_attr(''sensor.emhass_ui_energi_uden_soc_aendring'',''mistanke'')
+      is sameas true }}'
+    delay_on:
+      minutes: 5
+    attributes:
+      forklaring: Beregnet nettoenergi overstiger 1,0 kWh (2,5 kWh når SOC er højst 25 eller mindst 90 %) uden ændring i rapporteret SOC. Deye-historikken viser,
+        at dette kan forekomme i kildedataene. Advarslen dokumenterer en afvigelse; den beviser ikke forbindelsesfejl
+        og stopper ikke styringen. Nulstilles ved ændret SOC.
+      energi_kwh: '{{ states(''sensor.emhass_ui_energi_uden_soc_aendring'') }}'
+- triggers:
+  - trigger: time_pattern
+    seconds: /30
+  - trigger: state
+    entity_id:
+    - sensor.emhass_m_battery_output_w_power
+    - sensor.emhass_m_battery_soc
+    - binary_sensor.emhass_ui_beskeddata_ok
+  sensor:
+  - name: EMHASS energi uden SOC ændring
+    unique_id: emhass_ui_energi_uden_soc_aendring
+    default_entity_id: sensor.emhass_ui_energi_uden_soc_aendring
+    unit_of_measurement: kWh
+    state: |-
+      {% set soc=states('sensor.emhass_m_battery_soc')|float(none) %}
+      {% set old_soc=this.attributes.get('soc',none) %}
+      {% set dt=as_timestamp(now())-(this.attributes.get('tid',0)|float(0)) %}
+      {% set old=this.state|float(0) %}
+      {% set w=this.attributes.get('watt',0)|float(0) %}
+      {% set fresh=is_state('binary_sensor.emhass_ui_beskeddata_ok','on') %}
+      {% set integrate=fresh and this.attributes.get('gyldig',false) and 0<dt<=60 and w|abs>100 %}
+      {% set energy=old + (w*dt/3600000 if integrate else 0) %}
+      {% if soc is not none and (old_soc is none or soc!=old_soc or this.attributes.get('kilde')!=states('sensor.emhass_maalekilde')) %}0
+      {% else %}{{ energy|round(6) }}{% endif %}
+    attributes:
+      soc: '{% set s=states(''sensor.emhass_m_battery_soc'')|float(none) %}{{ s if s is not none else this.attributes.get(''soc'',none)
+        }}'
+      tid: '{{ as_timestamp(now()) }}'
+      watt: '{{ states(''sensor.emhass_m_battery_output_w_power'')|float(0) }}'
+      gyldig: '{{ is_state(''binary_sensor.emhass_ui_beskeddata_ok'',''on'') }}'
+      mistanke: |-
+        {% set soc=states('sensor.emhass_m_battery_soc')|float(none) %}
+        {% set old_soc=this.attributes.get('soc',none) %}
+        {% set dt=as_timestamp(now())-(this.attributes.get('tid',0)|float(0)) %}
+        {% set old=this.state|float(0) %}
+        {% set w=this.attributes.get('watt',0)|float(0) %}
+        {% set fresh=is_state('binary_sensor.emhass_ui_beskeddata_ok','on') %}
+        {% set integrate=fresh and this.attributes.get('gyldig',false) and 0<dt<=60 and w|abs>100 %}
+        {% set energy=old + (w*dt/3600000 if integrate else 0) %}
+        {# LiFePO4 holder SOC stille i bunden og toppen #}
+        {% set graense = 2.5 if soc is not none and (soc <= 25 or soc >= 90) else 1.0 %}
+        {% if soc is not none and (old_soc is none or soc!=old_soc or this.attributes.get('kilde')!=states('sensor.emhass_maalekilde')) %}{{ false }}
+        {% else %}{{ this.attributes.get('mistanke',false) or energy|abs>=graense }}{% endif %}
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+script:
+  emhass_ui_send_besked:
+    alias: EMHASS – send telefonbesked
+    mode: queued
+    max: 20
+    sequence:
+    - action: input_text.set_value
+      target:
+        entity_id: input_text.emhass_ui_seneste_besked
+      data:
+        value: '{{ (now().strftime(''%d/%m %H:%M'') ~ '' · '' ~ titel ~ '' · '' ~ besked)[:255] }}'
+    - action: logbook.log
+      data:
+        name: EMHASS
+        message: '{{ titel ~ ": " ~ besked }}'
+        entity_id: input_text.emhass_ui_seneste_besked
+    - action: persistent_notification.create
+      data:
+        title: '{{ titel }}'
+        message: '{{ besked }}'
+        notification_id: '{{ tag }}'
+    - condition: state
+      entity_id: input_boolean.emhass_ui_push
+      state: 'on'
+    - action: script.wattlas_besked
+      data:
+        title: '{{ titel }}'
+        message: '{{ besked }}'
+        data:
+          tag: '{{ tag }}'
+          group: emhass
+          url: /wattlas-styring/app#overvaagning
+  emhass_ui_test_besked:
+    alias: EMHASS – testbesked
+    mode: single
+    sequence:
+    - action: script.emhass_ui_send_besked
+      data:
+        titel: Solcellestyring – test
+        besked: Test af beskeder fra Home Assistant. Ingen inverterindstillinger er ændret.
+        tag: emhass_ui_test
+automation:
+- id: emhass_ui_problem_beskeder
+  alias: EMHASS – vigtige driftsbeskeder
+  mode: queued
+  max: 20
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.emhass_ui_planfejl
+    - binary_sensor.emhass_ui_datafejl
+    - binary_sensor.emhass_ui_netbelastning
+    - binary_sensor.emhass_ui_temperatur
+    - binary_sensor.emhass_ui_inverterfejl
+    - binary_sensor.emhass_ui_lav_soc
+    - binary_sensor.emhass_ui_indstillingsfejl
+    - binary_sensor.emhass_ui_lader_ikke
+    - binary_sensor.emhass_ui_styrekanalfejl
+    to: 'on'
+    id: problem
+  - trigger: state
+    entity_id:
+    - binary_sensor.emhass_ui_planfejl
+    - binary_sensor.emhass_ui_datafejl
+    - binary_sensor.emhass_ui_netbelastning
+    - binary_sensor.emhass_ui_temperatur
+    - binary_sensor.emhass_ui_inverterfejl
+    - binary_sensor.emhass_ui_lav_soc
+    - binary_sensor.emhass_ui_indstillingsfejl
+    - binary_sensor.emhass_ui_lader_ikke
+    - binary_sensor.emhass_ui_styrekanalfejl
+    from: 'on'
+    to: 'off'
+    id: recovery
+  actions:
+  - condition: template
+    value_template: '{{ trigger.id==''problem'' or is_state(''input_boolean.emhass_ui_recovery'',''on'') }}'
+  - action: script.emhass_ui_send_besked
+    data:
+      titel: '{{ (''Kontrollér: '' if trigger.id==''problem'' else ''Normal igen: '') ~ state_attr(trigger.entity_id,''friendly_name'')
+        }}'
+      besked: |-
+        {% if trigger.id=='problem' %}{{ state_attr(trigger.entity_id,'forklaring') }}{% else %}Denne advarsel er ikke længere aktiv. Øvrige advarsler kan stadig være aktive.{% endif %}
+        Batteri: {{ states('sensor.emhass_m_battery_soc') }} %.
+        Batterieffekt: {{ states('sensor.emhass_m_battery_output_w_power') }} W (+ afladning / − opladning).
+        Net: {{ states('sensor.emhass_m_grid_out_total_power') }} W.
+        Temperatur: {{ states('sensor.emhass_m_battery_temperature') }} °C.
+        Plan: {{ states('sensor.emhass_ui_drift') }}.
+      tag: '{{ trigger.entity_id | replace(''binary_sensor.'','''') }}'
+- id: emhass_ui_soc_afvigelse_besked
+  alias: EMHASS – separat SOC-advarsel
+  mode: restart
+  triggers:
+  - trigger: state
+    entity_id: binary_sensor.emhass_ui_soc_afvigelse
+    to: 'on'
+  - trigger: state
+    entity_id: binary_sensor.emhass_ui_soc_afvigelse
+    to: 'off'
+  - trigger: homeassistant
+    event: start
+  actions:
+  - choose:
+    - conditions: '{{ is_state(''binary_sensor.emhass_ui_soc_afvigelse'',''on'') }}'
+      sequence:
+      - action: persistent_notification.create
+        data:
+          notification_id: emhass_soc_afvigelse
+          title: EMHASS – batteriets SOC afviger fra energiberegningen
+          message: '{{ state_attr(''binary_sensor.emhass_ui_soc_afvigelse'',''forklaring'') }}'
+    - conditions: '{{ is_state(''binary_sensor.emhass_ui_soc_afvigelse'',''off'') }}'
+      sequence:
+      - action: persistent_notification.dismiss
+        data:
+          notification_id: emhass_soc_afvigelse

@@ -1,0 +1,54 @@
+# Fuldt batteri, så cellerne kan balancere (LiFePO4 balancerer i toppen).
+# Har det ikke stået fuldt i 1 time de seneste 7 dage, lades det op på billig nattakst, så det er fuldt ca. kl. 05 og står til kl. 06.
+# Bliver det fuldt af solen i den situation, hviler det 1 time, medmindre strømmen koster 4 kr./kWh eller mere. Ellers følges planen.
+# Selve styringen ligger i script.emhass_reguler (emhass_forbindelse.yaml).
+input_boolean:
+  emhass_fuld_opladning:
+    name: EMHASS fuld opladning hver 7. dag
+    icon: mdi:battery-charging-100
+    initial: true
+
+input_datetime:
+  emhass_sidst_fuld:
+    name: EMHASS batteri sidst fuldt i 1 time
+    has_date: true
+    has_time: false
+    icon: mdi:battery-check
+
+template:
+  - binary_sensor:
+      - name: EMHASS batteri fuldt
+        unique_id: emhass_batteri_fuldt
+        default_entity_id: binary_sensor.emhass_batteri_fuldt
+        icon: mdi:battery
+        availability: "{{ is_number(states('sensor.emhass_m_battery_soc')) }}"
+        state: "{{ states('sensor.emhass_m_battery_soc') | float(0) >= 98.5 }}"
+
+automation:
+  - id: emhass_sidst_fuld_registrer
+    alias: EMHASS – registrér fuldt batteri
+    description: Gemmer datoen, når batteriet har stået fuldt i 1 time. Første start bruger 7/11-2026, hvor det sidst stod fuldt.
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.emhass_batteri_fuldt
+        to: 'on'
+        for: '01:00:00'
+        id: fuldt
+      - trigger: homeassistant
+        event: start
+        id: start
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.id == 'fuldt' or states('input_datetime.emhass_sidst_fuld') | as_datetime is none or states('input_datetime.emhass_sidst_fuld') < '2000' }}"
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.emhass_sidst_fuld
+        data:
+          date: "{{ now().date().isoformat() if trigger.id == 'fuldt' else now().date().isoformat() }}"
+      - action: system_log.write
+        data:
+          logger: emhass.fuldt
+          level: info
+          message: "Batteri registreret som fuldt: {{ trigger.id }}"
+    mode: single

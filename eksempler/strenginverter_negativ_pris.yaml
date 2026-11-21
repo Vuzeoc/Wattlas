@@ -1,0 +1,20 @@
+# Eksempel: sluk en ekstra streng-inverter (via relæ), når salgsprisen er negativ og der eksporteres,
+# og tænd den igen, når prisen er positiv eller huset køber. Ret switch.strenginverter_relae.
+alias: Wattlas eksempel · streng-inverter ved negativ salgspris
+mode: single
+triggers:
+  - trigger: time_pattern
+    minutes: /1
+actions:
+  - variables:
+      pris: "{{ states('sensor.emhass_ui_salgspris') | float(0) }}"
+      net: "{{ states('sensor.emhass_m_grid_out_total_power') | float(0) }}"
+  - choose:
+      - conditions: "{{ pris < 0 and net < -100 and is_state('switch.strenginverter_relae', 'on') }}"
+        sequence:
+          - action: switch.turn_off
+            target: {entity_id: switch.strenginverter_relae}
+      - conditions: "{{ (pris >= 0 or net > 100) and is_state('switch.strenginverter_relae', 'off') }}"
+        sequence:
+          - action: switch.turn_on
+            target: {entity_id: switch.strenginverter_relae}

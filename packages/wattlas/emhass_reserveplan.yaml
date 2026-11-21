@@ -1,0 +1,82 @@
+template:
+- triggers:
+  - trigger: event
+    event_type: emhass_plan_record
+  actions:
+  - variables:
+      candidate: |-
+        {% set d=trigger.event.data %}{% set out=d.get('output',{}) %}
+        {% set b=out.get('p_batt_forecast',[]) %}{% set g=out.get('p_grid_forecast',[]) %}{% set s=out.get('soc_batt_forecast',[]) %}
+        {% set ct=as_timestamp(d.get('time'),0) %}{% set start=d.get('input',{}).get('start_ts',0)|float(0) %}
+        {% set ns=namespace(ok=4<=b|count<=48 and b|count==g|count and b|count==s|count and 0<=as_timestamp(now())-ct<=60,rows=[]) %}
+        {% for i in range(b|count) %}
+         {% if i<g|count and i<s|count and b[i]|count==2 and g[i]|count==2 and s[i]|count==2 %}
+          {% set ts=b[i][0]|float(0) %}
+          {% if not (ts==start+i*1800 and ts==g[i][0]|float(-1) and ts==s[i][0]|float(-1)
+            and is_number(b[i][1]) and is_number(g[i][1]) and is_number(s[i][1])
+            and -(states('input_number.wattlas_maks_ladeeffekt_w')|float(0))<=b[i][1]|float<=states('input_number.wattlas_maks_afladeeffekt_w')|float(0) and -(states('input_number.wattlas_maks_eksport_w')|float(0))<=g[i][1]|float<=states('input_number.wattlas_maks_netimport_w')|float(0) and 15<=s[i][1]|float<=100) %}
+           {% set ns.ok=false %}
+          {% else %}{% set ns.rows=ns.rows+[[ts|int,b[i][1]|float,g[i][1]|float,s[i][1]|float]] %}{% endif %}
+         {% else %}{% set ns.ok=false %}{% endif %}
+        {% endfor %}
+        {{ dict(ok=ns.ok,rows=ns.rows,created=ct) }}
+  sensor:
+  - name: EMHASS seneste brugbare tidsplan
+    unique_id: emhass_gemt_plan
+    default_entity_id: sensor.emhass_gemt_plan
+    state: '{{ trigger.event.data.time if candidate.ok else this.state }}'
+    attributes:
+      schema: '{{ 1 if candidate.ok else this.attributes.get(''schema'',0) }}'
+      rows: '{{ candidate.rows if candidate.ok else this.attributes.get(''rows'',[]) }}'
+      seneste_afvisning: '{{ this.attributes.get(''seneste_afvisning'','''') if candidate.ok else now().isoformat()
+        }}'
+      maks_alder_timer: 2
+- triggers:
+  - trigger: time_pattern
+    seconds: /10
+  - trigger: state
+    entity_id: sensor.emhass_gemt_plan
+  - trigger: homeassistant
+    event: start
+  actions:
+  - variables:
+      selected: |-
+        {% set t=as_timestamp(now()) %}
+        {% set ct=as_timestamp(states('sensor.emhass_gemt_plan'),0) %}
+        {% set age=t-ct %}{% set slot=(t//1800)*1800 %}
+        {% set rows=state_attr('sensor.emhass_gemt_plan','rows') or [] %}
+        {% set ns=namespace(rows=[]) %}
+        {% if state_attr('sensor.emhass_gemt_plan','schema')==1 and 0<=age<7200 %}
+         {% for r in rows %}
+          {% if r|count==4 and r[0]|float(-1)==slot and is_number(r[1]) and is_number(r[2]) and is_number(r[3])
+            and -(states('input_number.wattlas_maks_ladeeffekt_w')|float(0))<=r[1]|float<=states('input_number.wattlas_maks_afladeeffekt_w')|float(0) and -(states('input_number.wattlas_maks_eksport_w')|float(0))<=r[2]|float<=states('input_number.wattlas_maks_netimport_w')|float(0) and 15<=r[3]|float<=100 %}
+           {% set ns.rows=ns.rows+[r] %}
+          {% endif %}
+         {% endfor %}
+        {% endif %}
+        {% set valid=ns.rows|count==1 %}
+        {{ dict(mode=('Frisk' if age<720 and ct//1800==t//1800 else 'Reserve') if valid else 'Ingen',
+         valid=valid,row=ns.rows[0] if valid else [],created=ct,age=age) }}
+  sensor:
+  - name: EMHASS planvalg
+    unique_id: emhass_planvalg
+    default_entity_id: sensor.emhass_planvalg
+    state: '{{ selected.mode }}'
+    attributes:
+      row: '{{ selected.row }}'
+      generated: '{{ selected.created }}'
+      age_minutes: '{{ (selected.age/60)|round(1) }}'
+- binary_sensor:
+  - name: EMHASS brugbar tidsplan
+    unique_id: emhass_plan_brugbar
+    default_entity_id: binary_sensor.emhass_plan_brugbar
+    state: '{% set r=state_attr(''sensor.emhass_planvalg'',''row'') or [] %}{{ states(''sensor.emhass_planvalg'')
+      in [''Frisk'',''Reserve''] and r|count==4 and r[0]|float(-1)==(as_timestamp(now())//1800)*1800 and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_planvalg'',''generated'')|float(0))<7200
+      }}'
+  - name: EMHASS reserveplan aktiv
+    unique_id: emhass_reserveplan_aktiv
+    default_entity_id: binary_sensor.emhass_reserveplan_aktiv
+    state: '{{ is_state(''sensor.emhass_planvalg'',''Reserve'') and is_state(''binary_sensor.emhass_plan_brugbar'',''on'')
+      and is_state(''input_boolean.emhass_styring_aktiv'',''on'') and is_state(''input_boolean.emhass_opstart_klar'',''on'')
+      and is_state(''binary_sensor.emhass_ui_data_frisk'',''on'') and is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
+      }}'

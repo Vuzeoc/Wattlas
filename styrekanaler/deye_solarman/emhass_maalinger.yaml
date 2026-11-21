@@ -1,0 +1,343 @@
+# reservekilden for målingerne er Solarman (min_inverter_*, samme logger) i stedet for SunMate; attributterne hedder solarman_ok/solarman_heartbeat.
+template:
+- triggers:
+  - trigger: time_pattern
+    seconds: /10
+  - trigger: homeassistant
+    event: start
+  actions:
+  - variables:
+      mapping:
+        load_w_totalpower: load_power
+        grid_out_total_power: grid_power
+        battery_output_w_power: battery_power
+        battery_soc: battery_state_of_charge
+        battery_voltage: battery_voltage
+        inverter_status: run_state
+        battery_temperature: battery_temperature
+        inverter_temperature: heatsink_temperature
+        external_ct_w_l1: external_ct_power_l1
+        grid_current_v_l1: grid_voltage_l1
+        external_ct_w_l2: external_ct_power_l2
+        grid_current_v_l2: grid_voltage_l2
+        external_ct_w_l3: external_ct_power_l3
+        grid_current_v_l3: grid_voltage_l3
+      smap:
+        load_w_totalpower: sensor.min_inverter_load_power
+        grid_out_total_power: sensor.min_inverter_grid_power
+        battery_output_w_power: sensor.min_inverter_battery_power
+        battery_soc: sensor.min_inverter_battery
+        battery_voltage: sensor.min_inverter_battery_voltage
+        inverter_status: sensor.min_inverter_device_state
+        battery_temperature: sensor.min_inverter_battery_temperature
+        inverter_temperature: sensor.min_inverter_temperature
+        external_ct_w_l1: sensor.min_inverter_external_ct1_power
+        grid_current_v_l1: sensor.min_inverter_grid_l1_voltage
+        external_ct_w_l2: sensor.min_inverter_external_ct2_power
+        grid_current_v_l2: sensor.min_inverter_grid_l2_voltage
+        external_ct_w_l3: sensor.min_inverter_external_ct3_power
+        grid_current_v_l3: sensor.min_inverter_grid_l3_voltage
+      required:
+      - load_w_totalpower
+      - grid_out_total_power
+      - external_ct_w_l1
+      - external_ct_w_l2
+      - external_ct_w_l3
+      - grid_current_v_l1
+      - grid_current_v_l2
+      - grid_current_v_l3
+      - battery_output_w_power
+      - battery_soc
+      - battery_voltage
+      fast:
+      - load_w_totalpower
+      - grid_out_total_power
+      - external_ct_w_l1
+      - external_ct_w_l2
+      - external_ct_w_l3
+      - grid_current_v_l1
+      - grid_current_v_l2
+      - grid_current_v_l3
+  - variables:
+      sample: |-
+        {% set t=as_timestamp(now()) %}
+        {% set ns=namespace(d=true,s=true,dh=0,sh=0,values_d={},values_s={},times_d={},times_s={}) %}
+        {% for k,v in mapping.items() %}
+         {% set di='sensor.deye_home_monitor_'~v %}{% set si=smap[k] %}
+         {% set de=states[di] %}{% set se=states[si] %}
+         {% set dt=as_timestamp(de.last_reported,0) if de is defined and de is not none else 0 %}
+         {% set st=as_timestamp(se.last_reported,0) if se is defined and se is not none else 0 %}
+         {% set ns.values_d=dict(ns.values_d,**{k:states(di)}) %}{% set ns.values_s=dict(ns.values_s,**{k:states(si)}) %}
+         {% set ns.times_d=dict(ns.times_d,**{k:dt}) %}{% set ns.times_s=dict(ns.times_s,**{k:st}) %}
+         {% if k in required %}
+          {% if not is_number(states(di)) %}{% set ns.d=false %}{% endif %}
+          {% if not is_number(states(si)) %}{% set ns.s=false %}{% endif %}
+         {% endif %}
+         {% if k in fast %}
+          {% if is_number(states(di)) %}{% set ns.dh=[ns.dh,dt]|max %}{% endif %}
+          {% if is_number(states(si)) %}{% set ns.sh=[ns.sh,st]|max %}{% endif %}
+          {% if not 0<=t-dt<=90 %}{% set ns.d=false %}{% endif %}
+         {% endif %}
+        {% endfor %}
+        {% set ns.d=ns.d and has_value('sensor.deye_home_monitor_run_state') and 0<=t-ns.dh<=90 %}
+        {% set ns.s=ns.s and has_value('sensor.min_inverter_device_state') and 0<=t-ns.sh<=90 %}
+        {% set old=state_attr('sensor.emhass_maalekilde','deye_siden')|float(0) %}
+        {% set since=(old if old>0 and old<=t and trigger.platform!='homeassistant' else t) if ns.d else 0 %}
+        {% set chosen='Deye' if ns.d and (t-since>=60 or not ns.s) else 'Solarman' if ns.s else 'Ingen' %}
+        {{ dict(source=chosen,values=ns.values_d if chosen=='Deye' else ns.values_s if chosen=='Solarman' else {},
+         times=ns.times_d if chosen=='Deye' else ns.times_s if chosen=='Solarman' else {},
+         deye_ok=ns.d,solarman_ok=ns.s,deye_siden=since,solarman_heartbeat=ns.sh,time=t) }}
+  sensor:
+  - name: EMHASS målekilde
+    unique_id: emhass_maalekilde
+    default_entity_id: sensor.emhass_maalekilde
+    state: '{{ sample.source }}'
+    attributes:
+      values: '{{ sample[''values''] }}'
+      raw_reported: '{{ sample[''times''] }}'
+      deye_ok: '{{ sample[''deye_ok''] }}'
+      solarman_ok: '{{ sample[''solarman_ok''] }}'
+      deye_siden: '{{ sample[''deye_siden''] }}'
+      solarman_heartbeat: '{{ sample[''solarman_heartbeat''] }}'
+      sample_time: '{{ sample[''time''] }}'
+- sensor:
+  - name: EMHASS måling load_w_totalpower
+    unique_id: emhass_m_load_w_totalpower
+    default_entity_id: sensor.emhass_m_load_w_totalpower
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''load_w_totalpower'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_out_total_power
+    unique_id: emhass_m_grid_out_total_power
+    default_entity_id: sensor.emhass_m_grid_out_total_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_out_total_power'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_output_w_power
+    unique_id: emhass_m_battery_output_w_power
+    default_entity_id: sensor.emhass_m_battery_output_w_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_output_w_power'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_soc
+    unique_id: emhass_m_battery_soc
+    default_entity_id: sensor.emhass_m_battery_soc
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_soc'',0)
+        }}'
+    unit_of_measurement: '%'
+    device_class: battery
+    state_class: measurement
+  - name: EMHASS måling battery_voltage
+    unique_id: emhass_m_battery_voltage
+    default_entity_id: sensor.emhass_m_battery_voltage
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_voltage'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling inverter_status
+    unique_id: emhass_m_inverter_status
+    default_entity_id: sensor.emhass_m_inverter_status
+    state: '{% set v=(state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'')
+      %}{{ ''Normal'' if v|lower==''normal'' else v }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'') not
+      in [''unknown'',''unavailable''] }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''inverter_status'',0)
+        }}'
+  - name: EMHASS måling battery_temperature
+    unique_id: emhass_m_battery_temperature
+    default_entity_id: sensor.emhass_m_battery_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_temperature'',0)
+        }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling inverter_temperature
+    unique_id: emhass_m_inverter_temperature
+    default_entity_id: sensor.emhass_m_inverter_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''inverter_temperature'',0)
+        }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l1
+    unique_id: emhass_m_external_ct_w_l1
+    default_entity_id: sensor.emhass_m_external_ct_w_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l1'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l1
+    unique_id: emhass_m_grid_current_v_l1
+    default_entity_id: sensor.emhass_m_grid_current_v_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l1'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l2
+    unique_id: emhass_m_external_ct_w_l2
+    default_entity_id: sensor.emhass_m_external_ct_w_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l2'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l2
+    unique_id: emhass_m_grid_current_v_l2
+    default_entity_id: sensor.emhass_m_grid_current_v_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l2'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l3
+    unique_id: emhass_m_external_ct_w_l3
+    default_entity_id: sensor.emhass_m_external_ct_w_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l3'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l3
+    unique_id: emhass_m_grid_current_v_l3
+    default_entity_id: sensor.emhass_m_grid_current_v_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l3'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  binary_sensor:
+  - name: EMHASS styrekanal (Deye)
+    unique_id: emhass_styrekanal_ok
+    default_entity_id: binary_sensor.emhass_styrekanal_ok
+    state: |-
+      {% set t=as_timestamp(now()) %}
+      {% set ns=namespace(ok=true) %}
+      {% for e in ['number.min_inverter_battery_max_charging_current','number.min_inverter_battery_max_discharging_current','number.min_inverter_battery_grid_charging_current'] %}
+       {% if not is_number(states(e)) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {% for i in range(1,7) %}
+       {% for suffix in ['soc','power'] %}
+       {% if not is_number(states('number.min_inverter_program_'~i~'_'~suffix)) %}{% set ns.ok=false %}{% endif %}
+       {% endfor %}
+       {% if not has_value('switch.emhass_netladning_p'~i) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {{ ns.ok and 0<=t-(state_attr('sensor.emhass_maalekilde','solarman_heartbeat')|float(0))<=90
+       and has_value('sensor.min_inverter_device_state')
+       and has_value('switch.min_inverter_battery_grid_charging')
+       and (has_value('select.min_inverter_time_of_use') and not is_state('select.min_inverter_time_of_use','Disabled')) }}
+  - name: EMHASS mangler inverterstyring
+    unique_id: emhass_ui_styrekanalfejl
+    default_entity_id: binary_sensor.emhass_ui_styrekanalfejl
+    state: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') and not is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
+      }}'
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 30
+    attributes:
+      forklaring: Deye-styrekanalen eller driftsindstillingerne er ikke klar. Deye kan levere målinger, men kan
+        ikke overtage skriveadgangen. Netopladning er forsøgt stoppet; faktisk inverterdrift skal kontrolleres.

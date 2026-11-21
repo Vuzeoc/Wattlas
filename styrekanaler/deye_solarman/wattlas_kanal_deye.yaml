@@ -1,0 +1,397 @@
+# Wattlas styrekanal – Deye via Solarman (ha-solarman). Enheden skal hedde "min_inverter" (se docs/STYREKANALER.md).
+# Kernen (emhass_*.yaml, wattlas_styring.yaml) taler KUN med disse Wattlas-entiteter. Vil man bruge en anden
+# inverter (fx SunMate eller Sunsynk), udskiftes denne fil med en anden styrekanal med samme entiteter.
+# Netladning pr. tidsprogram: Deye har en valgmenu pr. program (Disabled/Grid/Generator/Both) – til = Grid, fra = Disabled.
+# Solarman viser en skrivning med det samme, men genlæser først efter ca. 5 min.
+template:
+  - switch:
+      - name: EMHASS netladning program 1
+        unique_id: emhass_netladning_p1
+        default_entity_id: switch.emhass_netladning_p1
+        availability: "{{ has_value('select.min_inverter_program_1_charging') }}"
+        state: "{{ states('select.min_inverter_program_1_charging') in ['Grid', 'Both'] }}"
+        turn_on:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_1_charging}
+            data: {option: Grid}
+        turn_off:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_1_charging}
+            data: {option: Disabled}
+      - name: EMHASS netladning program 2
+        unique_id: emhass_netladning_p2
+        default_entity_id: switch.emhass_netladning_p2
+        availability: "{{ has_value('select.min_inverter_program_2_charging') }}"
+        state: "{{ states('select.min_inverter_program_2_charging') in ['Grid', 'Both'] }}"
+        turn_on:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_2_charging}
+            data: {option: Grid}
+        turn_off:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_2_charging}
+            data: {option: Disabled}
+      - name: EMHASS netladning program 3
+        unique_id: emhass_netladning_p3
+        default_entity_id: switch.emhass_netladning_p3
+        availability: "{{ has_value('select.min_inverter_program_3_charging') }}"
+        state: "{{ states('select.min_inverter_program_3_charging') in ['Grid', 'Both'] }}"
+        turn_on:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_3_charging}
+            data: {option: Grid}
+        turn_off:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_3_charging}
+            data: {option: Disabled}
+      - name: EMHASS netladning program 4
+        unique_id: emhass_netladning_p4
+        default_entity_id: switch.emhass_netladning_p4
+        availability: "{{ has_value('select.min_inverter_program_4_charging') }}"
+        state: "{{ states('select.min_inverter_program_4_charging') in ['Grid', 'Both'] }}"
+        turn_on:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_4_charging}
+            data: {option: Grid}
+        turn_off:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_4_charging}
+            data: {option: Disabled}
+      - name: EMHASS netladning program 5
+        unique_id: emhass_netladning_p5
+        default_entity_id: switch.emhass_netladning_p5
+        availability: "{{ has_value('select.min_inverter_program_5_charging') }}"
+        state: "{{ states('select.min_inverter_program_5_charging') in ['Grid', 'Both'] }}"
+        turn_on:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_5_charging}
+            data: {option: Grid}
+        turn_off:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_5_charging}
+            data: {option: Disabled}
+      - name: EMHASS netladning program 6
+        unique_id: emhass_netladning_p6
+        default_entity_id: switch.emhass_netladning_p6
+        availability: "{{ has_value('select.min_inverter_program_6_charging') }}"
+        state: "{{ states('select.min_inverter_program_6_charging') in ['Grid', 'Both'] }}"
+        turn_on:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_6_charging}
+            data: {option: Grid}
+        turn_off:
+          - action: select.select_option
+            target: {entity_id: select.min_inverter_program_6_charging}
+            data: {option: Disabled}
+      - name: Wattlas netladning
+        unique_id: wattlas_netladning
+        default_entity_id: switch.wattlas_netladning
+        availability: "{{ has_value('switch.min_inverter_battery_grid_charging') }}"
+        state: "{{ is_state('switch.min_inverter_battery_grid_charging', 'on') }}"
+        turn_on:
+          - action: switch.turn_on
+            target: {entity_id: switch.min_inverter_battery_grid_charging}
+        turn_off:
+          - action: switch.turn_off
+            target: {entity_id: switch.min_inverter_battery_grid_charging}
+      - name: Wattlas solsalg
+        unique_id: wattlas_solsalg
+        default_entity_id: switch.wattlas_solsalg
+        availability: "{{ has_value('switch.min_inverter_export_surplus') }}"
+        state: "{{ is_state('switch.min_inverter_export_surplus', 'on') }}"
+        turn_on:
+          - action: switch.turn_on
+            target: {entity_id: switch.min_inverter_export_surplus}
+        turn_off:
+          - action: switch.turn_off
+            target: {entity_id: switch.min_inverter_export_surplus}
+  - number:
+      - name: Wattlas netladestrøm
+        unique_id: wattlas_netladestroem
+        default_entity_id: number.wattlas_netladestroem
+        availability: "{{ has_value('number.min_inverter_battery_grid_charging_current') }}"
+        state: "{{ states('number.min_inverter_battery_grid_charging_current') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_battery_grid_charging_current', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_battery_grid_charging_current', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_battery_grid_charging_current', 'step') | float(1) }}"
+        unit_of_measurement: "A"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_battery_grid_charging_current}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 1 SOC
+        unique_id: wattlas_program_1_soc
+        default_entity_id: number.wattlas_program_1_soc
+        availability: "{{ has_value('number.min_inverter_program_1_soc') }}"
+        state: "{{ states('number.min_inverter_program_1_soc') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_1_soc', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_1_soc', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_1_soc', 'step') | float(1) }}"
+        unit_of_measurement: "%"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_1_soc}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 1 effekt
+        unique_id: wattlas_program_1_power
+        default_entity_id: number.wattlas_program_1_power
+        availability: "{{ has_value('number.min_inverter_program_1_power') }}"
+        state: "{{ states('number.min_inverter_program_1_power') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_1_power', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_1_power', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_1_power', 'step') | float(1) }}"
+        unit_of_measurement: "W"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_1_power}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 2 SOC
+        unique_id: wattlas_program_2_soc
+        default_entity_id: number.wattlas_program_2_soc
+        availability: "{{ has_value('number.min_inverter_program_2_soc') }}"
+        state: "{{ states('number.min_inverter_program_2_soc') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_2_soc', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_2_soc', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_2_soc', 'step') | float(1) }}"
+        unit_of_measurement: "%"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_2_soc}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 2 effekt
+        unique_id: wattlas_program_2_power
+        default_entity_id: number.wattlas_program_2_power
+        availability: "{{ has_value('number.min_inverter_program_2_power') }}"
+        state: "{{ states('number.min_inverter_program_2_power') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_2_power', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_2_power', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_2_power', 'step') | float(1) }}"
+        unit_of_measurement: "W"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_2_power}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 3 SOC
+        unique_id: wattlas_program_3_soc
+        default_entity_id: number.wattlas_program_3_soc
+        availability: "{{ has_value('number.min_inverter_program_3_soc') }}"
+        state: "{{ states('number.min_inverter_program_3_soc') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_3_soc', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_3_soc', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_3_soc', 'step') | float(1) }}"
+        unit_of_measurement: "%"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_3_soc}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 3 effekt
+        unique_id: wattlas_program_3_power
+        default_entity_id: number.wattlas_program_3_power
+        availability: "{{ has_value('number.min_inverter_program_3_power') }}"
+        state: "{{ states('number.min_inverter_program_3_power') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_3_power', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_3_power', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_3_power', 'step') | float(1) }}"
+        unit_of_measurement: "W"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_3_power}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 4 SOC
+        unique_id: wattlas_program_4_soc
+        default_entity_id: number.wattlas_program_4_soc
+        availability: "{{ has_value('number.min_inverter_program_4_soc') }}"
+        state: "{{ states('number.min_inverter_program_4_soc') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_4_soc', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_4_soc', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_4_soc', 'step') | float(1) }}"
+        unit_of_measurement: "%"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_4_soc}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 4 effekt
+        unique_id: wattlas_program_4_power
+        default_entity_id: number.wattlas_program_4_power
+        availability: "{{ has_value('number.min_inverter_program_4_power') }}"
+        state: "{{ states('number.min_inverter_program_4_power') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_4_power', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_4_power', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_4_power', 'step') | float(1) }}"
+        unit_of_measurement: "W"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_4_power}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 5 SOC
+        unique_id: wattlas_program_5_soc
+        default_entity_id: number.wattlas_program_5_soc
+        availability: "{{ has_value('number.min_inverter_program_5_soc') }}"
+        state: "{{ states('number.min_inverter_program_5_soc') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_5_soc', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_5_soc', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_5_soc', 'step') | float(1) }}"
+        unit_of_measurement: "%"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_5_soc}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 5 effekt
+        unique_id: wattlas_program_5_power
+        default_entity_id: number.wattlas_program_5_power
+        availability: "{{ has_value('number.min_inverter_program_5_power') }}"
+        state: "{{ states('number.min_inverter_program_5_power') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_5_power', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_5_power', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_5_power', 'step') | float(1) }}"
+        unit_of_measurement: "W"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_5_power}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 6 SOC
+        unique_id: wattlas_program_6_soc
+        default_entity_id: number.wattlas_program_6_soc
+        availability: "{{ has_value('number.min_inverter_program_6_soc') }}"
+        state: "{{ states('number.min_inverter_program_6_soc') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_6_soc', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_6_soc', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_6_soc', 'step') | float(1) }}"
+        unit_of_measurement: "%"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_6_soc}
+            data: {value: "{{ value }}"}
+      - name: Wattlas program 6 effekt
+        unique_id: wattlas_program_6_power
+        default_entity_id: number.wattlas_program_6_power
+        availability: "{{ has_value('number.min_inverter_program_6_power') }}"
+        state: "{{ states('number.min_inverter_program_6_power') | float(0) }}"
+        min: "{{ state_attr('number.min_inverter_program_6_power', 'min') | float(0) }}"
+        max: "{{ state_attr('number.min_inverter_program_6_power', 'max') | float(100) }}"
+        step: "{{ state_attr('number.min_inverter_program_6_power', 'step') | float(1) }}"
+        unit_of_measurement: "W"
+        set_value:
+          - action: number.set_value
+            target: {entity_id: number.min_inverter_program_6_power}
+            data: {value: "{{ value }}"}
+  - sensor:
+      - name: Wattlas maks. ladestrøm
+        unique_id: wattlas_maks_ladestroem
+        default_entity_id: sensor.wattlas_maks_ladestroem
+        unit_of_measurement: A
+        availability: "{{ has_value('number.min_inverter_battery_max_charging_current') }}"
+        state: "{{ states('number.min_inverter_battery_max_charging_current') | float(0) }}"
+      - name: Wattlas maks. afladestrøm
+        unique_id: wattlas_maks_afladestroem
+        default_entity_id: sensor.wattlas_maks_afladestroem
+        unit_of_measurement: A
+        availability: "{{ has_value('number.min_inverter_battery_max_discharging_current') }}"
+        state: "{{ states('number.min_inverter_battery_max_discharging_current') | float(0) }}"
+  - binary_sensor:
+      - name: Wattlas tidsprogrammer aktive
+        unique_id: wattlas_tidsprogram_aktiv
+        default_entity_id: binary_sensor.wattlas_tidsprogram_aktiv
+        availability: "{{ has_value('select.min_inverter_time_of_use') }}"
+        state: "{{ not is_state('select.min_inverter_time_of_use', 'Disabled') }}"
+  # Målinger til økonomi, rapport og app (kWh-tællere). Produktion = Deye + evt. inverter på GEN-porten (mikroinverter).
+  - sensor:
+      - name: Wattlas produktion i dag
+        unique_id: wattlas_i_dag_produktion
+        default_entity_id: sensor.wattlas_i_dag_produktion
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_today_production') }}"
+        state: "{{ (states('sensor.min_inverter_today_production') | float(0) + states('sensor.min_inverter_microinverter_energy_today') | float(0)) | round(2) }}"
+      - name: Wattlas produktion i alt
+        unique_id: wattlas_total_produktion
+        default_entity_id: sensor.wattlas_total_produktion
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_total_production') }}"
+        state: "{{ (states('sensor.min_inverter_total_production') | float(0) + states('sensor.min_inverter_microinverter_energy') | float(0)) | round(2) }}"
+      - name: Wattlas købt i dag
+        unique_id: wattlas_i_dag_koebt
+        default_entity_id: sensor.wattlas_i_dag_koebt
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_today_energy_import') }}"
+        state: "{{ states('sensor.min_inverter_today_energy_import') | float(0) }}"
+      - name: Wattlas solgt i dag
+        unique_id: wattlas_i_dag_solgt
+        default_entity_id: sensor.wattlas_i_dag_solgt
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_today_energy_export') }}"
+        state: "{{ states('sensor.min_inverter_today_energy_export') | float(0) }}"
+      - name: Wattlas forbrug i dag
+        unique_id: wattlas_i_dag_forbrug
+        default_entity_id: sensor.wattlas_i_dag_forbrug
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_today_load_consumption') }}"
+        state: "{{ states('sensor.min_inverter_today_load_consumption') | float(0) }}"
+      - name: Wattlas batteri ladet i dag
+        unique_id: wattlas_i_dag_ladet
+        default_entity_id: sensor.wattlas_i_dag_ladet
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_today_battery_charge') }}"
+        state: "{{ states('sensor.min_inverter_today_battery_charge') | float(0) }}"
+      - name: Wattlas købt i alt
+        unique_id: wattlas_total_koebt
+        default_entity_id: sensor.wattlas_total_koebt
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_total_energy_import') }}"
+        state: "{{ states('sensor.min_inverter_total_energy_import') | float(0) }}"
+      - name: Wattlas solgt i alt
+        unique_id: wattlas_total_solgt
+        default_entity_id: sensor.wattlas_total_solgt
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_total_energy_export') }}"
+        state: "{{ states('sensor.min_inverter_total_energy_export') | float(0) }}"
+      - name: Wattlas forbrug i alt
+        unique_id: wattlas_total_forbrug
+        default_entity_id: sensor.wattlas_total_forbrug
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_total_load_consumption') }}"
+        state: "{{ states('sensor.min_inverter_total_load_consumption') | float(0) }}"
+  - binary_sensor:
+      - name: Wattlas inverter forbundet
+        unique_id: wattlas_forbindelse
+        default_entity_id: binary_sensor.wattlas_forbindelse
+        device_class: connectivity
+        state: "{{ is_state('binary_sensor.min_inverter_connection', 'on') }}"
+      - name: Wattlas PV-måling OK
+        unique_id: wattlas_pv_maaling_ok
+        default_entity_id: binary_sensor.wattlas_pv_maaling_ok
+        state: "{{ is_number(states('sensor.min_inverter_pv_power')) and is_number(states('sensor.min_inverter_microinverter_power')) }}"
+  - sensor:
+      - name: Wattlas batteri afladet i dag
+        unique_id: wattlas_i_dag_afladet
+        default_entity_id: sensor.wattlas_i_dag_afladet
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ has_value('sensor.min_inverter_today_battery_discharge') }}"
+        state: "{{ states('sensor.min_inverter_today_battery_discharge') | float(0) }}"
+      - name: EMHASS Solproduktion samlet
+        unique_id: emhass_solproduktion_samlet
+        default_entity_id: sensor.emhass_solproduktion_samlet
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_inverter_pv_power')) }}"
+        state: "{{ ([0, states('sensor.min_inverter_pv_power') | float(0)] | max + [0, states('sensor.min_inverter_microinverter_power') | float(0)] | max) | round(0) }}"

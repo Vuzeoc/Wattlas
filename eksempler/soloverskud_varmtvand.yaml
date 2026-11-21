@@ -1,0 +1,33 @@
+# Eksempel (ikke en del af kernen): tænd en kontakt, når der eksporteres sol og batteriet er næsten fuldt.
+# Ret switch.varmtvandsbeholder til din egen kontakt. Kopiér ind under Automationer → Ny → Rediger i YAML.
+# Vil du hellere have, at EMHASS planlægger den, så brug "Fleksibel forbruger" på Wattlas Styring.
+alias: Wattlas eksempel · varmt vand på soloverskud
+mode: single
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.emhass_m_grid_out_total_power  # negativ = eksport
+    below: -1500
+    for: {minutes: 5}
+  - trigger: numeric_state
+    entity_id: sensor.emhass_m_grid_out_total_power
+    above: 200
+    for: {minutes: 2}
+actions:
+  - choose:
+      - conditions:
+          - condition: numeric_state
+            entity_id: sensor.emhass_m_grid_out_total_power
+            below: -1500
+          - condition: numeric_state
+            entity_id: sensor.emhass_m_battery_soc
+            above: 95
+        sequence:
+          - action: switch.turn_on
+            target: {entity_id: switch.varmtvandsbeholder}
+      - conditions:
+          - condition: numeric_state
+            entity_id: sensor.emhass_m_grid_out_total_power
+            above: 200
+        sequence:
+          - action: switch.turn_off
+            target: {entity_id: switch.varmtvandsbeholder}

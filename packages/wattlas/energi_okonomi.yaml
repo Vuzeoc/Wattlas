@@ -1,0 +1,298 @@
+# Solcelle-økonomi, dagslog + rekorder, ugentlig energirapport
+# og advarsel når Deye-forbindelsen er væk. Læser kun – ændrer ingen styring.
+# Sparet pr. dag = EMHASS-regnskabet (sensor.emhass_besparelse_regnskab), samme formel som "Sparet i dag"
+# på Emhass Styring: base - actual + lager slut - lager start.
+# Bogført total ligger i input_number (overlever genstart); bogføres hver nat kl. 00.05 med datovagt.
+# Har du sparet penge før Wattlas (fx i SunMate), så sæt input_number.solcelle_sparet_bogfoert til beløbet ved start.
+homeassistant:
+  customize:
+    # Langtidsstatistik for købsprisen
+    sensor.emhass_ui_koebspris:
+      state_class: measurement
+
+input_number:
+  solcelle_sparet_bogfoert:
+    name: Solceller · sparet i alt (bogført)
+    min: 0
+    max: 1000000
+    step: 0.01
+    mode: box
+    unit_of_measurement: kr.
+    icon: mdi:piggy-bank
+  solcelle_investering:
+    name: Solceller · samlet investering
+    min: 0
+    max: 1000000
+    step: 1
+    mode: box
+    unit_of_measurement: kr.
+    icon: mdi:cash-multiple
+
+input_datetime:
+  solcelle_sparet_bogfoert_dato:
+    name: Solceller · bogført til og med
+    has_date: true
+    has_time: false
+  solcelle_start_dato:
+    name: Solceller · anlægget startede
+    has_date: true
+    has_time: false
+
+template:
+  - sensor:
+      - name: Solceller sparet i dag
+        unique_id: solcelle_sparet_i_dag
+        default_entity_id: sensor.solcelle_sparet_i_dag
+        icon: mdi:piggy-bank-outline
+        unit_of_measurement: kr.
+        device_class: monetary
+        availability: >-
+          {% set g = state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') %}
+          {{ g is mapping and g.get('day') == now().date() | string and g.get('current') is mapping }}
+        state: >-
+          {% set g = state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') %}{% set c = g.current %}
+          {{ (c.base - c.actual + (g.get('grid_cost', 0) | float(0)) - (c.get('stock_start', 0) | float(0))) | round(2) }}
+
+      - name: Solceller sparet i alt
+        unique_id: solcelle_sparet_i_alt
+        default_entity_id: sensor.solcelle_sparet_i_alt
+        icon: mdi:piggy-bank
+        unit_of_measurement: kr.
+        device_class: monetary
+        state_class: total
+        availability: "{{ is_number(states('input_number.solcelle_sparet_bogfoert')) }}"
+        state: >-
+          {% set g = state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') %}
+          {% set bog = states('input_number.solcelle_sparet_bogfoert') | float %}
+          {% set bdato = states('input_datetime.solcelle_sparet_bogfoert_dato') %}
+          {% set ns = namespace(t = bog) %}
+          {% if g is mapping %}
+            {% set y = g.get('yesterday') or {} %}
+            {% if y.get('date', '') > bdato and y.get('coverage', 0) > 0 %}
+              {% set ns.t = ns.t + y.base - y.actual + (y.get('stock_end', 0) | float(0)) - (y.get('stock_start', 0) | float(0)) %}
+            {% endif %}
+            {% if g.get('day') == now().date() | string and g.get('day', '') > bdato and g.get('current') is mapping %}
+              {% set c = g.current %}
+              {% set ns.t = ns.t + c.base - c.actual + (g.get('grid_cost', 0) | float(0)) - (c.get('stock_start', 0) | float(0)) %}
+            {% endif %}
+          {% endif %}
+          {{ ns.t | round(2) }}
+
+      - name: Solceller tilbagebetaling
+        unique_id: solcelle_tilbagebetaling
+        default_entity_id: sensor.solcelle_tilbagebetaling
+        icon: mdi:calendar-check
+        device_class: date
+        availability: >-
+          {{ is_number(states('sensor.solcelle_sparet_i_alt')) and is_number(states('input_number.solcelle_investering'))
+             and states('input_datetime.solcelle_start_dato') not in ['unknown', 'unavailable'] }}
+        state: >-
+          {% set tot = states('sensor.solcelle_sparet_i_alt') | float %}
+          {% set inv = states('input_number.solcelle_investering') | float %}
+          {% set dage = [1, (now().date() - strptime(states('input_datetime.solcelle_start_dato'), '%Y-%m-%d').date()).days] | max %}
+          {% set rate = tot / dage %}
+          {% if tot >= inv %}{{ now().date() }}{% elif rate > 0 %}{{ (now() + timedelta(days = ((inv - tot) / rate) | int)).date() }}{% else %}{{ none }}{% endif %}
+        attributes:
+          tjent_hjem_pct: >-
+            {% set inv = states('input_number.solcelle_investering') | float(0) %}
+            {{ (100 * states('sensor.solcelle_sparet_i_alt') | float(0) / inv) | round(1) if inv > 0 else none }}
+          mangler_kr: "{{ ([0, states('input_number.solcelle_investering') | float(0) - states('sensor.solcelle_sparet_i_alt') | float(0)] | max) | round(0) }}"
+          kr_pr_dag: >-
+            {% set dage = [1, (now().date() - strptime(states('input_datetime.solcelle_start_dato'), '%Y-%m-%d').date()).days] | max %}
+            {{ (states('sensor.solcelle_sparet_i_alt') | float(0) / dage) | round(1) }}
+          kr_pr_dag_30: >-
+            {% set l = (state_attr('sensor.energi_dagslog', 'dage') or [])[-30:] %}
+            {{ ((l | map(attribute = 'sparet') | sum) / (l | count)) | round(1) if l | count >= 7 else none }}
+          roi_pct: >-
+            {% set inv = states('input_number.solcelle_investering') | float(0) %}
+            {% set dage = [1, (now().date() - strptime(states('input_datetime.solcelle_start_dato'), '%Y-%m-%d').date()).days] | max %}
+            {{ (100 * 365 * states('sensor.solcelle_sparet_i_alt') | float(0) / dage / inv) | round(1) if inv > 0 else none }}
+          grundlag: Gennemsnit pr. dag siden anlægget startede (inkl. sommeren) – vintertempoet er lavere.
+
+      - name: Selvforsyning i dag
+        unique_id: selvforsyning_i_dag
+        default_entity_id: sensor.selvforsyning_i_dag
+        icon: mdi:home-lightning-bolt
+        unit_of_measurement: "%"
+        state_class: measurement
+        availability: "{{ states('sensor.wattlas_i_dag_forbrug') | float(0) > 0 and is_number(states('sensor.wattlas_i_dag_koebt')) }}"
+        state: >-
+          {{ ([0, 100 * (1 - states('sensor.wattlas_i_dag_koebt') | float / states('sensor.wattlas_i_dag_forbrug') | float)] | max) | round(0) }}
+      - name: Selvforsyning i alt
+        unique_id: selvforsyning_i_alt
+        default_entity_id: sensor.selvforsyning_i_alt
+        icon: mdi:home-lightning-bolt-outline
+        unit_of_measurement: "%"
+        availability: "{{ states('sensor.wattlas_total_forbrug') | float(0) > 0 and is_number(states('sensor.wattlas_total_koebt')) }}"
+        state: >-
+          {{ (100 * (1 - states('sensor.wattlas_total_koebt') | float / states('sensor.wattlas_total_forbrug') | float)) | round(0) }}
+      - name: Egetforbrug af solstrøm i dag
+        unique_id: egetforbrug_i_dag
+        default_entity_id: sensor.egetforbrug_i_dag
+        icon: mdi:solar-power-variant
+        unit_of_measurement: "%"
+        state_class: measurement
+        availability: >-
+          {{ states('sensor.wattlas_i_dag_produktion') | float(0) > 0.5
+             and is_number(states('sensor.wattlas_i_dag_solgt')) }}
+        state: >-
+          {% set pv = states('sensor.wattlas_i_dag_produktion') | float(0) %}
+          {{ ([0, 100 * (1 - states('sensor.wattlas_i_dag_solgt') | float / pv)] | max) | round(0) }}
+      - name: Egetforbrug af solstrøm i alt
+        unique_id: egetforbrug_i_alt
+        default_entity_id: sensor.egetforbrug_i_alt
+        icon: mdi:solar-power
+        unit_of_measurement: "%"
+        availability: "{{ states('sensor.wattlas_total_produktion') | float(0) > 0 and is_number(states('sensor.wattlas_total_solgt')) }}"
+        state: >-
+          {% set pv = states('sensor.wattlas_total_produktion') | float(0) %}
+          {{ (100 * (1 - states('sensor.wattlas_total_solgt') | float / pv)) | round(0) }}
+
+  # Dagslog: én række pr. dag (sidste 400 dage) + rekorder. Rekorderne opdateres hver aften.
+  - triggers:
+      - trigger: time
+        at: "23:59:30"
+    sensor:
+      - name: Energi dagslog
+        unique_id: energi_dagslog
+        default_entity_id: sensor.energi_dagslog
+        icon: mdi:notebook-outline
+        state: "{{ now().date() | string }}"
+        attributes:
+          dage: >-
+            {% set g = state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') %}
+            {% set ok = g is mapping and g.get('day') == now().date() | string and g.get('current') is mapping %}
+            {% set c = g.current if ok else {} %}
+            {% set e = dict(
+                 d = now().date() | string,
+                 sparet = ((c.base - c.actual + (g.get('grid_cost', 0) | float(0)) - (c.get('stock_start', 0) | float(0))) | round(2)) if ok else 0,
+                 koeb = (c.get('import_cost', 0) | float(0) | round(2)) if ok else 0,
+                 pv = states('sensor.wattlas_i_dag_produktion') | float(0) | round(1),
+                 last = states('sensor.wattlas_i_dag_forbrug') | float(0) | round(1),
+                 ind = states('sensor.wattlas_i_dag_koebt') | float(0) | round(1),
+                 ud = states('sensor.wattlas_i_dag_solgt') | float(0) | round(1),
+                 bat = states('sensor.wattlas_i_dag_ladet') | float(0) | round(1)) %}
+                        {% set gl = (this.attributes.get('dage') or []) | rejectattr('d', 'eq', e.d) | list %}
+            {{ (gl + [e])[-400:] }}
+          rekorder: >-
+            {% set seed = {} %}
+            {% set g = state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') %}
+            {% set ok = g is mapping and g.get('day') == now().date() | string and g.get('current') is mapping %}
+            {% set c = g.current if ok else {} %}
+            {% set dag = now().date() | string %}
+            {% set ns = namespace(r = this.attributes.get('rekorder') or seed) %}
+            {% for k, v in [
+                 ('produktion', states('sensor.wattlas_i_dag_produktion') | float(0)),
+                 ('solgt', states('sensor.wattlas_i_dag_solgt') | float(0)),
+                 ('koebt', states('sensor.wattlas_i_dag_koebt') | float(0)),
+                 ('forbrug', states('sensor.wattlas_i_dag_forbrug') | float(0)),
+                 ('batteri', states('sensor.wattlas_i_dag_ladet') | float(0)),
+                 ('sparet', (c.base - c.actual + (g.get('grid_cost', 0) | float(0)) - (c.get('stock_start', 0) | float(0))) if ok else 0)] %}
+              {% if v > (ns.r.get(k) or {}).get('v', -999999) %}{% set ns.r = dict(ns.r, **{k: {'v': v | round(2), 'd': dag}}) %}{% endif %}
+            {% endfor %}
+            {{ ns.r }}
+
+automation:
+  - id: solcelle_bogfoer_sparet
+    alias: Solceller · bogfør gårsdagens besparelse
+    description: >-
+      Hver nat lægges gårsdagens besparelse fra EMHASS-regnskabet til den bogførte total (input_number).
+      Datovagt: en dag bogføres kun én gang.
+    mode: single
+    triggers:
+      - trigger: time
+        at: "00:05:00"
+      - trigger: homeassistant
+        event: start
+    variables:
+      y: "{{ (state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') or {}).get('yesterday') or {} }}"
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ y.get('date', '') == (now().date() - timedelta(days=1)) | string
+             and y.get('date', '') > states('input_datetime.solcelle_sparet_bogfoert_dato')
+             and y.get('coverage', 0) > 0 }}
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.solcelle_sparet_bogfoert
+        data:
+          value: >-
+            {{ (states('input_number.solcelle_sparet_bogfoert') | float
+                + y.base - y.actual + (y.get('stock_end', 0) | float(0)) - (y.get('stock_start', 0) | float(0))) | round(2) }}
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.solcelle_sparet_bogfoert_dato
+        data:
+          date: "{{ y.date }}"
+
+  - id: deye_forbindelse_tabt
+    alias: Wattlas · inverteren svarer ikke
+    description: >-
+      Inverteren (loggeren) har ikke svaret i 10 min (forbindelse off/unavailable): besked via EMHASS-beskedscriptet,
+      også når EMHASS-styringen er slået fra. Besked igen, når den er tilbage. Korte udfald (5 sek.) ignoreres.
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.wattlas_forbindelse
+        to: ["off", "unavailable"]
+        for:
+          minutes: 10
+        id: ned
+      - trigger: state
+        entity_id: binary_sensor.wattlas_forbindelse
+        from: ["off", "unavailable"]
+        to: "on"
+        id: op
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.id == 'ned' or (as_timestamp(now()) - as_timestamp(trigger.from_state.last_changed, 0)) >= 600 }}
+    actions:
+      - action: script.emhass_ui_send_besked
+        data:
+          titel: "{{ 'Wattlas: inverteren svarer ikke' if trigger.id == 'ned' else 'Wattlas: inverteren er tilbage' }}"
+          besked: >-
+            {% if trigger.id == 'ned' %}Home Assistant har ikke haft forbindelse til inverteren i 10 min.
+            Målinger, besparelsesregnskab og EMHASS-styring står stille. Tjek loggeren og wifi.{% else %}Forbindelsen
+            til inverteren er tilbage efter {{ ((as_timestamp(now()) - as_timestamp(trigger.from_state.last_changed, 0)) / 60) | round(0) | int }} min.{% endif %}
+          tag: deye_forbindelse
+
+  - id: energi_ugerapport
+    alias: Energi · ugentlig rapport (søndag aften)
+    description: >-
+      Søndag kl. 19.30: opsummerer ugen (de sidste 7 dage inkl. i dag): solproduktion, sparet, strømkøb og dyreste dag.
+      Sendes via script.wattlas_besked.
+    mode: single
+    triggers:
+      - trigger: time
+        at: "19:30:00"
+    conditions:
+      - condition: time
+        weekday: sun
+    actions:
+      - variables:
+          fra: "{{ (now().date() - timedelta(days=6)) | string }}"
+          log: "{{ (state_attr('sensor.energi_dagslog', 'dage') or []) | selectattr('d', '>=', fra) | rejectattr('d', 'eq', now().date() | string) | list }}"
+          idag: >-
+            {{ dict(d = now().date() | string,
+                    sparet = states('sensor.solcelle_sparet_i_dag') | float(0),
+                    koeb = ((state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') or {}).get('current') or {}).get('import_cost', 0) | float(0),
+                    pv = states('sensor.wattlas_i_dag_produktion') | float(0)) }}
+          uge: "{{ log + [idag] }}"
+          dyr: "{{ uge | sort(attribute='koeb', reverse=true) | first }}"
+          ugedage: "{{ ['mandag','tirsdag','onsdag','torsdag','fredag','lørdag','søndag'] }}"
+          tekst: >-
+            {% set pv = uge | map(attribute='pv') | sum %}{% set sp = uge | map(attribute='sparet') | sum %}{% set kb = uge | map(attribute='koeb') | sum %}
+            {% set dd = ugedage[strptime(dyr.d, '%Y-%m-%d').weekday()] %}
+            Ugens energi: solcellerne producerede {{ pv | round(0) | int }} kWh og sparede {{ sp | round(0) | int }} kr.
+            Strømkøbet var {{ kb | round(0) | int }} kr., dyreste dag {{ dd }} med {{ dyr.koeb | round(0) | int }} kr.
+            {%- set tb = states('sensor.solcelle_tilbagebetaling') %}{% if tb not in ['unknown', 'unavailable'] %} Anlægget er {{ state_attr('sensor.solcelle_tilbagebetaling', 'tjent_hjem_pct') | round(0) | int }} procent tjent hjem.{% endif %}
+      - action: script.wattlas_besked
+        data:
+          title: ⚡ Wattlas · ugens energi
+          message: "{{ tekst }}"
+          data:
+            tag: energi_uge
+            group: energi
+            url: /wattlas-energi/app#okonomi
