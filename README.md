@@ -32,7 +32,11 @@ Hårde grænser for sikringer, batteri og fase-strøm gælder altid, uanset hvad
 |---|---|---|
 | ![Planens logik](docs/billeder/plan.png) | ![Elpris](docs/billeder/elpris.png) | ![Solprognose](docs/billeder/sol.png) |
 
-*Billederne er lavet med opdigtede demotal.*
+| Økonomi: sparet pr. dag, uge og år og tilbagebetalingstid | Historik: produktion, forbrug, salg og batteri |
+|---|---|
+| ![Økonomi](docs/billeder/okonomi.png) | ![Historik](docs/billeder/historik.png) |
+
+*Live, planens logik, elpris og solprognose er vist med opdigtede demotal. Økonomi og historik er fra en rigtig installation.*
 
 ## Hvilke invertere
 
