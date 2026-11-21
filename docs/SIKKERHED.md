@@ -23,8 +23,6 @@ reglerne hos dit netselskab. Er du i tvivl om dine grænser, så spørg din elin
 - Sæt grænserne efter din installation. Hent dem fra datablade og sikringer, ikke fra eksemplerne.
 - Følg den første dag med styringen slået til, mens du er hjemme.
 - Hold Home Assistant, EMHASS og inverter-integrationen opdateret, men læs ændringslogs før opdateringer.
-- **Hemmeligheder:** EMHASS-nøglen ligger i en helper. Del aldrig `secrets.yaml`, `.storage` eller skærmbilleder af
-  Indstillinger → Hjælpere. Udgiv aldrig din egen konfiguration uden at fjerne nøgler, IP-adresser og navne.
 
 ## Fejl og sårbarheder
 
