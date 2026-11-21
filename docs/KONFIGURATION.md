@@ -55,7 +55,7 @@ alpha-begrænsning.
 |---|---|
 | `wattlas_emhass_adresse` | `http://homeassistant.local:5000` (din HA-adresse + EMHASS-port) |
 | `wattlas_emhass_noegle` | API-nøglen fra EMHASS-app'en (vises skjult) |
-| `wattlas_solprognose_entitet` | en sensor med attributten `forecast` (fx `sensor.…_power_now` fra Helios Forecast) |
+| `wattlas_solprognose_entitet` | `sensor.…_power_now` fra Helios Forecast, eller en anden sensor i samme format ([SOLPROGNOSE.md](SOLPROGNOSE.md)) |
 | `wattlas_vejr_entitet` | `weather.forecast_hjem` |
 | `wattlas_udetemperatur_entitet` | `sensor.udetemperatur` |
 

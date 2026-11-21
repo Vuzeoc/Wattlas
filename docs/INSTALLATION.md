@@ -17,7 +17,7 @@ Regn med ca. en time. Styringen kan ikke starte, før trin 6 er gjort færdigt. 
 | **Energi Data Service** (HACS) | spotpriser → `sensor.energi_data_service` | HACS → søg "Energi Data Service". Sæt pris **inkl. moms**, uden tariffer |
 | **Workday** (indbygget) | hverdage/fridage i regler → `binary_sensor.workday_sensor` | Indstillinger → Enheder og tjenester → Tilføj → Workday, land Danmark |
 | **SQL** (indbygget) | husprognose og historik fra HA's database | aktiveres automatisk af pakken |
-| En **solprognose** med attributten `forecast` (liste af `{datetime, watts}`) | solen i planen | fx *Helios Forecast* (HACS). Andre virker, hvis sensoren har samme format |
+| En **solprognose** med attributten `forecast` (liste af `{datetime, watts}`) | solen i planen | **Helios Forecast** (HACS) anbefales, Wattlas er bygget til den. Andre kræver samme format med kvarterstal, se [SOLPROGNOSE.md](SOLPROGNOSE.md) |
 | En **vejr-entitet** (`weather.…`) med timeprognose | temperatur-justeret husforbrug | fx Met.no (indbygget) |
 | En **udetemperatur-sensor** | samme | hvilken som helst `sensor.…` i °C |
 | Inverterens integration | styrekanal | Deye: [ha-solarman](https://github.com/davidrapan/ha-solarman) (HACS). SunMate: SunMate-integrationen |

@@ -33,13 +33,14 @@ Wattlas taler med inverteren gennem en **styrekanal**, en fil med adapter-entite
 | Sunsynk / Sol-Ark / andre Deye-kloner | brug Deye-kanalen, hvis dine entiteter hedder det samme; ellers skriv din egen ([STYREKANALER.md](docs/STYREKANALER.md)) |
 
 Begrænsninger i alpha: kun 48 V-batterier (spændingsvindue 45–58 V), 3-faset net, dansk nettarif med tre tidsperioden
-(0–6, 6–17/21–24, 17–21) og spotpris fra Energi Data Service.
+(0–6, 6–17/21–24, 17–21), spotpris fra Energi Data Service og solprognose i kvarterstal (Helios Forecast anbefales).
 
 ## Kom i gang
 
 1. [docs/INSTALLATION.md](docs/INSTALLATION.md) – trin for trin, ca. en time.
 2. [docs/KONFIGURATION.md](docs/KONFIGURATION.md) – hvad hvert tal betyder, og hvordan du finder dit.
-3. [docs/FAQ.md](docs/FAQ.md)
+3. [docs/SOLPROGNOSE.md](docs/SOLPROGNOSE.md) – hvorfor Helios Forecast, og hvad en anden prognose skal kunne.
+4. [docs/FAQ.md](docs/FAQ.md)
 
 ## Licens
 
