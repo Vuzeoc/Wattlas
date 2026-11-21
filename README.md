@@ -28,15 +28,43 @@ Hårde grænser for sikringer, batteri og fase-strøm gælder altid, uanset hvad
 
 ## Sådan ser det ud
 
-| Planens logik: hvad EMHASS vil, og hvorfor | Elpris time for time, inkl. tariffer | Solprognose mod målt produktion |
-|---|---|---|
-| ![Planens logik](docs/billeder/plan.png) | ![Elpris](docs/billeder/elpris.png) | ![Solprognose](docs/billeder/sol.png) |
+### Wattlas – appen
 
 | Økonomi: sparet pr. dag, uge og år og tilbagebetalingstid | Historik: produktion, forbrug, salg og batteri |
 |---|---|
 | ![Økonomi](docs/billeder/okonomi.png) | ![Historik](docs/billeder/historik.png) |
 
-*Live, planens logik, elpris og solprognose er vist med opdigtede demotal. Økonomi og historik er fra en rigtig installation.*
+| Elpris time for time, inkl. tariffer | Solprognose mod målt produktion |
+|---|---|
+| ![Elpris](docs/billeder/elpris.png) | ![Solprognose](docs/billeder/sol.png) |
+
+### Wattlas Styring
+
+**Styring:** status, elpris og manuel tilsidesættelse. Vælg varighed (30 min, 1, 2 eller 4 timer eller til midnat) og
+ladeniveau (60, 80 eller 100 %), og tryk *Lad nu*, *Ingen netopladning*, *Gem batteriet*, *Brug batteriet* eller *Stop solsalg*.
+Tilsidesættelsen udløber altid af sig selv.
+
+![Styring med manuel tilsidesættelse](docs/billeder/styring.png)
+
+**Avancerede indstillinger:** reserve, slut-niveau, net-loft, batterislid, ugentlig fuldladning, *hvad-hvis*-beregning
+og fleksibel forbruger.
+
+![Indstillinger, hvad-hvis og fleksibel forbruger](docs/billeder/styring_avanceret.png)
+
+| Regler: faste tidsrum, fx "hverdage 16–21: gem batteriet" | Overvågning: advarsler, forbindelser og beskeder |
+|---|---|
+| ![Regler](docs/billeder/regler.png) | ![Overvågning](docs/billeder/overvaagning.png) |
+
+**Planens logik:** hvad EMHASS har planlagt, hvorfor, og 7 automatiske tjek.
+
+![Planens logik](docs/billeder/plan.png)
+
+| Teknik: strenge (PV), spænding, strøm og effekt pr. fase | Teknik: batteri, inverterens indstillinger og tidsprogrammer |
+|---|---|
+| ![Teknik – inverter og net](docs/billeder/teknik.png) | ![Teknik – batteri og tidsprogrammer](docs/billeder/teknik_batteri.png) |
+
+*Live, planens logik, elpris og solprognose er vist med opdigtede demotal. De øvrige billeder er fra en rigtig installation
+(taget om natten, derfor 0 W sol og en slukket streng-inverter).*
 
 ## Hvilke invertere
 
