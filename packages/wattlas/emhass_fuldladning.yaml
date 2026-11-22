@@ -6,7 +6,6 @@ input_boolean:
   emhass_fuld_opladning:
     name: EMHASS fuld opladning hver 7. dag
     icon: mdi:battery-charging-100
-    initial: true
 
 input_datetime:
   emhass_sidst_fuld:

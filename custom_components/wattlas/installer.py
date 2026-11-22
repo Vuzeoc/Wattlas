@@ -53,15 +53,13 @@ def tilfoej_packages(tekst: str) -> str | None:
 
 def anden_styring(config_dir: str, pkg_rel: str | None) -> str | None:
     """Sti til en anden EMHASS/Wattlas-styring, som ikke er Wattlas' egen – to styringer på én inverter er farligt."""
+    if not pkg_rel:
+        return None  # ingen packages = ingen aktiv styring; løse kopier andre steder i /config indlæser HA ikke
     cfg = Path(config_dir)
-    egen = (cfg / pkg_rel / "wattlas").resolve() if pkg_rel else None
-    for p in cfg.rglob("emhass_forbindelse.yaml"):
-        dele = p.relative_to(cfg).parts
-        if dele and (dele[0].startswith("wattlas_backup_") or dele[0] in ("custom_components", ".storage", "deps")):
-            continue
-        if egen and p.resolve().parent == egen:
-            continue
-        return str(p.relative_to(cfg))
+    egen = (cfg / pkg_rel / "wattlas").resolve()
+    for p in (cfg / pkg_rel).rglob("emhass_forbindelse.yaml"):
+        if p.resolve().parent != egen:
+            return str(p.relative_to(cfg))
     return None
 
 
@@ -155,6 +153,10 @@ def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, versi
     except Exception:
         rul_tilbage(kvit)
         raise
+    # behold de 3 nyeste backups (inkl. den netop lavede); kun mapper med Wattlas' eget navnemønster røres
+    gamle = sorted(p for p in cfg.glob("wattlas_backup_*") if p.is_dir() and re.fullmatch(r"wattlas_backup_\d{8}-\d{6}", p.name))
+    for p in gamle[:-3]:
+        shutil.rmtree(p, ignore_errors=True)
     return kvit
 
 

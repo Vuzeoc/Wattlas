@@ -16,7 +16,7 @@ from homeassistant.helpers import selector as sel
 from homeassistant.helpers.check_config import async_check_ha_config_file
 
 from . import installer
-from .const import DOMAIN, EMHASS_SLUG, LINK, PAAKRAEVET, TAL, TRIN
+from .const import DOMAIN, EMHASS_SLUG, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TRIN
 
 VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
 SUFFIX = {"deye": ("sensor", "_pv_power"), "sunmate": ("number", "_timepoint_1_power")}
@@ -105,6 +105,8 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             eff = user_input.get("inverter2_effekt") or ""
             if ac and not eff:
                 fejl["inverter2_effekt"] = "mangler_effekt"
+            elif not re.fullmatch(NAVN_RE, user_input.get("inverter2_navn") or ""):
+                fejl["inverter2_navn"] = "navn_tegn"
             else:
                 self.d["inverter2"] = {"navn": user_input.get("inverter2_navn") or "Inverter 2", "ac": ac, "effekt": eff,
                                        "relae": user_input.get("inverter2_relae") or "",
@@ -205,7 +207,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             trin_ = h.get("step", 1)
             s = sel.NumberSelector(sel.NumberSelectorConfig(min=h.get("min", 0), max=h.get("max", 100000), step="any" if trin_ < 0.001 else trin_,
                                                             unit_of_measurement=h.get("unit_of_measurement"), mode=sel.NumberSelectorMode.BOX))
-            felter[vol.Required(k) if k in PAAKRAEVET else vol.Optional(k)] = s
+            felter[vol.Required(k) if k in PAAKRAEVET else vol.Optional(k, **({"default": STANDARD[k]} if k in STANDARD else {}))] = s
         return vol.Schema(felter)
 
     async def _tal_trin(self, trin: str, user_input, naeste) -> ConfigFlowResult:

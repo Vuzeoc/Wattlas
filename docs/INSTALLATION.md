@@ -23,10 +23,21 @@
 
 Dashboards fra integrationen er i YAML-tilstand og kan ikke redigeres i HA's editor. En ny version installeres fra
 Markedspladsen; Wattlas lægger selv de nye filer på plads og beder om en genstart. Dashboard-filerne
-(`/config/wattlas/dashboards/`) overskrives ved en ny version – de gamle gemmes i backup-mappen. Dine indstillinger bevares. Fjernes integrationen, flyttes
-filerne til `/config/wattlas_backup_<tidspunkt>/`.
+(`/config/wattlas/dashboards/`) overskrives ved en ny version – de gamle gemmes i backup-mappen. Dine indstillinger bevares. Fejler en opdatering, lægges den gamle
+version tilbage, og der står en besked under *Reparationer*.
 
-> Resten af denne side er den manuelle vej for avancerede brugere (`install.sh` eller kopiering i hånden).
+Fjernes integrationen, slår Wattlas først styringen fra (inverteren sættes til selvforbrug) og flytter derefter filerne til
+`/config/wattlas_backup_<tidspunkt>/`. Wattlas gemmer de 3 nyeste backup-mapper og sletter ældre.
+
+**Uden Markedspladsen:** åbn app'en *Terminal & SSH*, og kør de to linjer nedenfor. Scriptet kopierer kun integrationen
+(`custom_components/wattlas`). Genstart derefter HA, og fortsæt fra trin 3 ovenfor. Kør det igen for at opdatere.
+
+```sh
+cd /tmp && curl -fsSLO https://raw.githubusercontent.com/Vuzeoc/wattlas/main/install.sh
+sh install.sh
+```
+
+> Resten af denne side er den helt manuelle vej uden integrationen (kopiering i hånden) for avancerede brugere.
 > Den er også nyttig, hvis du vil forstå, hvad integrationen gør.
 
 ## Manuelt: regn med ca. en time
@@ -63,49 +74,7 @@ I EMHASS-app'ens indstillinger:
 
 Notér adressen: normalt `http://<din-HA-ip>:5000`. Tjek, at du kan åbne EMHASS' webside på den adresse.
 
-## 3. Kopiér filerne – med scriptet (anbefalet)
-
-Har du ikke packages i forvejen, så tilføj det først i `configuration.yaml`:
-
-```yaml
-homeassistant:
-  packages: !include_dir_named packages
-```
-
-Åbn app'en **Terminal & SSH**, og kør:
-
-```sh
-cd /tmp && curl -fsSLO https://raw.githubusercontent.com/Vuzeoc/wattlas/v0.1.0-alpha/install.sh
-sh install.sh deye        # eller: sh install.sh sunmate
-```
-
-Hedder inverterens entiteter noget andet end `min_inverter_…`, så tilføj `--prefix dit_prefix` (se trin 4).
-
-**De fleste har én inverter** og skal ikke andet. Har du *også* en inverter uden batteri (fx en ældre
-streng-inverter), kan du tilvælge den (kun med `deye`):
-
-```sh
-# på Deyes GEN-/mikroinverter-port – tælles automatisk med i solproduktionen
-sh install.sh deye --inverter2 min_strenginverter --inverter2-navn "Streng-inverter"
-
-# i eltavlen (AC-koblet) – dens effekt lægges til solproduktionen
-sh install.sh deye --inverter2 sma --inverter2-navn "SMA" --inverter2-ac sensor.sma_power
-
-# valgfrit: et relæ, der kan afbryde den
-... --inverter2-relae switch.strenginverter_relae
-```
-
-Se [BRUG.md › Én eller flere invertere](BRUG.md#én-eller-flere-invertere) for, hvad det betyder.
-
-Scriptet kopierer kernen, én styrekanal, app-kortene og begge dashboards (*Wattlas* og *Wattlas Styring*) og kører
-`ha core check`. Det genstarter ikke HA og rører ikke dine nøgler. Køres det igen (fx ved en ny version), flyttes de
-gamle filer til `/config/wattlas_backup_<tidspunkt>/`, og dine indstillinger bevares.
-
-Dashboards fra scriptet er i YAML-tilstand og kan ikke redigeres i HA's editor. Vil du ændre dem, så ret
-`/config/wattlas/dashboards/*.yaml`. Kortet indlæses via `frontend: extra_module_url`, så du skal ikke tilføje en
-ressource. Spring trin 5.2–5.4 over, og fortsæt med trin 4.
-
-## 3b. Kopiér filerne – i hånden
+## 3. Kopiér filerne
 
 Har du ikke packages i forvejen, så tilføj det i `configuration.yaml`:
 
@@ -128,7 +97,7 @@ Du kan gøre det på én af to måder:
 
 - **A (nemmest):** omdøb enheden i HA (Indstillinger → Enheder → inverteren → ✏️) til `min_inverter`, og sig **ja** til
   at omdøbe entitets-ID'erne.
-- **B:** kør scriptet med `--prefix dit_prefix`, eller søg og erstat `min_inverter` med dit eget prefix i de to filer
+- **B:** søg og erstat `min_inverter` med dit eget prefix i de to filer
   i `/config/packages/wattlas_kanal/`.
 
 **Kun Deye:** Wattlas bruger Deyes 6 tidsprogrammer med faste skift kl. **01, 05, 09, 13, 17 og 21**. Sæt programtiderne i
@@ -138,8 +107,6 @@ inverteren (eller via Solarman) til de tider. Wattlas skriver kun SOC, effekt og
 ## 5. Genstart og kort
 
 1. Indstillinger → System → Genstart (fuld genstart første gang, fordi SQL og nye helpers kræver det).
-
-Har du brugt scriptet, er du færdig med dette trin. Ellers:
 
 2. Kopiér `dist/` → `/config/www/wattlas/` (alle tre filer).
 3. Indstillinger → Dashboards → ⋮ → Ressourcer → Tilføj: `/local/wattlas/energi-app-card.js?v=1`, type **JavaScript-modul**.
@@ -158,6 +125,8 @@ Har du brugt scriptet, er du færdig med dette trin. Ellers:
 - nettarif og afgifter (fra din netselskabs- og elregning)
 - EMHASS-adresse og API-nøgle
 - solprognose- og vejr-entitet (udetemperatur-sensor er valgfri)
+- batteriets slidpris `wattlas_slid` (står den på 0, regner planen batteriet som gratis at bruge – se KONFIGURATION.md)
+- slå *Ugentlig fuldladning* til på **Wattlas Styring → Styring** (integrationen gør det selv; manuelt starter den slukket)
 
 Når `binary_sensor.wattlas_konfigureret` er **on**, er spærren væk.
 
@@ -175,7 +144,10 @@ fx `notify.mobile_app_din_telefon`. Som standard laver den en meddelelse i HA. T
 
 ## Afinstallation
 
-Slå styringen fra og vent 1 minut (selvforbrug sættes). Slet derefter mapperne fra trin 3 og 5 og genstart.
-Med scriptet er det `/config/packages/wattlas`, `/config/packages/wattlas_kanal`, `/config/www/wattlas` og
-`/config/wattlas` (stien til packages kan være en anden hos dig).
+**Med integrationen:** Indstillinger → Enheder og tjenester → Wattlas → ⋮ → Slet, og tryk *Genstart* under Reparationer.
+Wattlas slår selv styringen fra først.
+
+**Manuelt:** slå styringen fra og vent 1 minut (selvforbrug sættes). Slet derefter mapperne fra trin 3 og 5 og genstart:
+`/config/packages/wattlas`, `/config/packages/wattlas_kanal` og `/config/www/wattlas` (stien til packages kan være en
+anden hos dig).
 Tjek bagefter inverterens tidsprogrammer, og sæt dem som du vil have dem.

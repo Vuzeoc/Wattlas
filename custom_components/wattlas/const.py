@@ -22,8 +22,10 @@ TRIN = {
                 "maks_netladestroem_a", "maks_netladeeffekt_w"],
     "elnet": ["fase_graense_a", "import_graense_w", "maks_netimport_w", "maks_eksport_w"],
     "priser": ["nettarif_lav", "nettarif_hoej", "nettarif_spids", "elafgift", "tillaeg", "salg_nettarif", "salg_gebyr",
-               "solcelle_slid", "kulde_w_pr_grad"],
+               "solcelle_slid", "slid", "kulde_w_pr_grad"],
 }
+STANDARD = {"slid": 0.25}  # forudfyldt i opsætningen: uden en slidpris regner planen batteriet som gratis at bruge
+NAVN_RE = r"[A-Za-z0-9 ._æøåÆØÅ-]*"  # navnet skrives ind i dashboardets YAML
 
 _INDST = Path(__file__).parent / "payload" / "packages" / "wattlas" / "wattlas_indstillinger.yaml"
 

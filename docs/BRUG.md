@@ -35,7 +35,7 @@ Normalt skal du ingenting. Det, folk typisk bruger:
 | Vinter (lidt sol, kolde nætter) | hæv **Reserve** til 20–30 % |
 | Netselskabet skifter tarif (sommer/vinter) | ret de tre nettarif-helpers (se [KONFIGURATION.md](KONFIGURATION.md)) |
 | Arbejde på inverter eller batteri | slå **Wattlas styrer batteriet** fra først |
-| Ny version af Wattlas | kør `install.sh` igen; dine indstillinger bevares |
+| Ny version af Wattlas | opdatér *Wattlas* i Markedspladsen, og tryk *Genstart* under Reparationer; dine indstillinger bevares |
 
 ## Wattlas Styring → Styring
 
@@ -188,15 +188,10 @@ Har du også en almindelig streng-inverter (fx et ældre anlæg), afhænger det 
 | Tilslutning | Hvad Wattlas gør | Hvad du skal gøre |
 |---|---|---|
 | **På Deyes GEN-/mikroinverter-port** | tæller den automatisk med i solproduktionen (`…_microinverter_power`) og i planen | intet. Valgfrit: vis den i *Teknik* og i energiflowet (se nedenfor) |
-| **Direkte i husets eltavle** (AC-koblet) | Deyes CT ser den som lavere husforbrug. Styringen virker, men uden mere ved Wattlas ikke, at det er sol | installér med `--inverter2-ac <dens effekt-sensor>` (eller læg den til `sensor.emhass_solproduktion_samlet` i styrekanal-filen), og sørg for at solprognosen dækker begge anlæg |
+| **Direkte i husets eltavle** (AC-koblet) | Deyes CT ser den som lavere husforbrug. Styringen virker, men uden mere ved Wattlas ikke, at det er sol | vælg *I eltavlen* og dens effekt-sensor i opsætningen (eller læg den til `sensor.emhass_solproduktion_samlet` i styrekanal-filen), og sørg for at solprognosen dækker begge anlæg |
 
-**Nemmest:** vælg den ved installationen, så klarer `install.sh` det hele (se
-[INSTALLATION.md](INSTALLATION.md#3-kopiér-filerne--med-scriptet-anbefalet)):
-
-```sh
-sh install.sh deye --inverter2 min_strenginverter --inverter2-navn "Streng-inverter"          # GEN-port
-sh install.sh deye --inverter2 sma --inverter2-navn "SMA" --inverter2-ac sensor.sma_power      # AC-koblet
-```
+**Nemmest:** slå *Jeg har også en ekstra inverter uden batteri* til i opsætningen (trinnet *Din inverter*), så klarer
+Wattlas det hele. Se [BILLEDGUIDE.md](BILLEDGUIDE.md).
 
 Eller i hånden i `dashboards/wattlas_styring.yaml` og `dashboards/wattlas.yaml`:
 

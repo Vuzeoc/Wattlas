@@ -161,6 +161,7 @@ Herfra: se [BRUG.md](BRUG.md) for, hvordan du bruger Wattlas i hverdagen.
 | *EMHASS – beregning fejlede* (401) efter start | API-nøglen i Wattlas og i EMHASS-app'en er ikke ens |
 | Gul linje øverst i appen: *ikke færdigindstillet* | En indstilling mangler – linjen siger hvilken |
 
-**Fjerne Wattlas:** Slå først **Wattlas styrer** fra, og vent 1 minut (inverteren sættes til selvforbrug). Derefter
-Indstillinger → Enheder og tjenester → Wattlas → ⋮ → Slet, og genstart. Filerne flyttes til
-`/config/wattlas_backup_<tidspunkt>/` – intet slettes. Tjek bagefter inverterens tidsprogrammer.
+**Fjerne Wattlas:** Indstillinger → Enheder og tjenester → Wattlas → ⋮ → Slet. Wattlas slår selv styringen fra og sætter
+inverteren til selvforbrug (det kan tage op til et minut). Tryk derefter *Genstart* under **Reparationer**. Filerne
+flyttes til `/config/wattlas_backup_<tidspunkt>/` (de 3 nyeste backup-mapper gemmes). Tjek bagefter inverterens
+tidsprogrammer.

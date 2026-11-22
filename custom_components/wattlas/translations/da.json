@@ -94,6 +94,7 @@
           "salg_nettarif": "Indfødningstarif ved salg",
           "salg_gebyr": "Elselskabets gebyr ved salg",
           "solcelle_slid": "Solcellernes slid pr. kWh",
+          "slid": "Batterislid pr. afladet kWh",
           "kulde_w_pr_grad": "Ekstra husforbrug pr. grad koldere (valgfri)"
         },
         "data_description": {
@@ -105,6 +106,7 @@
           "salg_nettarif": "Indfødningstarif uden moms (valgfri).",
           "salg_gebyr": "Elselskabets gebyr pr. solgt kWh (valgfri).",
           "solcelle_slid": "Hvad en kWh solstrøm koster i slid, fx 0,10 (valgfri).",
+          "slid": "Batteriets pris / (kapacitet × cykler), fx 40 000 kr. / (20 kWh × 6000) ≈ 0,33. Ved 0 regner planen batteriet som gratis at slide på.",
           "kulde_w_pr_grad": "Ekstra husforbrug pr. grad koldere. Varmepumpe: 50–150. 0 = ingen justering (valgfri)."
         }
       }
@@ -113,6 +115,7 @@
       "forkert_entitet": "Vælg entiteten, der slutter på den viste endelse.",
       "kun_deye": "En ekstra inverter kræver Deye.",
       "mangler_effekt": "Vælg den ekstra inverters effekt-sensor.",
+      "navn_tegn": "Brug kun bogstaver, tal, mellemrum, punktum og bindestreg.",
       "mangler": "Der mangler stadig noget med ❌.",
       "bekraeft": "Sæt flueben for at fortsætte trods advarslerne.",
       "adresse": "Adressen skal starte med http:// eller https://",
@@ -152,6 +155,21 @@
           }
         }
       }
+    },
+    "fjernet": {
+      "title": "Genstart for at fjerne Wattlas helt",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Genstart Home Assistant",
+            "description": "Styringen er slået fra, og inverteren er sat til selvforbrug, hvis Wattlas styrede den. Filerne er flyttet til `{backup}`. Automationer og dashboards forsvinder først, når Home Assistant genstarter. Tjek bagefter inverterens tidsprogrammer."
+          }
+        }
+      }
+    },
+    "opdatering_fejlede": {
+      "title": "Wattlas-opdateringen til {version} blev ikke gennemført",
+      "description": "Den nye version bestod ikke Home Assistants konfigurationstjek, så den gamle er lagt tilbage og kører videre. Wattlas prøver igen ved næste genstart.\n\nFejl: {fejl}"
     }
   }
 }

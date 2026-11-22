@@ -83,12 +83,19 @@ Begrænsninger i alpha: kun 48 V-batterier (spændingsvindue 45–58 V), 3-faset
 1. **[docs/BILLEDGUIDE.md](docs/BILLEDGUIDE.md) – installationen trin for trin med billeder.**
    Uddybning og manuel installation: [docs/INSTALLATION.md](docs/INSTALLATION.md) – installér *Wattlas* fra Markedspladsen, og tilføj integrationen.
    Opsætningen tjekker, om du mangler noget, viser vej til det, spørger om dine tal og lægger det hele på plads.
-   Ingen kommandoer. (`install.sh` og manuel installation findes til avancerede brugere.)
+   Ingen kommandoer. (Uden Markedspladsen kan `install.sh` lægge integrationen ind; helt manuel installation findes også.)
 2. [docs/KONFIGURATION.md](docs/KONFIGURATION.md) – hvad hvert tal betyder, og hvordan du finder dit.
 3. [docs/BRUG.md](docs/BRUG.md) – sådan bruger du styringen: tilsidesættelser, indstillinger, hvad-hvis, fleksibel
    forbruger, regler og planens logik.
 4. [docs/SOLPROGNOSE.md](docs/SOLPROGNOSE.md) – hvorfor Helios Forecast, og hvad en anden prognose skal kunne.
 5. [docs/FAQ.md](docs/FAQ.md)
+
+## Udvikling
+
+`packages/`, `styrekanaler/`, `dist/`, `dashboards/` og `custom_components/wattlas/payload/` er genereret fra udviklerens
+egen installation. Ret ikke direkte i dem i en pull request – beskriv ændringen i en issue. Integrationens egen kode
+(`custom_components/wattlas/*.py`) har tests i `tests/`. De kræver `pip install homeassistant` og køres enkeltvis, fx
+`python tests/test_installer.py`.
 
 ## Licens
 
