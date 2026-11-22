@@ -1,5 +1,17 @@
 # Ændringer
 
+Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
+
+## 0.2.0
+Første udgave med et rigtigt versionsnavn i Markedspladsen.
+- Logo i Markedspladsen og under Integrationer
+- Markedspladsen viser versionsnavnet og tilbyder kun en opdatering, når der kommer en ny udgave
+- Beskrivelse af projektet ([docs/OM_WATTLAS.md](docs/OM_WATTLAS.md)) og kort beskrivelse øverst på forsiden
+- Billedguiden forklarer, at Markedspladsen beder om en GitHub-forbindelse første gang
+- Genstart-beskeden bliver stående, hvis Wattlas fjernes og tilføjes igen uden genstart
+- Fjernes Wattlas, mens inverteren ikke svarer, siger beskeden det og beder dig tjekke tidsprogrammerne
+- En ny standardværdi i en senere version når også dem, der allerede har sat Wattlas op
+
 ## 0.1.1-alpha
 Første offentlige udgave (0.1.0-alpha var en intern testudgave).
 - EMHASS-styring med plan-validering, reserveplan, fasegrænse og startspærre
