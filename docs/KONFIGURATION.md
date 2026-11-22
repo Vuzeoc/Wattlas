@@ -62,6 +62,14 @@ alpha-begrænsning.
 > API-nøglen ligger i HA's database som en helper-værdi. Alle med adgang til din HA kan læse den. Det er samme niveau som
 > resten af HA. Del aldrig skærmbilleder af Indstillinger → Hjælpere.
 
+## Husprognose (valgfri)
+
+| Helper | Betydning |
+|---|---|
+| `wattlas_kulde_w_pr_grad` | ekstra husforbrug i W pr. grad, det er koldere end ugens gennemsnit. Har du varmepumpe, er 50–150 W typisk. 0 = ingen justering |
+
+Alarmen *Høj netbelastning* går, når en fase under netladning bruger mere end `wattlas_fase_graense_a` + 25 %.
+
 ## Styring (sættes i appen)
 
 > Efter installationen står skyderne på deres laveste værdi (fx net-loft 1 kW). **Sæt dem, før du slår styringen til**,

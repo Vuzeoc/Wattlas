@@ -34,7 +34,33 @@ I EMHASS-app'ens indstillinger:
 
 Notér adressen: normalt `http://<din-HA-ip>:5000`. Tjek, at du kan åbne EMHASS' webside på den adresse.
 
-## 3. Packages
+## 3. Kopiér filerne – med scriptet (anbefalet)
+
+Har du ikke packages i forvejen, så tilføj det først i `configuration.yaml`:
+
+```yaml
+homeassistant:
+  packages: !include_dir_named packages
+```
+
+Åbn app'en **Terminal & SSH**, og kør:
+
+```sh
+cd /tmp && curl -fsSLO https://raw.githubusercontent.com/Vuzeoc/wattlas/v0.1.0-alpha/install.sh
+sh install.sh deye        # eller: sh install.sh sunmate
+```
+
+Hedder inverterens entiteter noget andet end `min_inverter_…`, så tilføj `--prefix dit_prefix` (se trin 4).
+
+Scriptet kopierer kernen, én styrekanal, app-kortene og begge dashboards (*Wattlas* og *Wattlas Styring*) og kører
+`ha core check`. Det genstarter ikke HA og rører ikke dine nøgler. Køres det igen (fx ved en ny version), flyttes de
+gamle filer til `/config/wattlas_backup_<tidspunkt>/`, og dine indstillinger bevares.
+
+Dashboards fra scriptet er i YAML-tilstand og kan ikke redigeres i HA's editor. Vil du ændre dem, så ret
+`/config/wattlas/dashboards/*.yaml`. Kortet indlæses via `frontend: extra_module_url`, så du skal ikke tilføje en
+ressource. Spring trin 5.2–5.4 over, og fortsæt med trin 4.
+
+## 3b. Kopiér filerne – i hånden
 
 Har du ikke packages i forvejen, så tilføj det i `configuration.yaml`:
 
@@ -57,7 +83,8 @@ Du kan gøre det på én af to måder:
 
 - **A (nemmest):** omdøb enheden i HA (Indstillinger → Enheder → inverteren → ✏️) til `min_inverter`, og sig **ja** til
   at omdøbe entitets-ID'erne.
-- **B:** søg og erstat `min_inverter` med dit eget prefix i de to filer i `/config/packages/wattlas_kanal/`.
+- **B:** kør scriptet med `--prefix dit_prefix`, eller søg og erstat `min_inverter` med dit eget prefix i de to filer
+  i `/config/packages/wattlas_kanal/`.
 
 **Kun Deye:** Wattlas bruger Deyes 6 tidsprogrammer med faste skift kl. **01, 05, 09, 13, 17 og 21**. Sæt programtiderne i
 inverteren (eller via Solarman) til de tider. Wattlas skriver kun SOC, effekt og netladning pr. program, ikke tiderne.
@@ -66,6 +93,9 @@ inverteren (eller via Solarman) til de tider. Wattlas skriver kun SOC, effekt og
 ## 5. Genstart og kort
 
 1. Indstillinger → System → Genstart (fuld genstart første gang, fordi SQL og nye helpers kræver det).
+
+Har du brugt scriptet, er du færdig med dette trin. Ellers:
+
 2. Kopiér `dist/` → `/config/www/wattlas/` (alle tre filer).
 3. Indstillinger → Dashboards → ⋮ → Ressourcer → Tilføj: `/local/wattlas/energi-app-card.js?v=1`, type **JavaScript-modul**.
    (Planens-logik-kortet hentes automatisk fra samme mappe.)
@@ -101,4 +131,6 @@ fx `notify.mobile_app_din_telefon`. Som standard laver den en meddelelse i HA. T
 ## Afinstallation
 
 Slå styringen fra og vent 1 minut (selvforbrug sættes). Slet derefter mapperne fra trin 3 og 5 og genstart.
+Med scriptet er det `/config/packages/wattlas`, `/config/packages/wattlas_kanal`, `/config/www/wattlas` og
+`/config/wattlas` (stien til packages kan være en anden hos dig).
 Tjek bagefter inverterens tidsprogrammer, og sæt dem som du vil have dem.

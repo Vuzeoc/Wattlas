@@ -81,7 +81,8 @@ Begrænsninger i alpha: kun 48 V-batterier (spændingsvindue 45–58 V), 3-faset
 
 ## Kom i gang
 
-1. [docs/INSTALLATION.md](docs/INSTALLATION.md) – trin for trin, ca. en time.
+1. [docs/INSTALLATION.md](docs/INSTALLATION.md) – trin for trin. Filerne, kortet og dashboards klares af `install.sh`
+   med én kommando. Indstillingerne udfylder du selv.
 2. [docs/KONFIGURATION.md](docs/KONFIGURATION.md) – hvad hvert tal betyder, og hvordan du finder dit.
 3. [docs/SOLPROGNOSE.md](docs/SOLPROGNOSE.md) – hvorfor Helios Forecast, og hvad en anden prognose skal kunne.
 4. [docs/FAQ.md](docs/FAQ.md)

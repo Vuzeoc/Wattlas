@@ -61,6 +61,13 @@ input_number:
     step: 1
     mode: box
     unit_of_measurement: A
+  wattlas_kulde_w_pr_grad:
+    name: Wattlas · ekstra husforbrug pr. grad koldere (valgfri)
+    min: 0
+    max: 500
+    step: 5
+    mode: box
+    unit_of_measurement: W
   wattlas_import_graense_w:
     name: Wattlas · maks. samlet import fra nettet (netladning)
     min: 0

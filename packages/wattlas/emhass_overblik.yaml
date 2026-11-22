@@ -221,7 +221,7 @@ template:
       {% set load=states('sensor.emhass_m_load_w_totalpower')|float(0) %}
       {{ is_state('input_boolean.emhass_styring_aktiv','on') and is_state('switch.wattlas_netladning','on')
        and -b/0.95-([0,pv-load]|max)>500
-       and ([states('sensor.emhass_ui_fase_1')|float(0),states('sensor.emhass_ui_fase_2')|float(0),states('sensor.emhass_ui_fase_3')|float(0)]|max)>25 }}
+       and ([states('sensor.emhass_ui_fase_1')|float(0),states('sensor.emhass_ui_fase_2')|float(0),states('sensor.emhass_ui_fase_3')|float(0)]|max)>states('input_number.wattlas_fase_graense_a')|float(0)*1.25 }}
     device_class: problem
     delay_on:
       minutes: 5

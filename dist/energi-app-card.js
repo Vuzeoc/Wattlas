@@ -208,7 +208,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       else if (a === 'dur') this._dur = v;
       else if (a === 'tsoc') this._tsoc = Number(v);
       else if (a === 'ts') { this._tilsidesaet(v); return; }
-      else if (a === 'hhset') { const [k, d] = v.split('|'), lim = {reserve: [15, 80], slut_soc: [15, 100], max_net_kw: [6, 11], slid: [0, 1]}[k];
+      else if (a === 'hhset') { const [k, d] = v.split('|'), lim = {reserve: [15, 80], slut_soc: [15, 100], max_net_kw: [1, Math.max(1, (this.n('input_number.wattlas_maks_netimport_w') || 50000) / 1000)], slid: [0, 1]}[k];
         this._hh[k] = Math.max(lim[0], Math.min(lim[1], Math.round((this._hh[k] + Number(d)) * 100) / 100)); }
       else if (a === 'hhfb') this._hh.forbruger = !this._hh.forbruger;
       else if (a === 'rny') { this._reglerUdkast().push({navn: 'Ny regel', aktiv: false, type: 'gem', dage: 'hverdage', fra: '16:00', til: '21:00', soc: 80}); }
@@ -400,7 +400,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
     hvadHvis() {
       const v = id => parseFloat(this.st(id)?.state);
       if (!this._hh) this._hh = {reserve: v('input_number.wattlas_reserve') || 15, slut_soc: v('input_number.wattlas_slut_soc') || 30,
-        max_net_kw: v('input_number.wattlas_max_net_kw') || 11, slid: v('input_number.wattlas_slid') ?? 0.25, forbruger: false};
+        max_net_kw: v('input_number.wattlas_max_net_kw') || (v('input_number.wattlas_maks_netimport_w') || 0) / 1000, slid: v('input_number.wattlas_slid') ?? 0.25, forbruger: false};
       const H = this._hh, status = this.st('input_text.wattlas_hvadhvis_status')?.state || '', koerer = this.st('script.wattlas_hvadhvis')?.state === 'on' || status.startsWith('beregner');
       const base = this.planKr('', v('input_number.wattlas_slid') || 0.25), alt = this.planKr('hh_', H.slid);
       const frisk = alt && status.startsWith('ok') && this._hhKoert;
@@ -608,7 +608,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         <div class="grid g2">${this.card('Indstillinger til optimeringen', `<p class="note" style="margin:0 0 8px">Sendes til EMHASS ved hver beregning, så planen tager højde for dem – reglerne kæmper ikke mod planen.</p>
             ${num('input_number.wattlas_reserve', 'Reserve', '%', 5, 'Laveste batteriniveau i planen (fx højere om vinteren eller ved stormvarsel)')}
             ${num('input_number.wattlas_slut_soc', 'Batteri ved planens slutning', '%', 5, 'Hvor meget der skal være tilbage, når horisonten slutter')}
-            ${num('input_number.wattlas_max_net_kw', 'Maks. køb fra elnettet', 'kW', 0.5, 'Sikringsgrænse for opladning (højst 11 kW)')}
+            ${num('input_number.wattlas_max_net_kw', 'Maks. køb fra elnettet', 'kW', 0.5, 'Sikringsgrænse for opladning (højst wattlas_maks_netimport_w)')}
             ${num('input_number.wattlas_slid', 'Batterislid', 'kr./kWh', 0.01, 'Pris pr. afladet kWh – højere = færre små runder')}
             ${tog('input_boolean.emhass_fuld_opladning', 'Ugentlig fuldladning', 'Lad til 100 % mindst én gang om ugen (cellebalancering)')}
             ${tog('input_boolean.emhass_styring_aktiv', 'Wattlas styrer batteriet', 'Slå fra = inverteren kører selvforbrug med 15 % reserve')}`, {icon: 'mdi:tune-variant'})}

@@ -190,9 +190,8 @@ script:
         type: hourly
       response_variable: vejr
     - variables:
-        # Watt ekstra forbrug pr. grad koldere end ugens gennemsnit. Tilpas til dit hus (varmepumpe: ofte 50–150 W;
-        # uden elvarme: 0).
-        kulde_w_pr_grad: 70
+        # Watt ekstra forbrug pr. grad koldere end ugens gennemsnit (input_number.wattlas_kulde_w_pr_grad, 0 = ingen justering).
+        kulde_w_pr_grad: "{{ states('input_number.wattlas_kulde_w_pr_grad')|float(0) }}"
         hus: |-
           {%- set raw = state_attr('sensor.emhass_husforbrug_historik', 'data') -%}
           {%- set rows = (raw | from_json if raw is string else raw) or [] -%}
