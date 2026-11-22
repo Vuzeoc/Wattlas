@@ -1,6 +1,10 @@
 # Wattlas
 
-**Batteri- og solcellestyring til Home Assistant – med EMHASS som hjerne og en app som ansigt.**
+**Åben styring af solceller og batteri i Home Assistant.**
+
+Wattlas lader batteriet op, når strømmen er billig, og bruger det, når den er dyr. Den passer på dine sikringer imens,
+viser hvorfor den gør, som den gør, og kan arbejde sammen med resten af huset: varmepumpe, varmt vand, ladestander og
+hvidevarer. Alt kører lokalt hos dig selv, og koden er åben.
 
 ![Wattlas live: energiflow mellem sol, elnet, hus og batteri](docs/billeder/live.png)
 
