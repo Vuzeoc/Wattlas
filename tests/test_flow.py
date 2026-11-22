@@ -26,6 +26,7 @@ async def ny_hass(conf):
     loader.async_setup(hass)
     assert await bootstrap.async_load_base_functionality(hass)
     hass.config.language = 'da'
+    hass.config.skip_pip = True  # testen installerer ikke Python-pakker (fx app-oversigtens), som en rigtig HA har i forvejen
     hass.config.components.add('repairs')  # rigtig HA har den altid (default_config); her uden http-server
     hass.set_state(core.CoreState.running)
     t0 = datetime.now().astimezone().replace(minute=0, second=0, microsecond=0)

@@ -1,6 +1,9 @@
 {
   "domain": "wattlas",
   "name": "Wattlas",
+  "after_dependencies": [
+    "hassio"
+  ],
   "codeowners": [
     "@Vuzeoc"
   ],
