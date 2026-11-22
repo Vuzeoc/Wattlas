@@ -404,7 +404,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       const H = this._hh, status = this.st('input_text.wattlas_hvadhvis_status')?.state || '', koerer = this.st('script.wattlas_hvadhvis')?.state === 'on' || status.startsWith('beregner');
       const base = this.planKr('', v('input_number.wattlas_slid') || 0.25), alt = this.planKr('hh_', H.slid);
       const frisk = alt && status.startsWith('ok') && this._hhKoert;
-      const row = (k, t, u, step, dec) => `<div class="set"><div><b>${t}</b></div><div class="stp"><button data-a="hhset" data-v="${k}|-${step}">−</button><em>${nf(H[k], dec)} ${u}</em><button data-a="hhset" data-v="${k}|${step}">+</button></div></div>`;
+      const row = (k, t, u, step, dec) => `<div class="set"><div><b>${t}</b></div><div class="stp"><button data-a="hhset" data-v="${k}|-${step}">−</button><em>${k === 'max_net_kw' && !H[k] ? 'ingen grænse' : nf(H[k], dec) + ' ' + u}</em><button data-a="hhset" data-v="${k}|${step}">+</button></div></div>`;
       let res = `<p class="note">Vælg ændringer og tryk "Beregn". EMHASS laver en ekstra plan ved siden af den rigtige – styringen ændres ikke.</p>`;
       if (koerer) res = `<div class="loading">Beregner alternativ plan …</div>`;
       else if (frisk && base) {
@@ -586,7 +586,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       const knap = (k, ic, c, t, d) => `<div class="ovc ${aktivMode === k ? 'on' : ''}" style="--c:${c}"><div class="ovh"><ha-icon icon="${ic}"></ha-icon><b>${t}</b></div><p>${d}</p>
         <button data-a="ts" data-v="${aktivMode === k ? 'ingen' : k}">${aktivMode === k ? 'Stop' : 'Start'}</button></div>`;
       const num = (id, t, u, step, d) => { const s = this.st(id); const v = s ? parseFloat(s.state) : null;
-        return `<div class="set"><div><b>${t}</b><span>${d}</span></div><div class="stp"><button data-a="num" data-v="${id}|-${step}">−</button><em>${v === null ? '–' : nf(v, step < 1 ? 2 : (step < 1 ? 1 : 0))} ${u}</em><button data-a="num" data-v="${id}|${step}">+</button></div></div>`; };
+        return `<div class="set"><div><b>${t}</b><span>${d}</span></div><div class="stp"><button data-a="num" data-v="${id}|-${step}">−</button><em>${v === null ? '–' : v === 0 && id.endsWith('max_net_kw') ? 'ingen grænse' : nf(v, step < 1 ? 2 : (step < 1 ? 1 : 0)) + ' ' + u}</em><button data-a="num" data-v="${id}|${step}">+</button></div></div>`; };
       const tog = (id, t, d) => { const s = this.st(id)?.state === 'on'; return `<div class="set"><div><b>${t}</b><span>${d}</span></div><button class="sw ${s ? 'on' : ''}" data-a="tog" data-v="${id}"><i></i></button></div>`; };
       const log = (this._log || []).map(e => { const d = new Date(e.when * 1000); return `<li><span>${String(d.getDate())}/${d.getMonth() + 1} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</span>${esc(e.message)}</li>`; }).join('') || '<li><span></span>Ingen tilsidesættelser de sidste 7 dage</li>';
       return `<div class="hero ${on ? '' : 'off'}"><img src="${LOGO}" alt=""><div><small>WATTLAS STYRER ${on ? '' : 'IKKE'}</small><h2>${handling}</h2>
@@ -608,7 +608,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         <div class="grid g2">${this.card('Indstillinger til optimeringen', `<p class="note" style="margin:0 0 8px">Sendes til EMHASS ved hver beregning, så planen tager højde for dem – reglerne kæmper ikke mod planen.</p>
             ${num('input_number.wattlas_reserve', 'Reserve', '%', 5, 'Laveste batteriniveau i planen (fx højere om vinteren eller ved stormvarsel)')}
             ${num('input_number.wattlas_slut_soc', 'Batteri ved planens slutning', '%', 5, 'Hvor meget der skal være tilbage, når horisonten slutter')}
-            ${num('input_number.wattlas_max_net_kw', 'Maks. køb fra elnettet', 'kW', 0.5, 'Sikringsgrænse for opladning (højst wattlas_maks_netimport_w)')}
+            ${num('input_number.wattlas_max_net_kw', 'Maks. køb fra elnettet', 'kW', 0.5, 'Sikringsgrænse for opladning. 0 = kun importloftet fra opsætningen')}
             ${num('input_number.wattlas_slid', 'Batterislid', 'kr./kWh', 0.01, 'Pris pr. afladet kWh – højere = færre små runder')}
             ${tog('input_boolean.emhass_fuld_opladning', 'Ugentlig fuldladning', 'Lad til 100 % mindst én gang om ugen (cellebalancering)')}
             ${tog('input_boolean.emhass_styring_aktiv', 'Wattlas styrer batteriet', 'Slå fra = inverteren kører selvforbrug med 15 % reserve')}`, {icon: 'mdi:tune-variant'})}
