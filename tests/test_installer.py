@@ -55,8 +55,52 @@ try:
 except I.InstallFejl:
     pass
 assert not (e / 'config/packages/wattlas').exists()
+# Huawei: tre enheder (inverter, batterier, elmåler) – uden batteri/elmåler stoppes installationen uden at efterlade filer
+h = ny('default_config:\n')
+for forkert in (None, {'min_luna': 'batteries'}, {'min_luna': 'batteries', 'min_hmaaler': 'x"y'}):
+    try:
+        I.installer(str(h), 'huawei', 'inverter', None, 't', forkert); raise SystemExit(f'burde kræve batteri og elmåler: {forkert}')
+    except I.InstallFejl:
+        pass
+    assert not (h / 'packages/wattlas').exists(), 'fejl må ikke efterlade filer'
+try:  # Deye har ingen ekstra enheder
+    I.installer(str(h), 'deye', 'min_inverter', None, 't', {'min_luna': 'batteries'}); raise SystemExit('Deye må ikke tage ekstra prefixer')
+except I.InstallFejl:
+    pass
+hx = {'min_luna': 'batteries', 'min_hmaaler': 'power_meter'}
+I.installer(str(h), 'huawei', 'inverter', None, 't5', hx)
+hk = ''.join(f.read_text(encoding='utf-8') for f in (h / 'packages/wattlas_kanal').glob('*.yaml'))
+assert not any(p in hk for p in ('min_huawei_', 'min_luna_', 'min_hmaaler_')), 'en pladsholder blev ikke erstattet'
+for e_id in ('sensor.inverter_input_power', 'sensor.batteries_state_of_capacity', 'number.batteries_maximum_discharging_power',
+             'sensor.power_meter_phase_a_active_power', 'sensor.power_meter_phase_c_voltage'):
+    assert e_id in hk, e_id
+alle = I.entiteter_i_kanal('huawei', 'inverter', hx)
+assert 'sensor.inverter_input_power' in alle and 'sensor.batteries_charge_discharge_power' in alle and 'sensor.power_meter_active_power' in alle
+assert not [x for x in alle if 'min_' in x], 'entitetstjekket skal kende alle tre enheder'
+# andre enhedsnavne (fx en omdøbt inverter) erstattes også
+I.installer(str(h), 'huawei', 'sun2000_10ktl_m1', None, 't6', {'min_luna': 'luna', 'min_hmaaler': 'maaler'})
+hk = ''.join(f.read_text(encoding='utf-8') for f in (h / 'packages/wattlas_kanal').glob('*.yaml'))
+assert 'sensor.sun2000_10ktl_m1_input_power' in hk and 'sensor.luna_state_of_capacity' in hk and 'sensor.maaler_active_power' in hk
+assert 'sensor.inverter_input_power' not in hk
+# Huawei med EMMA: EMMA-enheden (min_emma) + dens måler; den eksterne måler hedder som den indbyggede + "_2"
+ex = {'min_luna': 'batteries', 'min_hmaaler': 'emma|_2', 'min_emma': 'emma'}
+I.installer(str(h), 'huawei_emma', 'inverter', None, 't7', ex)
+hk = ''.join(f.read_text(encoding='utf-8') for f in (h / 'packages/wattlas_kanal').glob('*.yaml'))
+assert not any(p in hk for p in ('min_huawei_', 'min_luna_', 'min_hmaaler_', 'min_emma_')), 'en pladsholder blev ikke erstattet'
+for e_id in ('sensor.emma_phase_a_active_power_2', 'sensor.emma_phase_c_voltage_2', 'sensor.emma_feed_in_power',
+             'sensor.emma_total_supply_from_grid', "device_id('sensor.emma_feed_in_power')", 'select.emma_ess_control_mode',
+             'number.batteries_maximum_discharging_power', 'balance_ok'):
+    assert e_id in hk, e_id
+assert 'sensor.emma_feed_in_power_2' not in hk and 'sensor.power_meter_' not in hk
+alle = I.entiteter_i_kanal('huawei_emma', 'inverter', ex)
+assert 'sensor.emma_phase_b_active_power_2' in alle and 'sensor.emma_load_power' in alle and not [x for x in alle if 'min_' in x]
+for forkert in ({'min_luna': 'b', 'min_hmaaler': 'emma|2', 'min_emma': 'emma'}, {'min_luna': 'b', 'min_hmaaler': 'emma'}):
+    try:
+        I.installer(str(h), 'huawei_emma', 'inverter', None, 't', forkert); raise SystemExit(f'burde afvises: {forkert}')
+    except I.InstallFejl:
+        pass
 # afinstallation flytter til backup
 b = I.afinstaller(str(d))
 assert b and not (d / 'packages/wattlas').exists() and (pathlib.Path(b) / 'packages_wattlas').exists()
 print('installer: alle tjek OK')
-for x in (d, e): shutil.rmtree(x, ignore_errors=True)
+for x in (d, e, h): shutil.rmtree(x, ignore_errors=True)

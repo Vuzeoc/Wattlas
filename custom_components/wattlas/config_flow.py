@@ -19,7 +19,12 @@ from . import installer
 from .const import DOMAIN, EMHASS_SLUG, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TRIN
 
 VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
-SUFFIX = {"deye": ("sensor", "_pv_power"), "sunmate": ("number", "_timepoint_1_power")}
+SUFFIX = {"deye": ("sensor", "_pv_power"), "sunmate": ("number", "_timepoint_1_power"), "huawei": ("sensor", "_input_power")}
+# Huawei (LUNA2000) er et højvoltbatteri; kernen regner i A ved et lavvoltbatteri. Kanalen bruger derfor en fast
+# beregningsspænding, og A-indstillingerne udregnes fra W. Samme tal står i styrekanalen (styrekanaler/huawei).
+HUAWEI_V = 50
+A_FRA_W = {"maks_ladestroem_a": "maks_ladeeffekt_w", "maks_afladestroem_a": "maks_afladeeffekt_w",
+           "maks_netladestroem_a": "maks_netladeeffekt_w"}
 
 
 def _emhass(hass) -> tuple[str | None, str | None]:
@@ -76,7 +81,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_inverter()
         return self.async_show_form(step_id="user", data_schema=vol.Schema({
             vol.Required("kanal", default="deye"): sel.SelectSelector(sel.SelectSelectorConfig(
-                options=["deye", "sunmate"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
+                options=["deye", "sunmate", "huawei"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
 
     # 2 – vælg inverteren (de fleste har kun én)
     async def async_step_inverter(self, user_input=None) -> ConfigFlowResult:
@@ -91,11 +96,45 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 self.d["prefix"] = e.split(".", 1)[1][: -len(suf)]
                 self.d["inverter2"] = None
+                if self.d["kanal"] == "huawei":
+                    return await self.async_step_huawei()
                 return await (self.async_step_inverter2() if user_input.get("inverter2") else self.async_step_tjek())
         return self.async_show_form(step_id="inverter", errors=fejl, data_schema=vol.Schema({
             vol.Required("inverter"): sel.EntitySelector(sel.EntitySelectorConfig(domain=dom)),
             vol.Optional("inverter2", default=False): sel.BooleanSelector(),
         }), description_placeholders={"suffix": suf})
+
+    # 2a – kun Huawei: batteriet og elmåleren er egne enheder i Huawei Solar-integrationen. Elmåleren sidder enten på
+    # inverteren ("Power meter", vælg dens Active power) eller på en EMMA (vælg EMMA-målerens Phase A active power;
+    # den eksterne måler hedder som den indbyggede + "_2", som Wattlas så bruger på alle målerens sensorer).
+    async def async_step_huawei(self, user_input=None) -> ConfigFlowResult:
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            bat, maaler, emma = user_input["batteri"], user_input["maaler"], user_input.get("elmaaler") == "emma"
+            mb = re.fullmatch(r"sensor\.([a-z0-9_]+)_state_of_capacity", bat)
+            mm = re.fullmatch(r"sensor\.([a-z0-9_]+)_phase_a_active_power(_\d+)?" if emma else r"sensor\.([a-z0-9_]+)_active_power", maaler)
+            if not mb:
+                fejl["batteri"] = "forkert_entitet"
+            if not mm:
+                fejl["maaler"] = "forkert_maaler"
+            if not fejl:
+                self.d["ekstra"] = {"min_luna": mb.group(1), "min_hmaaler": mm.group(1)}
+                if emma:
+                    self.d["kanal"] = "huawei_emma"
+                    self.d["ekstra"]["min_emma"] = mm.group(1)
+                    if mm.group(2):
+                        self.d["ekstra"]["min_hmaaler"] += "|" + mm.group(2)
+                return await self.async_step_tjek()
+        har = lambda e: (s := self.hass.states.get(e)) is not None and s.state not in ("unknown", "unavailable")  # noqa: E731
+        std_emma = not har("sensor.power_meter_active_power") and har("sensor.emma_feed_in_power")
+        std = {"batteri": "sensor.batteries_state_of_capacity",
+               "maaler": "sensor.emma_phase_a_active_power" if std_emma else "sensor.power_meter_active_power"}
+        skema = {vol.Required("elmaaler", default="emma" if std_emma else "huawei"): sel.SelectSelector(sel.SelectSelectorConfig(
+            options=["huawei", "emma"], translation_key="elmaaler", mode=sel.SelectSelectorMode.LIST))}
+        for felt in ("batteri", "maaler"):
+            skema[vol.Required(felt, **({"default": std[felt]} if self.hass.states.get(std[felt]) else {}))] = sel.EntitySelector(
+                sel.EntitySelectorConfig(domain="sensor"))
+        return self.async_show_form(step_id="huawei", errors=fejl, data_schema=vol.Schema(skema))
 
     # 2b – kun hvis der også er en inverter uden batteri
     async def async_step_inverter2(self, user_input=None) -> ConfigFlowResult:
@@ -146,8 +185,8 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
                             "Bruger dine egne automationer det gamle navn, så ret dem bagefter.")
             else:
                 blok.append(f"❌ **{navn}** mangler – " + (f"[tilføj den]({link}), {hjælp}" if link else hjælp))
-        mangler = [e for e in installer.entiteter_i_kanal(self.d["kanal"], self.d["prefix"])
-                   if hass.states.get(e) is None and not e.endswith("_microinverter_power")]
+        alle = await hass.async_add_executor_job(installer.entiteter_i_kanal, self.d["kanal"], self.d["prefix"], self.d.get("ekstra"))
+        mangler = [e for e in alle if hass.states.get(e) is None and not e.endswith("_microinverter_power")]
         if mangler:
             vis = ", ".join(f"`{e}`" for e in mangler[:8]) + (f" og {len(mangler) - 8} til" if len(mangler) > 8 else "")
             adv.append(f"⚠️ Inverteren mangler {len(mangler)} entiteter, som Wattlas bruger: {vis}. "
@@ -200,9 +239,13 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Optional("udetemperatur"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="temperature")),
         }))
 
+    def _felter(self, trin: str) -> list[str]:
+        """Indstillingerne i trinnet. Huawei: A-grænserne udregnes fra W (se HUAWEI_V) og spørges ikke om."""
+        return [k for k in TRIN[trin] if not (str(self.d.get("kanal")).startswith("huawei") and k in A_FRA_W)]
+
     def _tal_skema(self, trin: str) -> vol.Schema:
         felter = {}
-        for k in TRIN[trin]:
+        for k in self._felter(trin):
             h = TAL[k]
             trin_ = h.get("step", 1)
             s = sel.NumberSelector(sel.NumberSelectorConfig(min=h.get("min", 0), max=h.get("max", 100000), step="any" if trin_ < 0.001 else trin_,
@@ -213,9 +256,12 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _tal_trin(self, trin: str, user_input, naeste) -> ConfigFlowResult:
         fejl = {}
         if user_input is not None:
-            fejl = {k: "over_nul" for k in TRIN[trin] if k in PAAKRAEVET and not (user_input.get(k) or 0) > 0}
+            fejl = {k: "over_nul" for k in self._felter(trin) if k in PAAKRAEVET and not (user_input.get(k) or 0) > 0}
             if not fejl:
-                self.d.setdefault("tal", {}).update({k: v for k, v in user_input.items() if v is not None})
+                tal = self.d.setdefault("tal", {})
+                tal.update({k: v for k, v in user_input.items() if v is not None})
+                if str(self.d.get("kanal")).startswith("huawei"):
+                    tal.update({a: round(tal[w] / HUAWEI_V) for a, w in A_FRA_W.items() if (tal.get(w) or 0) > 0})
                 return await naeste()
         return self.async_show_form(step_id=trin, data_schema=self._tal_skema(trin), errors=fejl)
 
@@ -234,7 +280,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         omdoeb = self.d.pop("omdoeb", None) or {}
         try:
             kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, self.d["kanal"],
-                                                     self.d["prefix"], self.d.get("inverter2"), VERSION)
+                                                     self.d["prefix"], self.d.get("inverter2"), VERSION, self.d.get("ekstra"))
         except installer.InstallFejl as e:
             return self.async_abort(reason="install_fejl", description_placeholders={"fejl": str(e)})
         res = await async_check_ha_config_file(hass)

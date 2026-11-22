@@ -10,7 +10,20 @@ import time
 from pathlib import Path
 
 PAYLOAD = Path(__file__).parent / "payload"
-KANALER = {"deye": ("deye_solarman", "min_inverter"), "sunmate": ("sunmate", "min_sunmate")}
+KANALER = {"deye": ("deye_solarman", "min_inverter"), "sunmate": ("sunmate", "min_sunmate"), "huawei": ("huawei", "min_huawei"),
+           "huawei_emma": ("huawei_emma", "min_huawei")}
+# Kanaler med flere enheder: pladsholdere ud over hoved-prefixet, som opsætningen skal udfylde (ekstra = {pladsholder: prefix}).
+# "prefix|_2" betyder prefix + endelse efter navnet (EMMA's eksterne måler har samme navne som den indbyggede + "_2").
+EKSTRA = {"huawei": ("min_luna", "min_hmaaler"), "huawei_emma": ("min_luna", "min_hmaaler", "min_emma")}
+EKSTRA_RE = re.compile(r"[a-z0-9_]+(\|_\d+)?")
+
+
+def _erstat(tekst: str, plads: str, ny: str) -> str:
+    """pladsholder_navn → prefix_navn (eller prefix_navn_2, når ny er "prefix|_2")."""
+    prefix, _, endelse = ny.partition("|")
+    if not endelse:
+        return tekst.replace(f"{plads}_", f"{prefix}_")
+    return re.sub(rf"\b{plads}_([a-z0-9_]*)", lambda m: f"{prefix}_{m.group(1)}{endelse if m.group(1) else ''}", tekst)
 PKG_RE = re.compile(r"^[ \t]*packages:[ \t]*!include_dir_(?:merge_)?named[ \t]+[\"']?([^\"'#\s]+)", re.M)
 PACKAGES_LINJE = "packages: !include_dir_named packages"
 
@@ -63,14 +76,16 @@ def anden_styring(config_dir: str, pkg_rel: str | None) -> str | None:
     return None
 
 
-def entiteter_i_kanal(kanal: str, prefix: str) -> list[str]:
-    """Alle inverter-entiteter, som styrekanalen (efter prefix) læser eller skriver."""
+def entiteter_i_kanal(kanal: str, prefix: str, ekstra: dict | None = None) -> list[str]:
+    """Alle inverter-entiteter, som styrekanalen (efter prefix og evt. ekstra prefixer) læser eller skriver."""
     mappe, std = KANALER[kanal]
     ids: set[str] = set()
     for f in (PAYLOAD / "styrekanaler" / mappe).glob("*.yaml"):
-        for m in re.finditer(rf"\b(sensor|binary_sensor|switch|number|select|button)\.{std}_([a-z0-9_]+)", f.read_text(encoding="utf-8")):
-            if not m.group(2).endswith("_"):  # "program_' ~ p ~ '_power" er et navn, der bygges i skabelonen
-                ids.add(f"{m.group(1)}.{prefix}_{m.group(2)}")
+        tekst = f.read_text(encoding="utf-8")
+        for plads, ny in {std: prefix, **(ekstra or {})}.items():
+            for m in re.finditer(rf"\b(sensor|binary_sensor|switch|number|select|button)\.{plads}_([a-z0-9_]+)", tekst):
+                if not m.group(2).endswith("_"):  # "program_' ~ p ~ '_power" er et navn, der bygges i skabelonen
+                    ids.add(m.group(1) + "." + _erstat(f"{plads}_{m.group(2)}", plads, ny))
     return sorted(ids)
 
 
@@ -81,8 +96,11 @@ def _flyt(src: Path, backup: Path, navn: str, flyttet: list) -> None:
         flyttet.append((backup / navn, src))
 
 
-def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, version: str) -> dict:
+def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, version: str, ekstra: dict | None = None) -> dict:
     """Kopierer alt på plads. Returnerer en kvittering, som rul_tilbage() kan bruge."""
+    ekstra = ekstra or {}
+    if set(ekstra) != set(EKSTRA.get(kanal, ())) or not all(EKSTRA_RE.fullmatch(v or "") for v in ekstra.values()):
+        raise InstallFejl("styrekanalens enheder (batteri og elmåler) mangler – fjern Wattlas og sæt det op igen")
     cfg = Path(config_dir)
     conf = cfg / "configuration.yaml"
     gammel_conf = conf.read_text(encoding="utf-8")
@@ -111,9 +129,13 @@ def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, versi
         shutil.copytree(PAYLOAD / "www", cfg / "www" / "wattlas")
         shutil.copytree(PAYLOAD / "dashboards", cfg / "wattlas" / "dashboards")
 
-        if prefix != std:
+        erstat = {std: prefix, **ekstra}
+        if any(plads != ny for plads, ny in erstat.items()):
             for f in (pkg / "wattlas_kanal").glob("*.yaml"):
-                f.write_text(f.read_text(encoding="utf-8").replace(f"{std}_", f"{prefix}_"), encoding="utf-8")
+                t = f.read_text(encoding="utf-8")
+                for plads, ny in erstat.items():
+                    t = _erstat(t, plads, ny)
+                f.write_text(t, encoding="utf-8")
         ds = cfg / "wattlas" / "dashboards"
         styr = (ds / "wattlas_styring.yaml").read_text(encoding="utf-8")
         energi = (ds / "wattlas.yaml").read_text(encoding="utf-8")

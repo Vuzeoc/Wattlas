@@ -31,7 +31,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if d.get("version") != VERSION:  # ny version fra markedspladsen: læg de nye filer på plads
         try:
             kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, d["kanal"], d["prefix"],
-                                                     d.get("inverter2"), VERSION)
+                                                     d.get("inverter2"), VERSION, d.get("ekstra"))
             res = await async_check_ha_config_file(hass)
             if res.errors:  # den nye version passer ikke til denne HA: læg den gamle tilbage
                 await hass.async_add_executor_job(installer.rul_tilbage, kvit)

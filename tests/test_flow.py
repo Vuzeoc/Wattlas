@@ -203,4 +203,79 @@ async def main():
     print('C fjernelse uden svar fra inverteren: OK')
     await hass.async_stop(force=True)
 
+    # D: Huawei – tre enheder, A-grænser udregnes fra W, og en opdatering bruger de samme enheder
+    hass, cfg = await ny_hass('default_config:\n')
+    for e in ('sensor.inverter_input_power', 'sensor.batteries_state_of_capacity', 'sensor.power_meter_active_power'):
+        hass.states.async_set(e, '0')
+    fm = hass.config_entries.flow
+    r = await fm.async_init('wattlas', context={'source': 'user'})
+    r = await fm.async_configure(r['flow_id'], {'kanal': 'huawei'})
+    r = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.inverter_input_power', 'inverter2': False})
+    assert r['step_id'] == 'huawei', r
+    fejl = await fm.async_configure(r['flow_id'], {'batteri': 'sensor.power_meter_active_power', 'maaler': 'sensor.power_meter_active_power'})
+    assert fejl['errors'] == {'batteri': 'forkert_entitet'}, fejl
+    r = await fm.async_configure(r['flow_id'], {'batteri': 'sensor.batteries_state_of_capacity', 'maaler': 'sensor.power_meter_active_power'})
+    assert r['step_id'] == 'tjek', r
+    assert 'number.batteries_maximum_discharging_power' in r['description_placeholders']['liste'] or 'entiteter' in r['description_placeholders']['liste']
+    r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
+    r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
+                                               'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    assert r['step_id'] == 'batteri' and not any(str(k).endswith('_a') for k in r['data_schema'].schema), 'Huawei spørges ikke om A'
+    hb = {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')}
+    r = await fm.async_configure(r['flow_id'], hb)
+    for t in ('elnet', 'priser'):
+        r = await fm.async_configure(r['flow_id'], TAL[t])
+    assert r['type'] == 'create_entry', r
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    assert entry.data['ekstra'] == {'min_luna': 'batteries', 'min_hmaaler': 'power_meter'}, entry.data
+    assert entry.data['tal']['maks_ladestroem_a'] == 200 and entry.data['tal']['maks_netladestroem_a'] == 120  # 10000/50, 6000/50
+    kanal = (cfg / 'packages/wattlas_kanal/wattlas_kanal_huawei.yaml').read_text(encoding='utf-8')
+    assert 'sensor.batteries_state_of_capacity' in kanal and 'min_luna_' not in kanal
+    print('D Huawei: OK')
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+    entry = await genindlaes(hass, genstart=True)
+    assert issue(hass, 'opdatering_fejlede') is None, 'opdateringen skal kende batteri og elmåler'
+    assert entry.data['version'] != '0.0.1' and 'sensor.power_meter_active_power' in \
+        (cfg / 'packages/wattlas_kanal/emhass_maalinger.yaml').read_text(encoding='utf-8')
+    print('D Huawei opdatering: OK')
+    await hass.async_stop(force=True)
+
+    # E: Huawei med EMMA (ekstern måler = "_2") – opsætning og opdatering
+    hass, cfg = await ny_hass('default_config:\n')
+    for e in ('sensor.inverter_input_power', 'sensor.batteries_state_of_capacity', 'sensor.emma_feed_in_power',
+              'sensor.emma_phase_a_active_power_2'):
+        hass.states.async_set(e, '0')
+    fm = hass.config_entries.flow
+    r = await fm.async_init('wattlas', context={'source': 'user'})
+    r = await fm.async_configure(r['flow_id'], {'kanal': 'huawei'})
+    r = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.inverter_input_power', 'inverter2': False})
+    assert r['step_id'] == 'huawei', r
+    fejl = await fm.async_configure(r['flow_id'], {'elmaaler': 'emma', 'batteri': 'sensor.batteries_state_of_capacity',
+                                                   'maaler': 'sensor.emma_feed_in_power'})
+    assert fejl['errors'] == {'maaler': 'forkert_maaler'}, fejl
+    r = await fm.async_configure(r['flow_id'], {'elmaaler': 'emma', 'batteri': 'sensor.batteries_state_of_capacity',
+                                                'maaler': 'sensor.emma_phase_a_active_power_2'})
+    assert r['step_id'] == 'tjek', r
+    r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
+    r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
+                                               'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    assert r['step_id'] == 'batteri' and not any(str(k).endswith('_a') for k in r['data_schema'].schema), 'EMMA spørges ikke om A'
+    r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
+    for t in ('elnet', 'priser'):
+        r = await fm.async_configure(r['flow_id'], TAL[t])
+    assert r['type'] == 'create_entry', r
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    assert entry.data['kanal'] == 'huawei_emma' and entry.data['ekstra'] == {'min_luna': 'batteries', 'min_hmaaler': 'emma|_2', 'min_emma': 'emma'}, entry.data
+    assert entry.data['tal']['maks_ladestroem_a'] == 200
+    assert 'sensor.emma_phase_a_active_power_2' in (cfg / 'packages/wattlas_kanal/emhass_maalinger.yaml').read_text(encoding='utf-8')
+    print('E Huawei med EMMA: OK')
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+    entry = await genindlaes(hass, genstart=True)
+    assert issue(hass, 'opdatering_fejlede') is None and entry.data['version'] != '0.0.1'
+    assert "device_id('sensor.emma_feed_in_power')" in (cfg / 'packages/wattlas_kanal/wattlas_kanal_huawei.yaml').read_text(encoding='utf-8')
+    print('E Huawei med EMMA opdatering: OK')
+    await hass.async_stop(force=True)
+
 asyncio.run(main())

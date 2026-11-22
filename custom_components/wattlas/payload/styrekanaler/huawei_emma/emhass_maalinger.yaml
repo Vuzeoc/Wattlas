@@ -1,0 +1,320 @@
+# Wattlas styrekanal – Huawei: målinger fra Huawei Solar (inverter min_huawei_*, batterier min_luna_*, elmåler min_hmaaler_*).
+# Fortegn til kernen: net positiv = køb, batteri positiv = afladning. Huawei bruger det modsatte: elmåleren er positiv
+# ved salg til nettet (Huaweis Modbus-dokumentation, register 37113 og 37132–37136), batteriet positivt ved ladning.
+# Fasetallene er nettets udveksling pr. fase ved elmåleren (inkl. batteriets egen ladning) – det, fasegrænsen skal bruge.
+# Batterispændingen er kanalens faste beregningsspænding på 50 V (se wattlas_kanal_huawei.yaml).
+# Huawei Solar læser hvert 30. sekund.
+template:
+- triggers:
+  - trigger: time_pattern
+    seconds: /10
+  - trigger: homeassistant
+    event: start
+  actions:
+  - variables:
+      sample: |-
+        {% set t = as_timestamp(now()) %}
+        {% set status = states('sensor.min_huawei_device_status') %}
+        {% set normal = status.startswith('On-grid') or status.startswith('Grid Connection') or status.startswith('Grid scheduling')
+           or status in ['Standby: no irradiation', 'Shutdown: ESS end-of-discharge'] %}
+        {# batteritemperatur: højeste BMS-temperatur fra Battery 1/2 (slået fra som standard i Huawei Solar – valgfri) #}
+        {% set bt = ['sensor.battery_1_bms_temperature', 'sensor.battery_2_bms_temperature'] | map('states') | select('is_number') | map('float') | list %}
+        {% set m = dict(
+          load_w_totalpower = states('sensor.wattlas_huawei_husforbrug'),
+          grid_out_total_power = -(states('sensor.min_emma_feed_in_power') | float(0)),
+          battery_output_w_power = -(states('sensor.min_luna_charge_discharge_power') | float(0)),
+          battery_soc = states('sensor.min_luna_state_of_capacity'),
+          battery_voltage = 50,
+          inverter_status = 'Normal' if normal else status,
+          battery_temperature = (bt | max) if bt else 'unavailable',
+          inverter_temperature = states('sensor.min_huawei_internal_temperature'),
+          external_ct_w_l1 = -(states('sensor.min_hmaaler_phase_a_active_power') | float(0)),
+          external_ct_w_l2 = -(states('sensor.min_hmaaler_phase_b_active_power') | float(0)),
+          external_ct_w_l3 = -(states('sensor.min_hmaaler_phase_c_active_power') | float(0)),
+          grid_current_v_l1 = states('sensor.min_hmaaler_phase_a_voltage'),
+          grid_current_v_l2 = states('sensor.min_hmaaler_phase_b_voltage'),
+          grid_current_v_l3 = states('sensor.min_hmaaler_phase_c_voltage')) %}
+        {% set kilder = ['sensor.min_emma_feed_in_power', 'sensor.min_luna_charge_discharge_power', 'sensor.min_luna_state_of_capacity',
+                         'sensor.min_emma_load_power', 'sensor.min_emma_pv_output_power', 'sensor.min_hmaaler_phase_a_active_power', 'sensor.min_hmaaler_phase_b_active_power',
+                         'sensor.min_hmaaler_phase_c_active_power', 'sensor.min_hmaaler_phase_a_voltage', 'sensor.min_hmaaler_phase_b_voltage',
+                         'sensor.min_hmaaler_phase_c_voltage'] %}
+        {% set ns = namespace(ok=has_value('sensor.min_huawei_device_status'), aeldst=t) %}
+        {% for e in kilder %}
+          {% set s = states[e] %}
+          {% if s is none or not is_number(s.state) %}{% set ns.ok = false %}
+          {% else %}{% set ns.aeldst = [ns.aeldst, as_timestamp(s.last_reported, 0)] | min %}{% endif %}
+        {% endfor %}
+        {# Regnestykke-tjek (fortegnene for EMMA er ikke dokumenteret): sol − batteriets ladning − salg = husforbrug, og
+           faserne skal tilsammen give salget. Passer det ikke, bruges målingerne ikke, og Wattlas styrer ikke. #}
+        {% set f = states('sensor.min_emma_feed_in_power') | float(0) %}
+        {% set pv = states('sensor.min_emma_pv_output_power') | float(0) %}
+        {% set hus = states('sensor.min_emma_load_power') | float(0) %}
+        {% set b = states('sensor.min_luna_charge_discharge_power') | float(0) %}
+        {% set fs = ['sensor.min_hmaaler_phase_a_active_power', 'sensor.min_hmaaler_phase_b_active_power',
+                     'sensor.min_hmaaler_phase_c_active_power'] | map('states') | map('float', 0) | sum %}
+        {% set balance_ok = (pv - b - f - hus) | abs <= 300 + 0.15 * (pv + hus) and (fs - f) | abs <= 300 + 0.1 * (f | abs) %}
+        {# Blokér først, når det har fejlet i 2 min i træk: Huawei Solar læser inverter, batteri og måler hver for sig
+           (hvert 30. s, ikke samtidig), så et enkelt skævt øjeblik er normalt. Et forkert fortegn varer ved. #}
+        {% set fejl_siden = 0 if balance_ok else (state_attr('sensor.emhass_maalekilde', 'balance_fejl_siden') | float(0) or t) %}
+        {% set ok = ns.ok and (balance_ok or t - fejl_siden < 120) and 0 <= t - ns.aeldst <= 90 %}
+        {% set tider = namespace(d={}) %}
+        {% for k in m %}{% set tider.d = dict(tider.d, **{k: ns.aeldst}) %}{% endfor %}
+        {{ dict(source=('Huawei' if ok else 'Ingen'), values=(m if ok else {}),
+                times=(tider.d if ok else {}), huawei_ok=ok, balance_ok=balance_ok, balance_fejl_siden=fejl_siden, time=t) }}
+  sensor:
+  - name: EMHASS målekilde
+    unique_id: emhass_maalekilde
+    default_entity_id: sensor.emhass_maalekilde
+    state: '{{ sample.source }}'
+    attributes:
+      values: '{{ sample[''values''] }}'
+      raw_reported: '{{ sample[''times''] }}'
+      huawei_ok: '{{ sample[''huawei_ok''] }}'
+      balance_ok: '{{ sample[''balance_ok''] }}'
+      balance_fejl_siden: '{{ sample[''balance_fejl_siden''] }}'
+      sample_time: '{{ sample[''time''] }}'
+- sensor:
+  - name: EMHASS måling load_w_totalpower
+    unique_id: emhass_m_load_w_totalpower
+    default_entity_id: sensor.emhass_m_load_w_totalpower
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''load_w_totalpower'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_out_total_power
+    unique_id: emhass_m_grid_out_total_power
+    default_entity_id: sensor.emhass_m_grid_out_total_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_out_total_power'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_output_w_power
+    unique_id: emhass_m_battery_output_w_power
+    default_entity_id: sensor.emhass_m_battery_output_w_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_output_w_power'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_soc
+    unique_id: emhass_m_battery_soc
+    default_entity_id: sensor.emhass_m_battery_soc
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_soc'',0)
+        }}'
+    unit_of_measurement: '%'
+    device_class: battery
+    state_class: measurement
+  - name: EMHASS måling battery_voltage
+    unique_id: emhass_m_battery_voltage
+    default_entity_id: sensor.emhass_m_battery_voltage
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_voltage'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling inverter_status
+    unique_id: emhass_m_inverter_status
+    default_entity_id: sensor.emhass_m_inverter_status
+    state: '{% set v=(state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'')
+      %}{{ ''Normal'' if v|lower==''normal'' else v }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'') not
+      in [''unknown'',''unavailable''] }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''inverter_status'',0)
+        }}'
+  - name: EMHASS måling battery_temperature
+    unique_id: emhass_m_battery_temperature
+    default_entity_id: sensor.emhass_m_battery_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_temperature'',0)
+        }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling inverter_temperature
+    unique_id: emhass_m_inverter_temperature
+    default_entity_id: sensor.emhass_m_inverter_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''inverter_temperature'',0)
+        }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l1
+    unique_id: emhass_m_external_ct_w_l1
+    default_entity_id: sensor.emhass_m_external_ct_w_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l1'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l1
+    unique_id: emhass_m_grid_current_v_l1
+    default_entity_id: sensor.emhass_m_grid_current_v_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l1'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l2
+    unique_id: emhass_m_external_ct_w_l2
+    default_entity_id: sensor.emhass_m_external_ct_w_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l2'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l2
+    unique_id: emhass_m_grid_current_v_l2
+    default_entity_id: sensor.emhass_m_grid_current_v_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l2'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l3
+    unique_id: emhass_m_external_ct_w_l3
+    default_entity_id: sensor.emhass_m_external_ct_w_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l3'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l3
+    unique_id: emhass_m_grid_current_v_l3
+    default_entity_id: sensor.emhass_m_grid_current_v_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Huawei''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l3'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  binary_sensor:
+  - name: EMHASS styrekanal (Huawei)
+    unique_id: emhass_styrekanal_ok
+    default_entity_id: binary_sensor.emhass_styrekanal_ok
+    state: |-
+      {% set t=as_timestamp(now()) %}
+      {% set ns=namespace(ok=true) %}
+      {% for e in ['number.min_luna_maximum_charging_power','number.min_luna_maximum_discharging_power'] %}
+       {% if not is_number(states(e)) or not is_number(state_attr(e,'max')) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {% for i in range(1,7) %}
+       {% for suffix in ['soc','power'] %}
+       {% if not is_number(states('number.wattlas_program_'~i~'_'~suffix)) %}{% set ns.ok=false %}{% endif %}
+       {% endfor %}
+       {% if not has_value('switch.emhass_netladning_p'~i) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {{ ns.ok and is_state_attr('sensor.emhass_maalekilde','huawei_ok',true)
+       and 0<=t-(state_attr('sensor.emhass_maalekilde','sample_time')|float(0))<=90
+       and has_value('sensor.min_huawei_device_status')
+       and has_value('switch.min_luna_charge_from_grid')
+       and states('select.min_emma_ess_control_mode') in ['maximum_self_consumption', 'third_party_dispatch']
+       and device_id('sensor.min_luna_state_of_capacity') is not none
+       and device_id('sensor.min_huawei_input_power') is not none }}
+  - name: EMHASS mangler inverterstyring
+    unique_id: emhass_ui_styrekanalfejl
+    default_entity_id: binary_sensor.emhass_ui_styrekanalfejl
+    state: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') and not is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
+      }}'
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 30
+    attributes:
+      forklaring: Huawei-styrekanalen er ikke klar – målinger, skriveadgang (Huawei Solar med elevate permissions),
+        batteriets indstillinger mangler, EMMA's ESS Control Mode er forkert, eller regnestykket mellem sol, batteri,
+        salg og husforbrug passer ikke (fortegn). Netopladning er forsøgt stoppet; faktisk inverterdrift skal kontrolleres.

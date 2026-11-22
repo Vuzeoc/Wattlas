@@ -2,6 +2,22 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.3.0
+- **Ny styrekanal: Huawei** – SUN2000 (hybrid) med LUNA2000-batteri og Huawei-elmåler via [Huawei Solar](https://github.com/wlcrs/huawei_solar).
+  Netladning i de billige timer (i 10 minutter ad gangen, så ladningen stopper af sig selv, hvis Home Assistant går ned),
+  *gem batteriet* via batteriets afladeeffekt, stop af solsalg og fasegrænse fra elmåleren. Testet mod en simuleret Huawei,
+  **ikke kørt i drift endnu** – se [STYREKANALER.md](docs/STYREKANALER.md)
+- Opsætningen spørger efter batteri og elmåler for Huawei og regner selv strømgrænserne ud fra effekterne
+- **Huawei med EMMA:** elmåler, husforbrug og salgsloft fra EMMA (indbygget eller ekstern måler). Eksperimentel, ikke kørt i drift endnu
+- **Regnestykke-tjek for Huawei:** passer sol, batteri, salg og forbrug ikke sammen i 2 minutter (fx et forkert fortegn), styrer Wattlas ikke
+- Huawei: når Wattlas holder op med at styre, får batteriet din egen afladeeffekt tilbage, og et stoppet solsalg startes igen. Strømgrænserne følger effekt-indstillingerne
+- App: batteriets tekst i live-billedet ligger ikke længere oven i strømkurven; knapperne under *Fleksibel forbruger*
+  (og andre +/− og kontakter) viser den nye værdi med det samme; effekt og timer er forklaret; "Push til mobilen"
+- **Styring (alle invertere):** netladestrømmen sænkes nu med det samme, når fasegrænsen eller importloftet kræver det.
+  Før kunne den blive liggende op til 5 A (ca. 250 W) over for at spare skrivninger til inverteren
+- `install.sh` henter seneste udgivelse i stedet for den nyeste kode
+- Wattlas' egne tests kører nu automatisk på GitHub, også en ny test af fasegrænse, importloft og ladestrøm
+
 ## 0.2.2
 - **Rettet:** på telefonen kunne siden hoppe op til toppen, mens man rullede, fordi appen byggede sig selv om hvert 5. sekund. Nu bygges den kun om, når noget faktisk er ændret, og rullepositionen holdes fast
 - En ekstra inverter, der slukker om natten, vises som *Sover – for lidt lys* i stedet for en tabel med "unavailable". Svarer den ikke, mens der er sol på hovedanlægget, vises en advarsel

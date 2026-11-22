@@ -658,8 +658,8 @@ script:
           {% set step=state_attr('number.wattlas_netladestroem','step')|float(1) %}
           {% set target=[states('input_number.wattlas_maks_netladestroem_a')|float(0),installed,register_max,current+10,((ladebudget_w|float)*0.95/v)|round(0,'floor')]|min if 45<=v<=58 else 0 %}
           {% set ny=((target/step)|round(0,'floor')*step) if step>0 else 0 %}
-          {# færre skrivninger: 5 A er ca. 260 W #}
-          {{ current if current>0 and ny>0 and (0<=ny-current<10 or 0<current-ny<5) else ny }}
+          {# færre skrivninger på vej op; ned går det med det samme, så fasegrænsen og importloftet holder #}
+          {{ current if current>0 and ny>0 and 0<=ny-current<10 else ny }}
         netladning: "{{ is_state('binary_sensor.wattlas_pv_maaling_ok', 'on')\
           \ and p_batt < -150 and p_net > 150 and fase_ok and ladeamp | float >= 5 and (fuld_aktiv or ts == 'lad' or not is_state('switch.wattlas_netladning','off') or (now() - states.switch.wattlas_netladning.last_changed).total_seconds() >= 600)\n   and 45 <= states('sensor.emhass_m_battery_voltage')\
           \ | float(0) <= 58\n   \n   and soc < ([100, ((maal / 5) | round(0,'ceil') * 5)] | min) }}"

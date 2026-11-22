@@ -1,4 +1,5 @@
 # Automatiske tjek, som Markedspladsens katalog kræver: HACS-tjekket og Home Assistants egen hassfest.
+# Plus Wattlas' egne tests (opsætning, opdatering, fjernelse og sikkerhedsregnestykkerne).
 name: Tjek
 
 on:
@@ -25,3 +26,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install homeassistant
+      - run: python tests/test_installer.py
+      - run: python tests/test_flow.py
+      - run: python tests/test_sikkerhed.py

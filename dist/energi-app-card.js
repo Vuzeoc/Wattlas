@@ -222,10 +222,10 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
           .forEach(([k, id]) => this._hass.callService('input_number', 'set_value', {entity_id: 'input_number.' + id, value: this._hh[k]})); return; }
       else if (a === 'num') { const [id, d] = v.split('|'), s = this.st(id); if (!s) return;
         const x = Math.max(s.attributes.min, Math.min(s.attributes.max, Math.round((parseFloat(s.state) + Number(d)) * 100) / 100));
-        this._hass.callService('input_number', 'set_value', {entity_id: id, value: x}); return; }
+        this._hass.callService('input_number', 'set_value', {entity_id: id, value: x}); this._last = 0; return; }
       else if (a === 'tog') { const s = this.st(v); if (!s) return;
         if (v === 'input_boolean.emhass_styring_aktiv' && !confirm(s.state === 'on' ? 'Stop Wattlas-styringen? Batteriet går i selvforbrug med 15 % reserve.' : 'Start Wattlas-styringen? EMHASS overtager inverterens tidsprogrammer.')) return;
-        this._hass.callService('input_boolean', 'toggle', {entity_id: v}); return; }
+        this._hass.callService('input_boolean', 'toggle', {entity_id: v}); this._last = 0; return; }
       this._last = 0; this._html = null; this._render();
       if (a === 'tab') window.scrollTo({top: 0}); // kun ved faneskift: tilbage til toppen (HA's topbjælke dækker ellers)
     }
@@ -349,9 +349,9 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         tx(560, 178, tjener != null ? `tjener ${nf(tjener, 2)} kr/kWh` : husK !== null ? `${nf(husK, 2)} kr/kWh` : '', C.hus, 'exb') +
         tx(560, 192, tjener == null && husS !== null ? `med slid ${nf(husS, 2)}` : '', C.hus) +
         anl.map(([n, v], k) => tx(398, 52 + 16 * k, v !== null ? `${esc(n)}  ${kw(Math.max(0, v))}` : '', C.sol, 'ex', 'start')).join('') +
-        tx(392, 384, bK !== null ? `${nf(bK, 1)} kWh over reserven` : '', C.bat, 'exb', 'start') +
-        tx(392, 400, [bV !== null ? nf(bV, 1) + ' V' : '', bT !== null ? nf(bT, 1) + ' °C' : '', batPris !== null ? nf(batPris, 2) + ' kr/kWh' : ''].filter(Boolean).join(' · '), 'var(--secondary-text-color)', 'ex', 'start') +
-        tx(392, 416, eta, C.bat, 'ex', 'start') +
+        tx(404, 410, bK !== null ? `${nf(bK, 1)} kWh over reserven` : '', C.bat, 'exb', 'start') +
+        tx(404, 426, [bV !== null && this.st('sensor.emhass_maalekilde')?.state !== 'Huawei' ? nf(bV, 1) + ' V' : '',  /* Huawei: kanalens beregningsspænding, ikke batteriets */ bT !== null ? nf(bT, 1) + ' °C' : '', batPris !== null ? nf(batPris, 2) + ' kr/kWh' : ''].filter(Boolean).join(' · '), 'var(--secondary-text-color)', 'ex', 'start') +
+        tx(404, 442, eta, C.bat, 'ex', 'start') +
         tx(330, 290, invT !== null ? `inverter ${nf(invT, 0)} °C` : '', 'var(--secondary-text-color)');
       const svg = `<svg viewBox="0 0 660 490" class="flow"><defs><radialGradient id="nodebg"><stop offset="0" stop-color="#16294a"/><stop offset="1" stop-color="#0a1426"/></radialGradient></defs>
         ${flows}
@@ -416,7 +416,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       const v = id => parseFloat(this.st(id)?.state);
       if (!this._hh) this._hh = {reserve: v('input_number.wattlas_reserve') || 15, slut_soc: v('input_number.wattlas_slut_soc') || 30,
         max_net_kw: v('input_number.wattlas_max_net_kw') || (v('input_number.wattlas_maks_netimport_w') || 0) / 1000, slid: v('input_number.wattlas_slid') ?? 0.25, forbruger: false};
-      const H = this._hh, status = this.st('input_text.wattlas_hvadhvis_status')?.state || '', koerer = this.st('script.wattlas_hvadhvis')?.state === 'on' || status.startsWith('beregner');
+      const H = this._hh, status = (this.st('input_text.wattlas_hvadhvis_status')?.state || '').replace(/^(unknown|unavailable)$/, ''), koerer = this.st('script.wattlas_hvadhvis')?.state === 'on' || status.startsWith('beregner');
       const base = this.planKr('', v('input_number.wattlas_slid') || 0.25), alt = this.planKr('hh_', H.slid);
       const frisk = alt && status.startsWith('ok') && this._hhKoert;
       const row = (k, t, u, step, dec) => `<div class="set"><div><b>${t}</b></div><div class="stp"><button data-a="hhset" data-v="${k}|-${step}">−</button><em>${k === 'max_net_kw' && !H[k] ? 'ingen grænse' : nf(H[k], dec) + ' ' + u}</em><button data-a="hhset" data-v="${k}|${step}">+</button></div></div>`;
@@ -450,8 +450,8 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       return this.card('Fleksibel forbruger', `<p class="note" style="margin:0 0 8px">Wattlas lægger fx varmtvandsbeholder, pool eller elbil i de bedste timer (sol og pris). EMHASS planlægger kørslen sammen med batteriet, og en kontakt i HA tændes og slukkes efter planen. Uden frisk plan er kontakten slukket.</p>
         <div class="set"><div><b>Navn</b></div><input class="inp" data-set="text|input_text.wattlas_forbruger1_navn" value="${esc(v('input_text.wattlas_forbruger1_navn') || '')}" placeholder="fx Varmtvandsbeholder"></div>
         <div class="set"><div><b>Kontakt</b><span>${gyldig ? (es ? `nu: ${es.state}` : '<b style="color:#fb7185">findes ikke</b>') : 'switch.…, light.… eller input_boolean.…'}</span></div><input class="inp" data-set="text|input_text.wattlas_forbruger1_entitet" value="${esc(ent)}" placeholder="switch.varmtvand"></div>
-        ${'' /* effekt og timer */}<div class="set"><div><b>Effekt</b></div><div class="stp"><button data-a="num" data-v="input_number.wattlas_forbruger1_effekt|-100">−</button><em>${nf(parseFloat(v('input_number.wattlas_forbruger1_effekt')))} W</em><button data-a="num" data-v="input_number.wattlas_forbruger1_effekt|100">+</button></div></div>
-        <div class="set"><div><b>Timer pr. døgn</b><span>kørt ${nf(parseFloat(v('input_number.wattlas_forbruger1_koert')), 1)} t i denne periode</span></div><div class="stp"><button data-a="num" data-v="input_number.wattlas_forbruger1_timer|-0.5">−</button><em>${nf(parseFloat(v('input_number.wattlas_forbruger1_timer')), 1)} t</em><button data-a="num" data-v="input_number.wattlas_forbruger1_timer|0.5">+</button></div></div>
+        ${'' /* effekt og timer */}<div class="set"><div><b>Effekt</b><span>det, den bruger, når den kører (typeskilt), fx varmtvand 3000 W. Planen regner med præcis den effekt. Under 100 W planlægges den ikke</span></div><div class="stp"><button data-a="num" data-v="input_number.wattlas_forbruger1_effekt|-100">−</button><em>${nf(parseFloat(v('input_number.wattlas_forbruger1_effekt')))} W</em><button data-a="num" data-v="input_number.wattlas_forbruger1_effekt|100">+</button></div></div>
+        <div class="set"><div><b>Timer pr. døgn</b><span>inden færdig-tidspunktet · kørt ${nf(parseFloat(v('input_number.wattlas_forbruger1_koert')), 1)} t i denne periode</span></div><div class="stp"><button data-a="num" data-v="input_number.wattlas_forbruger1_timer|-0.5">−</button><em>${nf(parseFloat(v('input_number.wattlas_forbruger1_timer')), 1)} t</em><button data-a="num" data-v="input_number.wattlas_forbruger1_timer|0.5">+</button></div></div>
         <div class="set"><div><b>Skal være færdig kl.</b><span>ny periode starter her</span></div><input class="inp" type="time" data-set="time|input_datetime.wattlas_forbruger1_faerdig" value="${tid}"></div>
         <div class="set"><div><b>Wattlas styrer forbrugeren</b><span>${on ? (plan.length ? 'planlagt: ' + plan.map(kl).join(', ') : 'ingen kørsel i planen lige nu') : 'slået fra – prøv den i hvad-hvis først'}</span></div><button class="sw ${on ? 'on' : ''}" data-a="tog" data-v="input_boolean.wattlas_forbruger1_aktiv" ${gyldig && es ? '' : 'disabled'}><i></i></button></div>`, {icon: 'mdi:power-socket-eu'});
     }
@@ -489,7 +489,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         return `<li class="${a ? 'bad' : ''}"><ha-icon icon="${a ? 'mdi:alert-circle' : 'mdi:check-circle'}" style="color:${a ? C.err : C.ok}"></ha-icon><div><b>${n}</b>${a ? `<span>${esc(e.attributes.forklaring || '')}</span>` : ''}</div></li>`; }).join('');
       const nAl = ALARM.filter(([k]) => on('binary_sensor.emhass_ui_' + k)).length;
       const chip = (ok, t) => `<span class="pill ${ok ? 'ok' : 'err'}">● ${t}</span>`;
-      const forb = `<div class="chips">${chip(['Deye', 'Solarman', 'SunMate'].includes(s('sensor.emhass_maalekilde')?.state), 'Måling: ' + (s('sensor.emhass_maalekilde')?.state || '–'))}${chip(on('binary_sensor.emhass_ui_data_frisk'), 'Målekontrol')}
+      const forb = `<div class="chips">${chip(['Deye', 'Solarman', 'SunMate', 'Huawei'].includes(s('sensor.emhass_maalekilde')?.state), 'Måling: ' + (s('sensor.emhass_maalekilde')?.state || '–'))}${chip(on('binary_sensor.emhass_ui_data_frisk'), 'Målekontrol')}
         ${chip(on('binary_sensor.emhass_styrekanal_ok'), 'Inverterstyring')}${chip(['Frisk', 'Reserve'].includes(s('sensor.emhass_planvalg')?.state), 'Plan: ' + (s('sensor.emhass_planvalg')?.state || '–'))}
         ${chip(s('sensor.optim_status')?.state === 'Optimal', 'EMHASS: ' + (s('sensor.optim_status')?.state || '–'))}${chip(on('binary_sensor.wattlas_forbindelse'), 'Inverterforbindelse')}
         ${chip(on('input_boolean.emhass_har_overtaget'), 'Har overtaget')}${chip(on('input_boolean.emhass_opstart_klar'), 'Opstart klar')}</div>`;
@@ -504,8 +504,8 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         <tr><td>Seneste diagnose</td><td>${esc(s('sensor.emhass_diagnose_seneste')?.state || '–')}</td></tr></tbody></table>`;
       return `<div class="grid g2">${this.card(`Advarsler · ${nAl ? nAl + ' aktive' : 'alt OK'}`, `<ul class="alarm">${al}</ul>`, {icon: 'mdi:shield-alert-outline'})}
         <div class="stack">${this.card('Forbindelser og plan', forb, {icon: 'mdi:lan-connect'})}
-        ${this.card('Beskeder til telefonen', tog('input_boolean.emhass_ui_push', 'Push til iPhone', 'Advarsler sendes som push-besked') + tog('input_boolean.emhass_ui_recovery', 'Besked når det er normalt igen', '') +
-          `<p class="note">Seneste: ${esc(s('input_text.emhass_ui_seneste_besked')?.state || '–')}</p><div class="toolbar">${knap('emhass_ui_test_besked', 'Send testbesked')}${knap('emhass_diagnose_log', 'Gem diagnose nu')}${knap('emhass_test_helios', 'Beregn ny plan nu')}</div>`, {icon: 'mdi:cellphone-message'})}
+        ${this.card('Beskeder til telefonen', tog('input_boolean.emhass_ui_push', 'Push til mobilen', 'Advarsler sendes som push-besked til mobilen') + tog('input_boolean.emhass_ui_recovery', 'Besked når det er normalt igen', '') +
+          `<p class="note">Seneste: ${esc((s('input_text.emhass_ui_seneste_besked')?.state || '').replace(/^(unknown|unavailable)$/, '') || 'ingen endnu')}</p><div class="toolbar">${knap('emhass_ui_test_besked', 'Send testbesked')}${knap('emhass_diagnose_log', 'Gem diagnose nu')}${knap('emhass_test_helios', 'Beregn ny plan nu')}</div>`, {icon: 'mdi:cellphone-message'})}
         ${this.card('Teknik i styringen', per, {icon: 'mdi:cog-outline'})}</div></div>`;
     }
 

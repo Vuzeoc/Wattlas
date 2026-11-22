@@ -9,7 +9,7 @@
 # installerer resten. Kør scriptet igen for at opdatere til en nyere udgave.
 #
 # Valg: --kilde <mappe|fil.tar.gz> (installér fra en lokal kopi), --config <mappe> (standard /config).
-# Miljø: WATTLAS_VERSION (et tag, fx v0.2.2). Uden den hentes nyeste udgave fra main.
+# Miljø: WATTLAS_VERSION (et tag, fx v0.2.2). Uden den hentes seneste udgivelse.
 set -eu
 
 VERSION="${WATTLAS_VERSION:-}"
@@ -24,7 +24,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --kilde) [ $# -ge 2 ] || brug; KILDE="$2"; shift ;;
     --config) [ $# -ge 2 ] || brug; CONFIG="$2"; shift ;;
-    deye|sunmate|--prefix|--inverter2*)
+    deye|sunmate|huawei|--prefix|--inverter2*)
       fejl "Inverter, prefix og ekstra inverter vælges nu i opsætningen (Tilføj integration → Wattlas). Kør scriptet uden de valg." ;;
     -h|--help) brug ;;
     *) echo "Ukendt valg: $1" >&2; brug ;;
@@ -45,8 +45,13 @@ else
     [ -f "$KILDE" ] || fejl "Fandt ikke $KILDE."
     cp "$KILDE" "$ARKIV"
   else
-    if [ -n "$VERSION" ]; then URL="https://github.com/$REPO/archive/refs/tags/$VERSION.tar.gz"
-    else URL="https://github.com/$REPO/archive/refs/heads/main.tar.gz"; fi
+    if [ -z "$VERSION" ]; then  # seneste udgivelse – ikke main, som kan indeholde kode, der ikke er udgivet endnu
+      SENESTE="https://github.com/$REPO/releases/latest"  # sender videre til …/releases/tag/vX.Y.Z
+      if command -v curl >/dev/null 2>&1; then VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$SENESTE" | sed -n 's#.*/tag/##p')
+      else VERSION=$(wget -q -S --spider "$SENESTE" 2>&1 | sed -n 's#.*[Ll]ocation: .*/tag/##p' | tail -n 1 | tr -d '\r'); fi
+    fi
+    case "$VERSION" in ""|*[!A-Za-z0-9._-]*) fejl "Kunne ikke finde seneste udgivelse. Sæt WATTLAS_VERSION, fx WATTLAS_VERSION=v0.3.0." ;; esac
+    URL="https://github.com/$REPO/archive/refs/tags/$VERSION.tar.gz"
     echo "Henter $URL"
     if command -v curl >/dev/null 2>&1; then curl -fsSL "$URL" -o "$ARKIV" || fejl "Kunne ikke hente $URL"
     else wget -q "$URL" -O "$ARKIV" || fejl "Kunne ikke hente $URL"; fi
