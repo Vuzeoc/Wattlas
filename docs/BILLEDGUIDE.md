@@ -109,6 +109,9 @@ med, at batteriet lader fra nettet. Er du i tvivl, så spørg din elinstallatør
 Netselskabets tariffer (lav, høj og spids), elafgiften og evt. elselskabets tillæg og gebyrer. De står på din
 elregning eller netselskabets hjemmeside. Felter mærket *valgfri* kan stå tomme.
 
+**Batterislid** er forudfyldt med 0,25 kr. pr. kWh. Regn gerne dit eget tal: batteriets pris / (kapacitet × cykler).
+Sæt den ikke til 0 – så regner planen batteriet som gratis at bruge. (Feltet er nyt og er ikke med på billedet endnu.)
+
 ![Priser](billeder/installation/11-priser.jpg)
 
 ## 9. Færdig – genstart
@@ -163,5 +166,5 @@ Herfra: se [BRUG.md](BRUG.md) for, hvordan du bruger Wattlas i hverdagen.
 
 **Fjerne Wattlas:** Indstillinger → Enheder og tjenester → Wattlas → ⋮ → Slet. Wattlas slår selv styringen fra og sætter
 inverteren til selvforbrug (det kan tage op til et minut). Tryk derefter *Genstart* under **Reparationer**. Filerne
-flyttes til `/config/wattlas_backup_<tidspunkt>/` (de 3 nyeste backup-mapper gemmes). Tjek bagefter inverterens
+flyttes til `/config/wattlas_backup_<tidspunkt>/` (ældre backup-mapper ryddes ved næste installation, så de 3 nyeste gemmes). Tjek bagefter inverterens
 tidsprogrammer.

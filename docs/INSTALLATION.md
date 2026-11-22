@@ -27,7 +27,7 @@ Markedspladsen; Wattlas lægger selv de nye filer på plads og beder om en genst
 version tilbage, og der står en besked under *Reparationer*.
 
 Fjernes integrationen, slår Wattlas først styringen fra (inverteren sættes til selvforbrug) og flytter derefter filerne til
-`/config/wattlas_backup_<tidspunkt>/`. Wattlas gemmer de 3 nyeste backup-mapper og sletter ældre.
+`/config/wattlas_backup_<tidspunkt>/`. Ved hver installation og opdatering beholder Wattlas de 3 nyeste backup-mapper og sletter ældre.
 
 **Uden Markedspladsen:** åbn app'en *Terminal & SSH*, og kør de to linjer nedenfor. Scriptet kopierer kun integrationen
 (`custom_components/wattlas`). Genstart derefter HA, og fortsæt fra trin 3 ovenfor. Kør det igen for at opdatere.
