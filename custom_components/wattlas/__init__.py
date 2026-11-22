@@ -26,6 +26,7 @@ STYRING = "input_boolean.emhass_styring_aktiv"
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     d = entry.data
+    opdateret = False
     if d.get("version") != VERSION:  # ny version fra markedspladsen: læg de nye filer på plads
         try:
             kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, d["kanal"], d["prefix"],
@@ -36,6 +37,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 raise RuntimeError("; ".join(str(e.message) for e in res.errors[:3]))
             hass.config_entries.async_update_entry(entry, data={**d, "version": VERSION})
             ir.async_delete_issue(hass, DOMAIN, "opdatering_fejlede")
+            opdateret = True
             ir.async_create_issue(hass, DOMAIN, "genstart", is_fixable=True, is_persistent=True,
                                   severity=ir.IssueSeverity.WARNING, translation_key="genstart")
         except Exception as e:  # filerne er rullet tilbage; den gamle version kører videre
@@ -50,7 +52,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         s = hass.states.get("binary_sensor.wattlas_konfigureret")
         if s is None or s.state in ("unavailable", "unknown"):
             return  # pakkerne er ikke indlæst endnu (genstart mangler); efter en afinstallation står den som "unavailable"
-        ir.async_delete_issue(hass, DOMAIN, "genstart")
+        if not opdateret:  # lige efter en opdatering kører de gamle pakker stadig i hukommelsen: genstarten mangler endnu
+            ir.async_delete_issue(hass, DOMAIN, "genstart")
         d = entry.data  # frisk: opdateringen ovenfor kan have skrevet en ny version
         if d.get("overfoert"):
             return  # ellers ville en indstilling, brugeren selv sætter til 0, blive sat tilbage ved hver genstart

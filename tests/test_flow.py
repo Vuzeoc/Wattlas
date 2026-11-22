@@ -133,13 +133,16 @@ async def main():
     ir.async_delete_issue(hass, 'wattlas', 'genstart')
     fil.write_text('# gammel\n', encoding='utf-8')
     hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+    fang_kald(hass)
+    hass.states.async_set('binary_sensor.wattlas_konfigureret', 'on')  # de gamle pakker kører stadig, mens der opdateres
     entry = await genindlaes(hass)
-    assert 'gammel' not in fil.read_text(encoding='utf-8') and issue(hass, 'genstart') is not None
+    assert 'gammel' not in fil.read_text(encoding='utf-8')
+    assert issue(hass, 'genstart') is not None, 'efter en opdatering skal brugeren bedes om at genstarte'
     assert entry.data['version'] == ny_version and list(cfg.glob('wattlas_backup_*/packages_wattlas'))
-    fang_kald(hass)  # efter genstarten: overførslen må ikke skrive den gamle version tilbage (ellers geninstalleres der ved hver start)
-    hass.states.async_set('binary_sensor.wattlas_konfigureret', 'on')
+    # efter genstarten: reparationen væk, ingen ny installation, og overførslen har ikke skrevet den gamle version tilbage
     backups = len(list(cfg.glob('wattlas_backup_*')))
     entry = await genindlaes(hass)
+    assert issue(hass, 'genstart') is None
     assert entry.data['version'] == ny_version and entry.data['overfoert'] and len(list(cfg.glob('wattlas_backup_*'))) == backups
     print('B opdatering: OK')
 
