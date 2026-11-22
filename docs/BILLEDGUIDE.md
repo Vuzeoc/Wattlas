@@ -35,10 +35,17 @@ genstart app'en. Skriv koden ned – du skal bruge den i trin 5.
 
 ## 1. Installér Wattlas fra Markedspladsen
 
-Indstillinger → **Markedsplads** → søg *Wattlas* → **Installér**. Genstart Home Assistant bagefter.
+Wattlas ligger endnu ikke i Markedspladsens katalog, så den tilføjes med et link:
 
-> Wattlas ligger endnu ikke i Markedspladsens katalog. Indtil da: Markedsplads → ⋮ → **Tilføj fra link** →
-> `https://github.com/Vuzeoc/wattlas`, type *Integration*. (Kræver at du har koblet en GitHub-konto til Markedspladsen.)
+1. Indstillinger → **Markedsplads** → ⋮ → **Tilføj fra link**.
+2. Indsæt `https://github.com/Vuzeoc/wattlas`, og vælg typen *Integration*.
+3. **Første gang** beder Markedspladsen dig forbinde en GitHub-konto. En gratis konto er nok. Tryk *Fortsæt*, og indtast
+   koden, du får vist, på GitHubs side. Du skal aldrig skrive din GitHub-adgangskode i Home Assistant, og forbindelsen
+   læser kun offentlige oplysninger.
+4. Åbn linket igen, tryk **Installér**, og genstart Home Assistant.
+
+> Vil du ikke bruge en GitHub-konto, kan du lægge integrationen ind med to linjer i app'en *Terminal & SSH* – se
+> [INSTALLATION.md](INSTALLATION.md) under *Uden Markedspladsen*. Resten af guiden er den samme.
 
 ## 2. Tilføj integrationen
 

@@ -6,7 +6,8 @@
 
 1. **Tag en backup af HA** (Indstillinger → System → Sikkerhedskopier).
 2. **Markedsplads → Tilføj fra link** → `https://github.com/Vuzeoc/wattlas` (type: integration) → **Wattlas** → **Installér**,
-   og genstart Home Assistant.
+   og genstart Home Assistant. Første gang beder Markedspladsen dig forbinde en gratis GitHub-konto
+   (du får en kode, som indtastes på GitHubs side).
 3. **Indstillinger → Enheder og tjenester → Tilføj integration → Wattlas.** Opsætningen fører dig igennem:
    - **Inverter-type** (Deye eller SunMate) og **din inverter** (vælges på en liste). Ekstra inverter uden batteri kan slås til.
    - **Tjek af det, Wattlas skal bruge:** EMHASS-app'en, Energi Data Service, Workday, inverterens entiteter,
