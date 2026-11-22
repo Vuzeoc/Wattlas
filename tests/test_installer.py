@@ -55,8 +55,24 @@ try:
 except I.InstallFejl:
     pass
 assert not (e / 'config/packages/wattlas').exists()
+# Sonnen-kanalen: host og token sættes ind i styrekanalen, og manglende værdier stopper installationen
+s = ny('default_config:\n')
+try:
+    I.installer(str(s), 'sonnen', 'min_sonnen', None, 't'); raise SystemExit('burde kræve host og token')
+except I.InstallFejl:
+    pass
+assert not (s / 'packages/wattlas').exists(), 'fejl må ikke efterlade filer'
+I.installer(str(s), 'sonnen', 'min_sonnen', None, 't3', {'host': 'http://10.1.2.3', 'token': 'abc123'})
+sk = (s / 'packages/wattlas_kanal/wattlas_kanal_sonnen.yaml').read_text(encoding='utf-8')
+mk = (s / 'packages/wattlas_kanal/emhass_maalinger.yaml').read_text(encoding='utf-8')
+assert '__SONNEN_HOST__' not in sk and '__SONNEN_TOKEN__' not in sk and 'http://10.1.2.3' in sk and 'abc123' in sk
+assert '__SONNEN_HOST__' not in mk and '__SONNEN_TOKEN__' not in mk and 'http://10.1.2.3' in mk
+# andet prefix omdøber entiteterne uden at røre værts- og tokenfelterne
+I.installer(str(s), 'sonnen', 'mit_sonnen', None, 't4', {'host': 'http://10.1.2.3', 'token': 'abc123'})
+sk4 = (s / 'packages/wattlas_kanal/wattlas_kanal_sonnen.yaml').read_text(encoding='utf-8')
+assert 'sensor.min_sonnen_' not in sk4 and 'sensor.mit_sonnen_status' in sk4 and 'http://10.1.2.3' in sk4
 # afinstallation flytter til backup
 b = I.afinstaller(str(d))
 assert b and not (d / 'packages/wattlas').exists() and (pathlib.Path(b) / 'packages_wattlas').exists()
 print('installer: alle tjek OK')
-for x in (d, e): shutil.rmtree(x, ignore_errors=True)
+for x in (d, e, s): shutil.rmtree(x, ignore_errors=True)

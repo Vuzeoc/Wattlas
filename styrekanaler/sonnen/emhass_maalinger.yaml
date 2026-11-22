@@ -1,0 +1,354 @@
+# Wattlas styrekanal – SonnenBatterie: målinger fra batteriets lokale API v2.
+# Alle værdier læses med REST-sensorer (status, batterimåler, batteri, inverter og konfiguration) og
+# samles i sensor.emhass_maalekilde med alderstjek, ligesom de andre kanaler gør.
+# Fortegn: net positiv = køb (Sonnens GridFeedIn_W er negativ ved køb), batteri positiv = afladning
+# (Pac_total_W er allerede positiv ved afladning).
+# Per-fase: batteriet kan ikke aflæse netudveksling pr. fase. CT-feltet er husets forbrug pr. fase fra
+# batteriets egen måler (direction=consumption), og spændingerne pr. fase er læst samme sted.
+# Fase-tjekket i kernen bruger kun tallene og spændingsvinduet, så det passer.
+rest:
+- resource: "__SONNEN_HOST__/api/v2/status"
+  scan_interval: 5
+  timeout: 8
+  verify_ssl: false
+  headers:
+    Auth-Token: __SONNEN_TOKEN__
+  sensor:
+  - name: min_sonnen status
+    unique_id: min_sonnen_status
+    value_template: "{{ value_json.Consumption_W }}"
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    json_attributes:
+    - Production_W
+    - Consumption_W
+    - Pac_total_W
+    - GridFeedIn_W
+    - USOC
+    - Uac
+    - Ubat
+    - OperatingMode
+    - SystemStatus
+- resource: "__SONNEN_HOST__/api/v2/powermeter"
+  scan_interval: 15
+  timeout: 8
+  verify_ssl: false
+  headers:
+    Auth-Token: __SONNEN_TOKEN__
+  sensor:
+  - name: min_sonnen maaler w l1
+    unique_id: min_sonnen_maaler_w_l1
+    value_template: "{% set m = value_json | selectattr('direction','eq','consumption') | list %}{{ m[0].w_l1 if m else 'unavailable' }}"
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: min_sonnen maaler w l2
+    unique_id: min_sonnen_maaler_w_l2
+    value_template: "{% set m = value_json | selectattr('direction','eq','consumption') | list %}{{ m[0].w_l2 if m else 'unavailable' }}"
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: min_sonnen maaler w l3
+    unique_id: min_sonnen_maaler_w_l3
+    value_template: "{% set m = value_json | selectattr('direction','eq','consumption') | list %}{{ m[0].w_l3 if m else 'unavailable' }}"
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: min_sonnen maaler v l1
+    unique_id: min_sonnen_maaler_v_l1
+    value_template: "{% set m = value_json | selectattr('direction','eq','consumption') | list %}{{ m[0].v_l1_n if m else 'unavailable' }}"
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: min_sonnen maaler v l2
+    unique_id: min_sonnen_maaler_v_l2
+    value_template: "{% set m = value_json | selectattr('direction','eq','consumption') | list %}{{ m[0].v_l2_n if m else 'unavailable' }}"
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: min_sonnen maaler v l3
+    unique_id: min_sonnen_maaler_v_l3
+    value_template: "{% set m = value_json | selectattr('direction','eq','consumption') | list %}{{ m[0].v_l3_n if m else 'unavailable' }}"
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+- resource: "__SONNEN_HOST__/api/v2/battery"
+  scan_interval: 60
+  timeout: 8
+  verify_ssl: false
+  headers:
+    Auth-Token: __SONNEN_TOKEN__
+  sensor:
+  - name: min_sonnen batteri temperatur
+    unique_id: min_sonnen_batteri_temperatur
+    value_template: "{{ value_json.maximumcelltemperature if is_number(value_json.maximumcelltemperature) and value_json.maximumcelltemperature > -50 else 'unavailable' }}"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+- resource: "__SONNEN_HOST__/api/v2/inverter"
+  scan_interval: 15
+  timeout: 8
+  verify_ssl: false
+  headers:
+    Auth-Token: __SONNEN_TOKEN__
+  sensor:
+  - name: min_sonnen inverter temperatur
+    unique_id: min_sonnen_inverter_temperatur
+    value_template: "{{ value_json.tmax if is_number(value_json.tmax) and value_json.tmax > -50 else 'unavailable' }}"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+- resource: "__SONNEN_HOST__/api/v2/configurations"
+  scan_interval: 300
+  timeout: 8
+  verify_ssl: false
+  headers:
+    Auth-Token: __SONNEN_TOKEN__
+  sensor:
+  - name: min_sonnen konfiguration
+    unique_id: min_sonnen_konfiguration
+    value_template: "{{ value_json.IC_InverterMaxPower_w }}"
+    json_attributes:
+    - EM_OperatingMode
+    - EM_USOC
+    - EM_ToU_Schedule
+
+# Sonnen kanalen har én målekilde – batteriet selv. Alderstjekket svarer til de andre kanaler.
+template:
+- triggers:
+  - trigger: time_pattern
+    seconds: /10
+  - trigger: homeassistant
+    event: start
+  actions:
+  - variables:
+      sample: |-
+        {% set t = as_timestamp(now()) %}
+        {% set s = states.sensor.min_sonnen_status %}
+        {% set m = dict(
+          load_w_totalpower = states('sensor.min_sonnen_status'),
+          grid_out_total_power = -(state_attr('sensor.min_sonnen_status','GridFeedIn_W') | float(0)),
+          battery_output_w_power = state_attr('sensor.min_sonnen_status','Pac_total_W'),
+          battery_soc = state_attr('sensor.min_sonnen_status','USOC'),
+          battery_voltage = state_attr('sensor.min_sonnen_status','Ubat'),
+          inverter_status = state_attr('sensor.min_sonnen_status','SystemStatus'),
+          battery_temperature = states('sensor.min_sonnen_batteri_temperatur'),
+          inverter_temperature = states('sensor.min_sonnen_inverter_temperatur'),
+          external_ct_w_l1 = states('sensor.min_sonnen_maaler_w_l1'),
+          external_ct_w_l2 = states('sensor.min_sonnen_maaler_w_l2'),
+          external_ct_w_l3 = states('sensor.min_sonnen_maaler_w_l3'),
+          grid_current_v_l1 = states('sensor.min_sonnen_maaler_v_l1'),
+          grid_current_v_l2 = states('sensor.min_sonnen_maaler_v_l2'),
+          grid_current_v_l3 = states('sensor.min_sonnen_maaler_v_l3')) %}
+        {% set ns = namespace(ok=true) %}
+        {% if not has_value('sensor.min_sonnen_status')
+           or not is_number(state_attr('sensor.min_sonnen_status','GridFeedIn_W'))
+           or not is_number(state_attr('sensor.min_sonnen_status','Pac_total_W'))
+           or not is_number(state_attr('sensor.min_sonnen_status','USOC'))
+           or not is_number(state_attr('sensor.min_sonnen_status','Ubat')) %}{% set ns.ok = false %}{% endif %}
+        {% for k in ['external_ct_w_l1','external_ct_w_l2','external_ct_w_l3',
+                     'grid_current_v_l1','grid_current_v_l2','grid_current_v_l3'] %}
+          {% if not is_number(m[k]) %}{% set ns.ok = false %}{% endif %}
+        {% endfor %}
+        {% set alder = (t - s.last_reported.timestamp()) if s is not none and s.last_reported is not none else 999 %}
+        {{ dict(source=('Sonnen' if ns.ok and 0 <= alder <= 90 else 'Ingen'), values=(m if ns.ok else {}),
+                times=dict(status=(s.last_reported.timestamp() if s is not none and s.last_reported is not none else 0), tid=t),
+                maalekilde_ok=ns.ok, sample_time=t) }}
+  sensor:
+  - name: EMHASS målekilde
+    unique_id: emhass_maalekilde
+    default_entity_id: sensor.emhass_maalekilde
+    state: '{{ sample.source }}'
+    attributes:
+      values: '{{ sample[''values''] }}'
+      raw_reported: '{{ sample[''times''] }}'
+      sonnen_ok: '{{ sample[''maalekilde_ok''] }}'
+      sample_time: '{{ sample[''sample_time''] }}'
+- sensor:
+  - name: EMHASS måling load_w_totalpower
+    unique_id: emhass_m_load_w_totalpower
+    default_entity_id: sensor.emhass_m_load_w_totalpower
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable''))
+      }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_out_total_power
+    unique_id: emhass_m_grid_out_total_power
+    default_entity_id: sensor.emhass_m_grid_out_total_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable''))
+      }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_output_w_power
+    unique_id: emhass_m_battery_output_w_power
+    default_entity_id: sensor.emhass_m_battery_output_w_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable''))
+      }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_soc
+    unique_id: emhass_m_battery_soc
+    default_entity_id: sensor.emhass_m_battery_soc
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable''))
+      }}'
+    unit_of_measurement: '%'
+    device_class: battery
+    state_class: measurement
+  - name: EMHASS måling battery_voltage
+    unique_id: emhass_m_battery_voltage
+    default_entity_id: sensor.emhass_m_battery_voltage
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable''))
+      }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling inverter_status
+    unique_id: emhass_m_inverter_status
+    default_entity_id: sensor.emhass_m_inverter_status
+    state: '{% set v=(state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'')
+      %}{{ ''Normal'' if v|lower in [''ongrid'',''normal''] else v }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'') not
+      in [''unknown'',''unavailable''] }}'
+  - name: EMHASS måling battery_temperature
+    unique_id: emhass_m_battery_temperature
+    default_entity_id: sensor.emhass_m_battery_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable''))
+      }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling inverter_temperature
+    unique_id: emhass_m_inverter_temperature
+    default_entity_id: sensor.emhass_m_inverter_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable''))
+      }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l1
+    unique_id: emhass_m_external_ct_w_l1
+    default_entity_id: sensor.emhass_m_external_ct_w_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable''))
+      }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l2
+    unique_id: emhass_m_external_ct_w_l2
+    default_entity_id: sensor.emhass_m_external_ct_w_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable''))
+      }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l3
+    unique_id: emhass_m_external_ct_w_l3
+    default_entity_id: sensor.emhass_m_external_ct_w_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable''))
+      }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l1
+    unique_id: emhass_m_grid_current_v_l1
+    default_entity_id: sensor.emhass_m_grid_current_v_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable''))
+      }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l2
+    unique_id: emhass_m_grid_current_v_l2
+    default_entity_id: sensor.emhass_m_grid_current_v_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable''))
+      }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l3
+    unique_id: emhass_m_grid_current_v_l3
+    default_entity_id: sensor.emhass_m_grid_current_v_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable''))
+      }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  binary_sensor:
+  - name: EMHASS Sonnen styrekanal
+    unique_id: emhass_styrekanal_ok
+    default_entity_id: binary_sensor.emhass_styrekanal_ok
+    state: |-
+      {% set t=as_timestamp(now()) %}
+      {% set ns=namespace(ok=true) %}
+      {% if not has_value('sensor.min_sonnen_status') %}{% set ns.ok=false %}{% endif %}
+      {% if not is_number(state_attr('sensor.min_sonnen_status','OperatingMode')) %}{% set ns.ok=false %}{% endif %}
+      {% for s in ['min_sonnen_maaler_w_l1','min_sonnen_maaler_w_l2','min_sonnen_maaler_w_l3',
+                   'min_sonnen_maaler_v_l1','min_sonnen_maaler_v_l2','min_sonnen_maaler_v_l3'] %}
+        {% if not is_number(states('sensor.'~s)) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {% if not has_value('switch.wattlas_netladning') %}{% set ns.ok=false %}{% endif %}
+      {% if not is_number(states('number.wattlas_netladestroem')) %}{% set ns.ok=false %}{% endif %}
+      {% for i in range(1,7) %}
+        {% if not is_number(states('number.wattlas_program_'~i~'_soc'))
+           or not is_number(states('number.wattlas_program_'~i~'_power'))
+           or not has_value('switch.emhass_netladning_p'~i) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {{ ns.ok and 0<=t-(state_attr('sensor.emhass_maalekilde','sample_time')|float(0))<=25 }}
+  - name: EMHASS mangler inverterstyring
+    unique_id: emhass_ui_styrekanalfejl
+    default_entity_id: binary_sensor.emhass_ui_styrekanalfejl
+    state: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') and not is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
+      }}'
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 30
+    attributes:
+      forklaring: Sonnen-styrekanalen er ikke klar. Kontrollér at batteriet svarer, at "JSON API for Writing"
+        er slået til i Software-Integration, og at tokenet virker. Netopladning er forsøgt stoppet; faktisk
+        batteridrift skal kontrolleres i batteriets eget dashboard.

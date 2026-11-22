@@ -58,6 +58,29 @@ SunMate har ikke dagstællere for køb, salg og forbrug. Dem laver kanalen selv 
 Kanalen er bygget ud fra en SunMate-opsætning, der kørte med Wattlas' forgænger, men den **er ikke testet** med denne version.
 Følg den nøje den første dag, og meld gerne tilbage.
 
+## SonnenBatterie (`styrekanaler/sonnen`) – alpha
+
+Til SonnenBatterie med det lokale API v2 (firmware 1.40 eller nyere). Kræver, at **JSON API for Reading** og
+**JSON API for Writing** er slået til i batteriets dashboard under Software-Integration. Adresse og token indtastes
+i opsætningen (den tjekker, at batteriet svarer) og sættes ind i kanalens filer under installationen.
+
+Netladning styres som manual mode (`EM_OperatingMode=1`) med et ladnings-setpoint i W: Wattlas skriver strøm i A,
+kanalen ganger med batterispændingen (Ubat) og sender W til `POST /api/v2/setpoint/charge/{W}`. Når netladningen
+slås fra, ryddes begge setpoints, og batteriet går i selvforbrug (`EM_OperatingMode=2`), så det aflader til huset.
+Programvinduerne p1–p6 findes ikke i Sonnens API: switchene er optimistiske, og det er Wattlas selv, der stopper
+ladningen ved programmets mål-SOC. Program-SOC og -effekt accepteres uden at skrive til batteriet.
+
+Begrænsninger:
+
+- **Solssalg kan ikke styres via API'et** – fw 1.40.5 har ingen feed-in-nøgle (EM_US_GEN_POWER_SET_POINT er et
+  generator-setpoint, ikke feed-in). Skiftet registreres, men påvirker ikke batteriet; kontrollér eksport i
+  batteriets eget dashboard.
+- **Netudveksling pr. fase kan ikke aflæses.** CT-feltet er husets forbrug pr. fase fra batteriets egen måler,
+  og spændingerne pr. fase er læst samme sted. Fase-tjekket i kernen bruger kun tallene og spændingsvinduet.
+- **Dagstællere og totaler** findes ikke i API'et og laves af kanalen med HA's `integration` og `utility_meter`.
+- Bygget og testet mod én SonnenBatterie (fw 1.40.5); valideret med HA's config-check, men **ikke kørt i drift
+  endnu**. Følg den nøje den første dag, og meld gerne tilbage.
+
 ## Lav din egen
 
 1. Kopiér `styrekanaler/deye_solarman/` til en ny mappe.

@@ -106,6 +106,7 @@ Wattlas taler med inverteren gennem en **styrekanal**, en fil med adapter-entite
 |---|---|
 | `styrekanaler/deye_solarman` – Deye (3-faset, lavvolt-batteri) via [ha-solarman](https://github.com/davidrapan/ha-solarman) | styrelogikken kører dagligt hos udvikleren; selve udgivelsesversionen (indstillinger, startspærre) er valideret med HA's config-check, men ikke kørt i drift endnu |
 | `styrekanaler/sunmate` – SunMate.IO pulse styrer inverteren | **ikke testet** med denne version |
+| `styrekanaler/sonnen` – SonnenBatterie via det lokale API v2 (fw 1.40+) | bygget og testet mod én SonnenBatterie (fw 1.40.5); valideret med HA's config-check, men **ikke kørt i drift** endnu – se [STYREKANALER.md](docs/STYREKANALER.md) for begrænsninger |
 | Sunsynk / Sol-Ark / andre Deye-kloner | brug Deye-kanalen, hvis dine entiteter hedder det samme; ellers skriv din egen ([STYREKANALER.md](docs/STYREKANALER.md)) |
 
 Vi har kun en Deye at teste på. Har du en anden inverter, hjælper vi gerne med at bygge og teste en direkte kobling

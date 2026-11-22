@@ -2,6 +2,14 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## Ikke-udgivet
+- Ny styrekanal: **SonnenBatterie** via det lokale API v2 (fw 1.40+). Netladning styres som manual mode med et
+  ladnings-setpoint i W (Wattlas' A ganges med batterispændingen); når netladningen slås fra, ryddes setpoints
+  og batteriet går i selvforbrug. Programvinduer p1–p6 findes ikke i Sonnens API, så switchene er optimistiske,
+  og Wattlas stopper selv ladningen ved mål-SOC. Solssalg kan ikke styres via API'et (fw 1.40.5 har ingen
+  feed-in-nøgle). Valideret med HA's config-check, men ikke kørt i drift endnu – se docs/STYREKANALER.md.
+- Kernen tager nu også imod målekilden "Sonnen" i `emhass_overblik`.
+
 ## 0.2.2
 - **Rettet:** på telefonen kunne siden hoppe op til toppen, mens man rullede, fordi appen byggede sig selv om hvert 5. sekund. Nu bygges den kun om, når noget faktisk er ændret, og rullepositionen holdes fast
 - En ekstra inverter, der slukker om natten, vises som *Sover – for lidt lys* i stedet for en tabel med "unavailable". Svarer den ikke, mens der er sol på hovedanlægget, vises en advarsel

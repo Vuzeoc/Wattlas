@@ -10,7 +10,8 @@ import time
 from pathlib import Path
 
 PAYLOAD = Path(__file__).parent / "payload"
-KANALER = {"deye": ("deye_solarman", "min_inverter"), "sunmate": ("sunmate", "min_sunmate")}
+KANALER = {"deye": ("deye_solarman", "min_inverter"), "sunmate": ("sunmate", "min_sunmate"),
+           "sonnen": ("sonnen", "min_sonnen")}
 PKG_RE = re.compile(r"^[ \t]*packages:[ \t]*!include_dir_(?:merge_)?named[ \t]+[\"']?([^\"'#\s]+)", re.M)
 PACKAGES_LINJE = "packages: !include_dir_named packages"
 
@@ -81,7 +82,8 @@ def _flyt(src: Path, backup: Path, navn: str, flyttet: list) -> None:
         flyttet.append((backup / navn, src))
 
 
-def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, version: str) -> dict:
+def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, version: str,
+              sonnen: dict | None = None) -> dict:
     """Kopierer alt på plads. Returnerer en kvittering, som rul_tilbage() kan bruge."""
     cfg = Path(config_dir)
     conf = cfg / "configuration.yaml"
@@ -114,6 +116,17 @@ def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, versi
         if prefix != std:
             for f in (pkg / "wattlas_kanal").glob("*.yaml"):
                 f.write_text(f.read_text(encoding="utf-8").replace(f"{std}_", f"{prefix}_"), encoding="utf-8")
+        if kanal == "sonnen":
+            host = (sonnen or {}).get("host", "")
+            token = (sonnen or {}).get("token", "")
+            if not host or not token:
+                raise InstallFejl("Sonnen-kanalen mangler host eller token")
+            for f in (pkg / "wattlas_kanal").glob("*.yaml"):
+                t = f.read_text(encoding="utf-8")
+                t = t.replace("__SONNEN_HOST__", host).replace("__SONNEN_TOKEN__", token)
+                if "__SONNEN_" in t:
+                    raise InstallFejl(f"Sonnen-kanalen mangler indsatte værdier i {f.name}")
+                f.write_text(t, encoding="utf-8")
         ds = cfg / "wattlas" / "dashboards"
         styr = (ds / "wattlas_styring.yaml").read_text(encoding="utf-8")
         energi = (ds / "wattlas.yaml").read_text(encoding="utf-8")

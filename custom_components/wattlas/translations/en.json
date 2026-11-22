@@ -26,6 +26,14 @@
           "inverter2_relae": "Relæ, der kan afbryde den (valgfri)"
         }
       },
+      "sonnen": {
+        "title": "Your SonnenBatterie",
+        "description": "Enable *JSON API for Reading* and *JSON API for Writing* in the battery's dashboard under Software-Integration, then enter the battery's address and token here. Setup checks that the battery answers before continuing.",
+        "data": {
+          "sonnen_host": "Battery address (e.g. http://192.168.1.50)",
+          "sonnen_token": "API token (Auth-Token)"
+        }
+      },
       "tjek": {
         "title": "Tjek af det, Wattlas skal bruge",
         "description": "{liste}",
@@ -120,6 +128,8 @@
       "bekraeft": "Sæt flueben for at fortsætte trods advarslerne.",
       "adresse": "Adressen skal starte med http:// eller https://",
       "noegle": "Nøglen er for kort.",
+      "token": "The battery did not return valid status – check the token (and that the API is enabled).",
+      "forbindelse": "Could not reach the battery at that address.",
       "prognose_format": "Sensoren har ikke en prognose med datetime og watts.",
       "prognose_kvarter": "Prognosen skal have en værdi pr. 15 minutter (se SOLPROGNOSE.md).",
       "over_nul": "Skal være større end 0."
@@ -134,7 +144,8 @@
     "kanal": {
       "options": {
         "deye": "Deye (via Solarman)",
-        "sunmate": "SunMate"
+        "sunmate": "SunMate",
+        "sonnen": "SonnenBatterie (local API)"
       }
     },
     "tilslutning": {

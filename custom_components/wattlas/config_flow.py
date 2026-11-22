@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
@@ -76,10 +77,12 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_inverter()
         return self.async_show_form(step_id="user", data_schema=vol.Schema({
             vol.Required("kanal", default="deye"): sel.SelectSelector(sel.SelectSelectorConfig(
-                options=["deye", "sunmate"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
+                options=["deye", "sunmate", "sonnen"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
 
     # 2 – vælg inverteren (de fleste har kun én)
     async def async_step_inverter(self, user_input=None) -> ConfigFlowResult:
+        if self.d["kanal"] == "sonnen":
+            return await self.async_step_sonnen()
         dom, suf = SUFFIX[self.d["kanal"]]
         fejl: dict[str, str] = {}
         if user_input is not None:
@@ -97,7 +100,45 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Optional("inverter2", default=False): sel.BooleanSelector(),
         }), description_placeholders={"suffix": suf})
 
-    # 2b – kun hvis der også er en inverter uden batteri
+    # 2b – kun Sonnen: host og token til batteriets lokale API
+    async def async_step_sonnen(self, user_input=None) -> ConfigFlowResult:
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            host = (user_input["sonnen_host"] or "").strip().rstrip("/")
+            token = (user_input["sonnen_token"] or "").strip()
+            if not re.match(r"https?://", host):
+                fejl["sonnen_host"] = "adresse"
+            elif not token:
+                fejl["sonnen_token"] = "noegle"
+            else:
+                forbindelse = await self._sonnen_tjek(host, token)
+                if forbindelse:
+                    fejl["sonnen_host"] = forbindelse
+                else:
+                    self.d["sonnen"] = {"host": host, "token": token}
+                    return await self.async_step_tjek()
+        return self.async_show_form(step_id="sonnen", errors=fejl, data_schema=vol.Schema({
+            vol.Required("sonnen_host"): sel.TextSelector(),
+            vol.Required("sonnen_token"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)),
+        }))
+
+    async def _sonnen_tjek(self, host: str, token: str) -> str | None:
+        """Læs batteriets status. Returnerer en fejl-kode eller None, hvis det svarede."""
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        session = async_get_clientsession(self.hass)
+        try:
+            r = await session.get(f"{host}/api/v2/status", headers={"Auth-Token": token},
+                                  timeout=aiohttp.ClientTimeout(total=10))
+            if r.status != 200:
+                return "token"
+            data = await r.json(content_type=None)
+        except Exception:
+            return "forbindelse"
+        if not isinstance(data, dict) or "USOC" not in data:
+            return "token"
+        return None
+
+    # 2c – kun hvis der også er en inverter uden batteri
     async def async_step_inverter2(self, user_input=None) -> ConfigFlowResult:
         fejl: dict[str, str] = {}
         if user_input is not None:
@@ -146,12 +187,16 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
                             "Bruger dine egne automationer det gamle navn, så ret dem bagefter.")
             else:
                 blok.append(f"❌ **{navn}** mangler – " + (f"[tilføj den]({link}), {hjælp}" if link else hjælp))
-        mangler = [e for e in installer.entiteter_i_kanal(self.d["kanal"], self.d["prefix"])
-                   if hass.states.get(e) is None and not e.endswith("_microinverter_power")]
-        if mangler:
-            vis = ", ".join(f"`{e}`" for e in mangler[:8]) + (f" og {len(mangler) - 8} til" if len(mangler) > 8 else "")
-            adv.append(f"⚠️ Inverteren mangler {len(mangler)} entiteter, som Wattlas bruger: {vis}. "
-                       "Har din inverter-integration slået nogle fra, så slå dem til. Ellers kan dele af styringen mangle.")
+        if self.d["kanal"] != "sonnen":
+            mangler = [e for e in installer.entiteter_i_kanal(self.d["kanal"], self.d["prefix"])
+                       if hass.states.get(e) is None and not e.endswith("_microinverter_power")]
+            if mangler:
+                vis = ", ".join(f"`{e}`" for e in mangler[:8]) + (f" og {len(mangler) - 8} til" if len(mangler) > 8 else "")
+                adv.append(f"⚠️ Inverteren mangler {len(mangler)} entiteter, som Wattlas bruger: {vis}. "
+                           "Har din inverter-integration slået nogle fra, så slå dem til. Ellers kan dele af styringen mangle.")
+        else:
+            adv.append("ℹ️ Sonnen-kanalen opretter sine egne entiteter, når den installeres – de opstår først efter genstart. "
+                       "Kontrollér at \"JSON API for Reading\" og \"JSON API for Writing\" er slået til i batteriets dashboard.")
         prognoser = [s.entity_id for s in hass.states.async_all("sensor") if isinstance(s.attributes.get("forecast"), list)]
         if not prognoser:
             adv.append("⚠️ Ingen solprognose fundet – *Helios Forecast* fra Markedspladsen anbefales (se SOLPROGNOSE.md).")
@@ -234,7 +279,8 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         omdoeb = self.d.pop("omdoeb", None) or {}
         try:
             kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, self.d["kanal"],
-                                                     self.d["prefix"], self.d.get("inverter2"), VERSION)
+                                                     self.d["prefix"], self.d.get("inverter2"), VERSION,
+                                                     self.d.get("sonnen"))
         except installer.InstallFejl as e:
             return self.async_abort(reason="install_fejl", description_placeholders={"fejl": str(e)})
         res = await async_check_ha_config_file(hass)
