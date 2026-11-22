@@ -1,0 +1,237 @@
+# Wattlas – husets indstillinger. ALLE tal herunder skal sættes, før styringen må starte
+# (binary_sensor.wattlas_konfigureret). 0 / tom = ikke sat. Sættes i Wattlas Styring → Indstillinger
+# eller under Indstillinger → Enheder og tjenester → Hjælpere. Se docs/KONFIGURATION.md.
+input_number:
+  # --- batteri og inverter ---
+  wattlas_batteri_kwh:
+    name: Wattlas · batteriets kapacitet
+    min: 0
+    max: 500
+    step: 0.01
+    mode: box
+    unit_of_measurement: kWh
+    icon: mdi:battery
+  wattlas_maks_ladeeffekt_w:
+    name: Wattlas · maks. ladeeffekt (batteri)
+    min: 0
+    max: 50000
+    step: 100
+    mode: box
+    unit_of_measurement: W
+  wattlas_maks_afladeeffekt_w:
+    name: Wattlas · maks. afladeeffekt (batteri)
+    min: 0
+    max: 50000
+    step: 100
+    mode: box
+    unit_of_measurement: W
+  wattlas_maks_ladestroem_a:
+    name: Wattlas · maks. ladestrøm (batteri, DC)
+    min: 0
+    max: 1000
+    step: 1
+    mode: box
+    unit_of_measurement: A
+  wattlas_maks_afladestroem_a:
+    name: Wattlas · maks. afladestrøm (batteri, DC)
+    min: 0
+    max: 1000
+    step: 1
+    mode: box
+    unit_of_measurement: A
+  wattlas_maks_netladestroem_a:
+    name: Wattlas · maks. netladestrøm (DC)
+    min: 0
+    max: 1000
+    step: 1
+    mode: box
+    unit_of_measurement: A
+  wattlas_maks_netladeeffekt_w:
+    name: Wattlas · effekt ved tvungen netladning
+    min: 0
+    max: 50000
+    step: 100
+    mode: box
+    unit_of_measurement: W
+  # --- elnet og sikringer ---
+  wattlas_fase_graense_a:
+    name: Wattlas · maks. strøm pr. fase (under hovedsikringen)
+    min: 0
+    max: 100
+    step: 1
+    mode: box
+    unit_of_measurement: A
+  wattlas_kulde_w_pr_grad:
+    name: Wattlas · ekstra husforbrug pr. grad koldere (valgfri)
+    min: 0
+    max: 500
+    step: 5
+    mode: box
+    unit_of_measurement: W
+  wattlas_import_graense_w:
+    name: Wattlas · maks. samlet import fra nettet (netladning)
+    min: 0
+    max: 100000
+    step: 100
+    mode: box
+    unit_of_measurement: W
+  wattlas_maks_netimport_w:
+    name: Wattlas · plan-grænse import fra nettet
+    min: 0
+    max: 100000
+    step: 100
+    mode: box
+    unit_of_measurement: W
+  wattlas_maks_eksport_w:
+    name: Wattlas · plan-grænse eksport til nettet
+    min: 0
+    max: 100000
+    step: 100
+    mode: box
+    unit_of_measurement: W
+  # --- priser (kr./kWh, uden moms hvor intet andet står) ---
+  wattlas_nettarif_lav:
+    name: Wattlas · nettarif lav (kl. 0–6)
+    min: 0
+    max: 10
+    step: 0.000001
+    mode: box
+    unit_of_measurement: kr./kWh
+  wattlas_nettarif_hoej:
+    name: Wattlas · nettarif høj (kl. 6–17 og 21–24)
+    min: 0
+    max: 10
+    step: 0.000001
+    mode: box
+    unit_of_measurement: kr./kWh
+  wattlas_nettarif_spids:
+    name: Wattlas · nettarif spids (kl. 17–21)
+    min: 0
+    max: 10
+    step: 0.000001
+    mode: box
+    unit_of_measurement: kr./kWh
+  wattlas_elafgift:
+    name: Wattlas · elafgift + Energinet-tariffer
+    min: 0
+    max: 10
+    step: 0.000001
+    mode: box
+    unit_of_measurement: kr./kWh
+  wattlas_tillaeg:
+    name: Wattlas · elselskabets tillæg (inkl. moms)
+    min: 0
+    max: 10
+    step: 0.000001
+    mode: box
+    unit_of_measurement: kr./kWh
+  wattlas_salg_nettarif:
+    name: Wattlas · indfødningstarif ved salg
+    min: 0
+    max: 10
+    step: 0.000001
+    mode: box
+    unit_of_measurement: kr./kWh
+  wattlas_salg_gebyr:
+    name: Wattlas · elselskabets gebyr ved salg
+    min: 0
+    max: 10
+    step: 0.000001
+    mode: box
+    unit_of_measurement: kr./kWh
+  wattlas_solcelle_slid:
+    name: Wattlas · solcellernes slid pr. kWh
+    min: 0
+    max: 5
+    step: 0.01
+    mode: box
+    unit_of_measurement: kr./kWh
+
+input_text:
+  wattlas_emhass_adresse:
+    name: Wattlas · EMHASS-adresse (fx http://homeassistant.local:5000)
+    max: 255
+  wattlas_emhass_noegle:
+    name: Wattlas · EMHASS API-nøgle
+    max: 255
+    mode: password
+  wattlas_solprognose_entitet:
+    name: Wattlas · solprognose-sensor (med attribut forecast)
+    max: 255
+  wattlas_vejr_entitet:
+    name: Wattlas · vejr-entitet (weather.…)
+    max: 255
+  wattlas_udetemperatur_entitet:
+    name: Wattlas · udetemperatur-sensor (valgfri – ellers vejr-entitetens temperatur)
+    max: 255
+
+template:
+  - sensor:
+      # Spejl af udetemperaturen, så husprognosen kan læse den fra langtidsstatistikken.
+      # Egen sensor, hvis den er sat; ellers vejr-entitetens aktuelle temperatur.
+      - name: Wattlas udetemperatur
+        unique_id: wattlas_udetemperatur
+        default_entity_id: sensor.wattlas_udetemperatur
+        unit_of_measurement: °C
+        device_class: temperature
+        state_class: measurement
+        availability: >-
+          {{ is_number(states(states('input_text.wattlas_udetemperatur_entitet')))
+             or is_number(state_attr(states('input_text.wattlas_vejr_entitet'), 'temperature')) }}
+        state: >-
+          {% set s = states(states('input_text.wattlas_udetemperatur_entitet')) %}
+          {{ s | float if is_number(s) else state_attr(states('input_text.wattlas_vejr_entitet'), 'temperature') | float }}
+  - binary_sensor:
+      # Startspærre: alt der skriver til inverteren eller kalder EMHASS kræver, at denne er tændt
+      - name: Wattlas konfigureret
+        unique_id: wattlas_konfigureret
+        default_entity_id: binary_sensor.wattlas_konfigureret
+        icon: mdi:shield-check
+        state: >-
+          {% set tal = ['batteri_kwh','maks_ladeeffekt_w','maks_afladeeffekt_w','maks_ladestroem_a','maks_afladestroem_a',
+                      'maks_netladestroem_a','maks_netladeeffekt_w','fase_graense_a','import_graense_w','maks_netimport_w',
+                      'maks_eksport_w','nettarif_lav','nettarif_hoej','nettarif_spids','elafgift'] %}
+          {% set ns = namespace(m=[]) %}
+          {% for k in tal %}{% if not (states('input_number.wattlas_' ~ k) | float(0) > 0) %}{% set ns.m = ns.m + ['input_number.wattlas_' ~ k] %}{% endif %}{% endfor %}
+          {% if not states('input_text.wattlas_emhass_adresse') is match('https?://') %}{% set ns.m = ns.m + ['input_text.wattlas_emhass_adresse'] %}{% endif %}
+          {% if states('input_text.wattlas_emhass_noegle') | length < 8 %}{% set ns.m = ns.m + ['input_text.wattlas_emhass_noegle'] %}{% endif %}
+          {% if state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') is none %}{% set ns.m = ns.m + ['input_text.wattlas_solprognose_entitet'] %}{% endif %}
+          {% if not states('input_text.wattlas_vejr_entitet').startswith('weather.') %}{% set ns.m = ns.m + ['input_text.wattlas_vejr_entitet'] %}{% endif %}
+          {% if not has_value('sensor.wattlas_udetemperatur') %}{% set ns.m = ns.m + ['input_text.wattlas_udetemperatur_entitet'] %}{% endif %}
+          {% if not has_value('sensor.energi_data_service') %}{% set ns.m = ns.m + ['sensor.energi_data_service (integrationen Energi Data Service)'] %}{% endif %}
+          {% if not has_value('binary_sensor.workday_sensor') %}{% set ns.m = ns.m + ['binary_sensor.workday_sensor (integrationen Workday)'] %}{% endif %}
+          {{ ns.m | count == 0 }}
+        attributes:
+          mangler: >-
+            {% set tal = ['batteri_kwh','maks_ladeeffekt_w','maks_afladeeffekt_w','maks_ladestroem_a','maks_afladestroem_a',
+                          'maks_netladestroem_a','maks_netladeeffekt_w','fase_graense_a','import_graense_w','maks_netimport_w',
+                          'maks_eksport_w','nettarif_lav','nettarif_hoej','nettarif_spids','elafgift'] %}
+            {% set ns = namespace(m=[]) %}
+            {% for k in tal %}{% if not (states('input_number.wattlas_' ~ k) | float(0) > 0) %}{% set ns.m = ns.m + ['input_number.wattlas_' ~ k] %}{% endif %}{% endfor %}
+            {% if not states('input_text.wattlas_emhass_adresse') is match('https?://') %}{% set ns.m = ns.m + ['input_text.wattlas_emhass_adresse'] %}{% endif %}
+            {% if states('input_text.wattlas_emhass_noegle') | length < 8 %}{% set ns.m = ns.m + ['input_text.wattlas_emhass_noegle'] %}{% endif %}
+            {% if state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') is none %}{% set ns.m = ns.m + ['input_text.wattlas_solprognose_entitet'] %}{% endif %}
+            {% if not states('input_text.wattlas_vejr_entitet').startswith('weather.') %}{% set ns.m = ns.m + ['input_text.wattlas_vejr_entitet'] %}{% endif %}
+            {% if not has_value('sensor.wattlas_udetemperatur') %}{% set ns.m = ns.m + ['input_text.wattlas_udetemperatur_entitet'] %}{% endif %}
+            {% if not has_value('sensor.energi_data_service') %}{% set ns.m = ns.m + ['sensor.energi_data_service (integrationen Energi Data Service)'] %}{% endif %}
+            {% if not has_value('binary_sensor.workday_sensor') %}{% set ns.m = ns.m + ['binary_sensor.workday_sensor (integrationen Workday)'] %}{% endif %}
+            {{ ns.m }}
+
+script:
+  # Alle Wattlas-beskeder går herigennem. Ret handlingen til din egen telefon (notify.mobile_app_…),
+  # og tilføj gerne flere modtagere eller højttaler-oplæsning.
+  wattlas_besked:
+    alias: Wattlas – send besked
+    mode: queued
+    fields:
+      title:
+        description: Overskrift
+      message:
+        description: Tekst
+      data:
+        description: "Ekstra data til notify, fx tag og url"
+    sequence:
+      - action: persistent_notification.create
+        data:
+          title: "{{ title | default('Wattlas') }}"
+          message: "{{ message | default('') }}"

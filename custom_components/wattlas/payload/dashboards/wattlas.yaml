@@ -1,0 +1,12 @@
+# Dashboard "Wattlas" (URL: wattlas-energi – HA kræver en bindestreg i URL'en). Indsæt i Rå konfigurationseditor.
+views:
+  - title: Wattlas
+    path: app
+    type: panel
+    cards:
+      - type: custom:energi-app-card
+        tabs: [live, okonomi, historik, elpris, sol]
+        link: {navn: Styring, url: /wattlas-styring/app#styring}
+        # pv_anlaeg: [{navn: Tag, entitet: sensor.min_inverter_pv_power}]
+        # startsaldo: 0
+        # startsaldo_dato: 2026-01-01

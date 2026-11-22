@@ -81,8 +81,9 @@ Begrænsninger i alpha: kun 48 V-batterier (spændingsvindue 45–58 V), 3-faset
 
 ## Kom i gang
 
-1. [docs/INSTALLATION.md](docs/INSTALLATION.md) – trin for trin. Filerne, kortet og dashboards klares af `install.sh`
-   med én kommando. Indstillingerne udfylder du selv.
+1. [docs/INSTALLATION.md](docs/INSTALLATION.md) – installér *Wattlas* fra Markedspladsen, og tilføj integrationen.
+   Opsætningen tjekker, om du mangler noget, viser vej til det, spørger om dine tal og lægger det hele på plads.
+   Ingen kommandoer. (`install.sh` og manuel installation findes til avancerede brugere.)
 2. [docs/KONFIGURATION.md](docs/KONFIGURATION.md) – hvad hvert tal betyder, og hvordan du finder dit.
 3. [docs/BRUG.md](docs/BRUG.md) – sådan bruger du styringen: tilsidesættelser, indstillinger, hvad-hvis, fleksibel
    forbruger, regler og planens logik.

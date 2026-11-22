@@ -1,6 +1,34 @@
 # Installation
 
-Regn med ca. en time. Styringen kan ikke starte, før trin 6 er gjort færdigt. Den har en startspærre.
+## Den nemme vej – uden kommandoer (anbefalet)
+
+1. **Tag en backup af HA** (Indstillinger → System → Sikkerhedskopier).
+2. **Markedsplads → Tilføj fra link** → `https://github.com/Vuzeoc/wattlas` (type: integration) → **Wattlas** → **Installér**,
+   og genstart Home Assistant.
+3. **Indstillinger → Enheder og tjenester → Tilføj integration → Wattlas.** Opsætningen fører dig igennem:
+   - **Inverter-type** (Deye eller SunMate) og **din inverter** (vælges på en liste). Ekstra inverter uden batteri kan slås til.
+   - **Tjek af det, Wattlas skal bruge:** EMHASS-app'en, Energi Data Service, Workday, inverterens entiteter,
+     solprognose og vejr. Mangler noget, står der en knap, der åbner den rigtige side. Installér det, og tryk *Send* for
+     at tjekke igen.
+   - **Forbindelser:** EMHASS-adressen udfyldes selv, når app'en findes. Indsæt API-nøglen fra EMHASS-app'en, og vælg
+     solprognose og vejr på listen.
+   - **Batteri, elnet og priser:** tallene fra datablade og elregning. Hvert felt har en forklaring.
+4. Wattlas lægger automationer, kort og de to dashboards (*Wattlas* og *Wattlas Styring*) på plads og tjekker
+   konfigurationen. Går noget galt, rulles alt tilbage.
+5. Under **Indstillinger → Reparationer** står *Genstart for at fuldføre Wattlas* → tryk **Genstart**.
+6. Efter genstarten overfører Wattlas dine indstillinger. Kun Deye: sæt de 6 tidsprogrammer (se trin 4 nedenfor).
+   Fortsæt med [8. Første start](#8-første-start).
+
+Dashboards fra integrationen er i YAML-tilstand og kan ikke redigeres i HA's editor. En ny version installeres fra
+Markedspladsen; Wattlas lægger selv de nye filer på plads og beder om en genstart. Fjernes integrationen, flyttes
+filerne til `/config/wattlas_backup_<tidspunkt>/`.
+
+> Resten af denne side er den manuelle vej for avancerede brugere (`install.sh` eller kopiering i hånden).
+> Den er også nyttig, hvis du vil forstå, hvad integrationen gør.
+
+## Manuelt: regn med ca. en time
+
+Styringen kan ikke starte, før trin 6 er gjort færdigt. Den har en startspærre.
 
 ## 0. Krav
 

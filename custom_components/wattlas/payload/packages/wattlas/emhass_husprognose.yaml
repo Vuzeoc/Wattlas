@@ -1,0 +1,34 @@
+# EMHASS husprognose – historik til en 7-dages, temperaturjusteret forbrugsprognose.
+# Læser kun fra Home Assistants egen database. Selve prognosen beregnes i
+# script.emhass_test_helios (emhass_forbindelse.yaml) lige før EMHASS-kaldet.
+sql:
+  # Husets forbrug pr. halve time de sidste 8 døgn (fra 5-minutters statistik)
+  - name: EMHASS husforbrug historik
+    unique_id: emhass_husforbrug_historik
+    query: >-
+      SELECT COUNT(*) AS antal, json_group_array(json_array(slot, m)) AS data FROM (
+        SELECT CAST(st.start_ts / 1800 AS INTEGER) * 1800 AS slot, ROUND(AVG(st.mean)) AS m
+        FROM statistics_short_term st JOIN statistics_meta sm ON st.metadata_id = sm.id
+        WHERE sm.statistic_id = 'sensor.emhass_m_load_w_totalpower'
+          AND st.start_ts >= CAST(strftime('%s', 'now') AS INTEGER) - 8 * 86400
+          AND st.mean IS NOT NULL
+        GROUP BY slot ORDER BY slot)
+    column: antal
+  # Udetemperatur time for time de sidste 8 døgn (fra timestatistik)
+  - name: EMHASS udetemperatur historik
+    unique_id: emhass_udetemperatur_historik
+    query: >-
+      SELECT COUNT(*) AS antal, json_group_array(json_array(CAST(st.start_ts AS INTEGER), ROUND(st.mean, 1))) AS data
+      FROM statistics st JOIN statistics_meta sm ON st.metadata_id = sm.id
+      WHERE sm.statistic_id = 'sensor.wattlas_udetemperatur'
+        AND st.start_ts >= CAST(strftime('%s', 'now') AS INTEGER) - 8 * 86400
+        AND st.mean IS NOT NULL
+    column: antal
+
+# Historikken er kun mellemregning – den gemmes ikke i databasen igen.
+recorder:
+  exclude:
+    entities:
+      - sensor.emhass_husforbrug_historik
+      - sensor.emhass_udetemperatur_historik
+      - input_text.wattlas_emhass_noegle  # API-nøglen gemmes ikke i historikken

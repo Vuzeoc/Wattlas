@@ -1,0 +1,15 @@
+# Dashboard "Wattlas Styring" (URL: wattlas-styring). Indsæt i Rå konfigurationseditor.
+views:
+  - title: Wattlas Styring
+    path: app
+    type: panel
+    cards:
+      - type: custom:energi-app-card
+        undertitel: Styring
+        tabs: [styring, regler, plan, overvaagning, teknik]
+        link: {navn: Energi, url: /wattlas-energi/app#live}
+        # inverter_prefix: min_inverter_
+        # inverter_navn: Deye 12 kW hybrid
+        # inverter2_prefix: min_strenginverter_
+        # inverter2_navn: streng-inverter
+        # inverter2_relae: switch.min_strenginverter_relae

@@ -1,0 +1,356 @@
+# Wattlas – manuelle tilsidesættelser og indstillinger til EMHASS-styringen.
+# Tilsidesættelser ændrer kun hvad script.emhass_reguler udfører (samme vej som den ugentlige fuldladning):
+#   lad    = lad fra elnettet nu til mål-SOC     gem   = batteriet aflader ikke (holder niveauet)
+#   ingen  = ingen netopladning (sol må lade)     brug  = batteriet forsyner huset uanset plan
+# Alle hårde grænser i reguleringen gælder stadig (20 A pr. fase, 13,8 kW, spænding, friske data, min. 15 %).
+# En tilsidesættelse udløber altid (højst 24 timer). Indstillingerne sendes til EMHASS ved hver beregning.
+input_select:
+  wattlas_tilsidesaettelse:
+    name: Wattlas · tilsidesættelse
+    options: [ingen, lad, ingen_netladning, gem, brug]
+    icon: mdi:hand-back-right
+
+input_number:
+  wattlas_tilsidesaet_soc:
+    name: Wattlas · lad til
+    min: 20
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    icon: mdi:battery-arrow-up
+  wattlas_reserve:
+    name: Wattlas · reserve (laveste batteriniveau)
+    min: 15
+    max: 80
+    step: 5
+    unit_of_measurement: "%"
+    icon: mdi:battery-lock
+  wattlas_slut_soc:
+    name: Wattlas · batteriniveau ved planens slutning
+    min: 15
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    icon: mdi:battery-clock
+  wattlas_max_net_kw:
+    name: Wattlas · maks. køb fra elnettet
+    min: 1
+    max: 50
+    step: 0.5
+    unit_of_measurement: kW
+    icon: mdi:transmission-tower-import
+  wattlas_forbruger1_effekt:
+    name: Wattlas · fleksibel forbruger effekt
+    min: 0
+    max: 11000
+    step: 100
+    mode: box
+    unit_of_measurement: W
+    icon: mdi:flash
+  wattlas_forbruger1_timer:
+    name: Wattlas · fleksibel forbruger timer pr. døgn
+    min: 0
+    max: 24
+    step: 0.5
+    unit_of_measurement: h
+    icon: mdi:timer-outline
+  wattlas_forbruger1_koert:
+    name: Wattlas · fleksibel forbruger kørt i perioden
+    min: 0
+    max: 24
+    step: 0.01
+    mode: box
+    unit_of_measurement: h
+    icon: mdi:timer-check-outline
+  wattlas_slid:
+    name: Wattlas · batterislid pr. afladet kWh
+    min: 0
+    max: 1
+    step: 0.01
+    unit_of_measurement: kr.
+    icon: mdi:battery-sync
+
+input_text:
+  wattlas_hvadhvis_status:
+    name: Wattlas · hvad-hvis status
+    max: 60
+  wattlas_forbruger1_navn:
+    name: Wattlas · fleksibel forbruger navn
+    max: 40
+  wattlas_forbruger1_entitet:
+    name: Wattlas · fleksibel forbruger kontakt (entity_id)
+    max: 80
+
+input_boolean:
+  wattlas_forbruger1_aktiv:
+    name: Wattlas · fleksibel forbruger styres
+    icon: mdi:power-socket-eu
+
+input_datetime:
+  wattlas_forbruger1_faerdig:
+    name: Wattlas · fleksibel forbruger færdig kl.
+    has_date: false
+    has_time: true
+  wattlas_tilsidesaet_til:
+    name: Wattlas · tilsidesættelse udløber
+    has_date: true
+    has_time: true
+  wattlas_solsalg_stop_til:
+    name: Wattlas · solsalg stoppet til
+    has_date: true
+    has_time: true
+
+template:
+  # Regler (tidsstyrede begrænsninger) gemmes fra Wattlas-appen via event wattlas_regler_gem (højst 8 regler)
+  - triggers:
+      - trigger: event
+        event_type: wattlas_regler_gem
+    sensor:
+      - name: Wattlas regler
+        unique_id: wattlas_regler
+        default_entity_id: sensor.wattlas_regler
+        icon: mdi:calendar-clock
+        state: "{{ ((trigger.event.data.get('regler') if trigger.event.data.get('regler') is list else [])[:8]) | count }}"
+        attributes:
+          regler: "{{ (trigger.event.data.get('regler') if trigger.event.data.get('regler') is list else [])[:8] }}"
+  - sensor:
+      # Første regel der passer nu (dag + tidsrum). Rækkefølge i styringen: manuel > regel > plan.
+      - name: Wattlas aktiv regel
+        unique_id: wattlas_aktiv_regel
+        default_entity_id: sensor.wattlas_aktiv_regel
+        icon: mdi:calendar-check
+        state: >-
+          {% set nu = now().strftime('%H:%M') %}{% set ns = namespace(t='ingen', soc=80, navn='') %}
+          {% for r in (state_attr('sensor.wattlas_regler', 'regler') or []) %}
+            {% if ns.t == 'ingen' and r is mapping and r.get('aktiv') and r.get('type') in ['lad', 'ingen_netladning', 'gem', 'brug', 'solsalg_stop'] %}
+              {% set d = r.get('dage', 'alle') %}
+              {% set dag_ok = d == 'alle' or (d == 'hverdage' and is_state('binary_sensor.workday_sensor', 'on'))
+                 or (d == 'fridage' and is_state('binary_sensor.workday_sensor', 'off')) or (d == 'weekend' and now().weekday() >= 5) %}
+              {% set fra = r.get('fra', '00:00') | string %}{% set til = r.get('til', '00:00') | string %}
+              {% set tid_ok = (fra <= nu < til) if fra < til else (nu >= fra or nu < til) %}
+              {% if dag_ok and tid_ok %}{% set ns.t = r.type %}{% set ns.soc = [20, [100, r.get('soc', 80) | int(80)] | min] | max %}{% set ns.navn = r.get('navn', '') | string %}{% endif %}
+            {% endif %}
+          {% endfor %}{{ ns.t }}
+        attributes:
+          soc: >-
+            {% set nu = now().strftime('%H:%M') %}{% set ns = namespace(t='ingen', soc=80, navn='') %}
+            {% for r in (state_attr('sensor.wattlas_regler', 'regler') or []) %}
+            {% if ns.t == 'ingen' and r is mapping and r.get('aktiv') and r.get('type') in ['lad', 'ingen_netladning', 'gem', 'brug', 'solsalg_stop'] %}
+            {% set d = r.get('dage', 'alle') %}
+            {% set dag_ok = d == 'alle' or (d == 'hverdage' and is_state('binary_sensor.workday_sensor', 'on'))
+            or (d == 'fridage' and is_state('binary_sensor.workday_sensor', 'off')) or (d == 'weekend' and now().weekday() >= 5) %}
+            {% set fra = r.get('fra', '00:00') | string %}{% set til = r.get('til', '00:00') | string %}
+            {% set tid_ok = (fra <= nu < til) if fra < til else (nu >= fra or nu < til) %}
+            {% if dag_ok and tid_ok %}{% set ns.t = r.type %}{% set ns.soc = [20, [100, r.get('soc', 80) | int(80)] | min] | max %}{% set ns.navn = r.get('navn', '') | string %}{% endif %}
+            {% endif %}
+            {% endfor %}{{ ns.soc }}
+          navn: >-
+            {% set nu = now().strftime('%H:%M') %}{% set ns = namespace(t='ingen', soc=80, navn='') %}
+            {% for r in (state_attr('sensor.wattlas_regler', 'regler') or []) %}
+            {% if ns.t == 'ingen' and r is mapping and r.get('aktiv') and r.get('type') in ['lad', 'ingen_netladning', 'gem', 'brug', 'solsalg_stop'] %}
+            {% set d = r.get('dage', 'alle') %}
+            {% set dag_ok = d == 'alle' or (d == 'hverdage' and is_state('binary_sensor.workday_sensor', 'on'))
+            or (d == 'fridage' and is_state('binary_sensor.workday_sensor', 'off')) or (d == 'weekend' and now().weekday() >= 5) %}
+            {% set fra = r.get('fra', '00:00') | string %}{% set til = r.get('til', '00:00') | string %}
+            {% set tid_ok = (fra <= nu < til) if fra < til else (nu >= fra or nu < til) %}
+            {% if dag_ok and tid_ok %}{% set ns.t = r.type %}{% set ns.soc = [20, [100, r.get('soc', 80) | int(80)] | min] | max %}{% set ns.navn = r.get('navn', '') | string %}{% endif %}
+            {% endif %}
+            {% endfor %}{{ ns.navn }}
+  - binary_sensor:
+      - name: Wattlas tilsidesættelse aktiv
+        unique_id: wattlas_tilsidesaettelse_aktiv
+        default_entity_id: binary_sensor.wattlas_tilsidesaettelse_aktiv
+        icon: mdi:hand-back-right
+        state: >-
+          {{ not is_state('input_select.wattlas_tilsidesaettelse', 'ingen')
+             and as_timestamp(states('input_datetime.wattlas_tilsidesaet_til'), 0) > as_timestamp(now()) }}
+        attributes:
+          tilstand: "{{ states('input_select.wattlas_tilsidesaettelse') }}"
+          til: "{{ states('input_datetime.wattlas_tilsidesaet_til') }}"
+          lad_til: "{{ states('input_number.wattlas_tilsidesaet_soc') | int(80) }}"
+      - name: Wattlas solsalg stoppet
+        unique_id: wattlas_solsalg_stoppet
+        default_entity_id: binary_sensor.wattlas_solsalg_stoppet
+        icon: mdi:solar-power-variant-outline
+        state: "{{ as_timestamp(states('input_datetime.wattlas_solsalg_stop_til'), 0) > as_timestamp(now()) }}"
+
+script:
+  wattlas_hvadhvis:
+    alias: Wattlas · hvad-hvis beregning
+    description: >-
+      Beregner en alternativ plan med andre indstillinger (eller med den fleksible forbruger) og publicerer den som
+      sensor.hh_* – den rigtige plan og styringen ændres ikke. Kører gennem samme script som den rigtige plan (mode single).
+    mode: single
+    fields:
+      reserve: {default: 15, selector: {number: {min: 15, max: 80}}}
+      slut_soc: {default: 30, selector: {number: {min: 15, max: 100}}}
+      max_net_kw: {default: 11, selector: {number: {min: 6, max: 11, step: 0.5}}}
+      slid: {default: 0.25, selector: {number: {min: 0, max: 1, step: 0.01}}}
+      forbruger:
+        default: false
+        selector:
+          boolean:
+    sequence:
+      - action: input_text.set_value
+        target: {entity_id: input_text.wattlas_hvadhvis_status}
+        data: {value: "beregner {{ now().strftime('%H:%M') }}"}
+      - wait_template: "{{ is_state('script.emhass_test_helios', 'off') }}"
+        timeout: "00:02:00"
+        continue_on_timeout: false
+      - action: script.emhass_test_helios
+        data:
+          hvadhvis:
+            reserve: "{{ reserve | default(15) }}"
+            slut_soc: "{{ slut_soc | default(30) }}"
+            max_net_kw: "{{ max_net_kw | default(11) }}"
+            slid: "{{ slid | default(0.25) }}"
+            forbruger: "{{ forbruger | default(false) }}"
+
+  wattlas_tilsidesaet:
+    alias: Wattlas · sæt tilsidesættelse
+    description: Starter eller stopper en manuel tilsidesættelse af batteristyringen. Udløber altid.
+    mode: queued
+    fields:
+      tilstand:
+        description: ingen, lad, ingen_netladning, gem, brug eller solsalg_stop / solsalg_auto
+        required: true
+        selector:
+          select:
+            options: [ingen, lad, ingen_netladning, gem, brug, solsalg_stop, solsalg_auto]
+      minutter:
+        description: Varighed (højst 24 timer)
+        default: 120
+        selector:
+          number: {min: 15, max: 1440, step: 15}
+      soc:
+        description: Mål for "lad" (20-100 %)
+        default: 80
+        selector:
+          number: {min: 20, max: 100, step: 5}
+    sequence:
+      - variables:
+          til: "{{ (now() + timedelta(minutes=([15, [1440, minutter | default(120) | int(120)] | min] | max))).isoformat() }}"
+      - choose:
+          - conditions: "{{ tilstand == 'solsalg_stop' }}"
+            sequence:
+              - action: input_datetime.set_datetime
+                target: {entity_id: input_datetime.wattlas_solsalg_stop_til}
+                data: {datetime: "{{ til }}"}
+          - conditions: "{{ tilstand == 'solsalg_auto' }}"
+            sequence:
+              - action: input_datetime.set_datetime
+                target: {entity_id: input_datetime.wattlas_solsalg_stop_til}
+                data: {timestamp: 0}
+          - conditions: "{{ tilstand in ['ingen', 'lad', 'ingen_netladning', 'gem', 'brug'] }}"
+            sequence:
+              - action: input_number.set_value
+                target: {entity_id: input_number.wattlas_tilsidesaet_soc}
+                data: {value: "{{ [20, [100, (soc | default(80) | int(80) / 5) | round(0) * 5] | min] | max }}"}
+              # rækkefølge: stop = vælg "ingen" før tiden nulstilles; start = tiden sættes før tilstanden (ellers udløber den straks)
+              - if: "{{ tilstand == 'ingen' }}"
+                then:
+                  - action: input_select.select_option
+                    target: {entity_id: input_select.wattlas_tilsidesaettelse}
+                    data: {option: ingen}
+                  - action: input_datetime.set_datetime
+                    target: {entity_id: input_datetime.wattlas_tilsidesaet_til}
+                    data: {timestamp: 0}
+                else:
+                  - action: input_datetime.set_datetime
+                    target: {entity_id: input_datetime.wattlas_tilsidesaet_til}
+                    data: {datetime: "{{ til }}"}
+                  - action: input_select.select_option
+                    target: {entity_id: input_select.wattlas_tilsidesaettelse}
+                    data: {option: "{{ tilstand }}"}
+      - action: logbook.log
+        data:
+          name: Wattlas
+          entity_id: input_select.wattlas_tilsidesaettelse
+          message: >-
+            {{ {'ingen': 'tilsidesættelse stoppet – følger planen igen', 'lad': 'lad fra elnettet til ' ~ (soc | default(80)) ~ ' %',
+                'ingen_netladning': 'ingen netopladning', 'gem': 'gem batteriet (ingen afladning)', 'brug': 'brug batteriet til huset',
+                'solsalg_stop': 'solsalg stoppet', 'solsalg_auto': 'solsalg automatisk igen'}[tilstand] }}
+            {%- if tilstand not in ['ingen', 'solsalg_auto'] %} til {{ as_timestamp(til) | timestamp_custom('%d/%m %H:%M') }}{% endif %}
+      # reguler straks i stedet for at vente op til 30 sek.
+      - action: script.emhass_reguler
+        continue_on_error: true
+
+automation:
+  - id: wattlas_tilsidesaettelse_udloeb
+    alias: Wattlas · tilsidesættelse udløber
+    description: Sætter tilsidesættelsen tilbage til "ingen", når tiden er gået (også efter genstart).
+    mode: single
+    triggers:
+      - trigger: template
+        value_template: >-
+          {{ not is_state('input_select.wattlas_tilsidesaettelse', 'ingen')
+             and as_timestamp(states('input_datetime.wattlas_tilsidesaet_til'), 0) <= as_timestamp(now()) }}
+      - trigger: homeassistant
+        event: start
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ not is_state('input_select.wattlas_tilsidesaettelse', 'ingen')
+             and as_timestamp(states('input_datetime.wattlas_tilsidesaet_til'), 0) <= as_timestamp(now()) }}
+    actions:
+      - action: input_select.select_option
+        target: {entity_id: input_select.wattlas_tilsidesaettelse}
+        data: {option: ingen}
+      - action: logbook.log
+        data: {name: Wattlas, entity_id: input_select.wattlas_tilsidesaettelse, message: tilsidesættelse udløbet – følger planen igen}
+
+  # Fleksibel forbruger: tænd/sluk kontakten efter EMHASS' plan (sensor.p_deferrable0). Slukket, når planen ikke er frisk.
+  - id: wattlas_forbruger1_styring
+    alias: Wattlas · fleksibel forbruger følger planen
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: time_pattern
+        seconds: /30
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.wattlas_konfigureret
+        state: 'on'
+      - condition: state
+        entity_id: input_boolean.wattlas_forbruger1_aktiv
+        state: "on"
+      - condition: template
+        value_template: >-
+          {{ states('input_text.wattlas_forbruger1_entitet') | regex_match('^(switch|light|input_boolean)[.][a-z0-9_]+$') }}
+    actions:
+      - variables:
+          ent: "{{ states('input_text.wattlas_forbruger1_entitet') }}"
+          tilbage: "{{ states('input_number.wattlas_forbruger1_timer') | float(0) - states('input_number.wattlas_forbruger1_koert') | float(0) }}"
+          oensket: >-
+            {{ is_state('input_boolean.emhass_styring_aktiv', 'on') and is_state('binary_sensor.emhass_ui_plan_frisk', 'on')
+               and states('sensor.p_deferrable0') | float(0) > 50 and tilbage | float(0) > 0 }}
+      - if:
+          - condition: template
+            value_template: "{{ oensket and not is_state(ent, 'on') }}"
+        then:
+          - action: homeassistant.turn_on
+            target: {entity_id: "{{ ent }}"}
+      - if:
+          - condition: template
+            value_template: "{{ not oensket and is_state(ent, 'on') }}"
+        then:
+          - action: homeassistant.turn_off
+            target: {entity_id: "{{ ent }}"}
+      - if:
+          - condition: template
+            value_template: "{{ is_state(ent, 'on') }}"
+        then:
+          - action: input_number.set_value
+            target: {entity_id: input_number.wattlas_forbruger1_koert}
+            data: {value: "{{ [24, states('input_number.wattlas_forbruger1_koert') | float(0) + 1 / 120] | min | round(3) }}"}
+
+  - id: wattlas_forbruger1_nulstil
+    alias: Wattlas · fleksibel forbruger ny periode
+    description: Når færdig-tidspunktet er nået, starter en ny periode (kørte timer nulstilles).
+    triggers:
+      - trigger: time
+        at: input_datetime.wattlas_forbruger1_faerdig
+    actions:
+      - action: input_number.set_value
+        target: {entity_id: input_number.wattlas_forbruger1_koert}
+        data: {value: 0}

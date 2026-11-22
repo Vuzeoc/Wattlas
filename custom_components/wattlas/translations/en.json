@@ -1,0 +1,151 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Wattlas – vælg inverter-type",
+        "description": "Wattlas styrer dit batteri efter elprisen med EMHASS. Vælg, hvordan Home Assistant taler med din inverter.",
+        "data": {
+          "kanal": "Inverter"
+        }
+      },
+      "inverter": {
+        "title": "Din inverter",
+        "description": "Vælg inverterens solcelle-effekt (entiteten slutter på `{suffix}`). De fleste har kun én inverter og skal ikke andet.\n\nHar du også en inverter **uden batteri** (fx et ældre anlæg), så slå *Ekstra inverter* til.",
+        "data": {
+          "inverter": "Inverterens solcelle-effekt",
+          "inverter2": "Ekstra inverter uden batteri",
+          "inverter2_navn": "Navn på den ekstra inverter",
+          "inverter2_tilslutning": "Hvor sidder den?",
+          "inverter2_effekt": "Den ekstra inverters effekt (kræves hvis den sidder i eltavlen)",
+          "inverter2_relae": "Relæ, der kan afbryde den (valgfri)"
+        }
+      },
+      "tjek": {
+        "title": "Tjek af det, Wattlas skal bruge",
+        "description": "{liste}\n\nNår alt med ❌ er klaret, så tryk **Send** for at tjekke igen.",
+        "data": {
+          "forstaaet": "Jeg har læst advarslerne og vil fortsætte"
+        }
+      },
+      "forbindelser": {
+        "title": "Forbindelser og prognoser",
+        "description": "EMHASS-adressen er udfyldt, hvis app'en blev fundet. API-nøglen finder du i EMHASS-app'ens indstillinger.",
+        "data": {
+          "emhass_adresse": "EMHASS-adresse",
+          "emhass_noegle": "EMHASS API-nøgle",
+          "solprognose": "Solprognose (fx Helios Forecast …_power_now)",
+          "vejr": "Vejr",
+          "udetemperatur": "Udetemperatur (valgfri – ellers bruges vejrets)"
+        }
+      },
+      "batteri": {
+        "title": "Batteri og inverter",
+        "description": "Find tallene i datablade for inverter og batteri. Vælg hellere for lavt end for højt.",
+        "data": {
+          "batteri_kwh": "batteriets kapacitet",
+          "maks_ladeeffekt_w": "maks. ladeeffekt (batteri)",
+          "maks_afladeeffekt_w": "maks. afladeeffekt (batteri)",
+          "maks_ladestroem_a": "maks. ladestrøm (batteri, DC)",
+          "maks_afladestroem_a": "maks. afladestrøm (batteri, DC)",
+          "maks_netladestroem_a": "maks. netladestrøm (DC)",
+          "maks_netladeeffekt_w": "effekt ved tvungen netladning"
+        },
+        "data_description": {
+          "batteri_kwh": "Brugbar kapacitet for alle batterimoduler, fx 2 × 10 kWh = 20.",
+          "maks_ladeeffekt_w": "Fra inverterens datablad (DC-ladeeffekt), højst batteriets.",
+          "maks_afladeeffekt_w": "Inverterens AC-udgangseffekt eller batteriets maks., det laveste.",
+          "maks_ladestroem_a": "Batteriets maks. ladestrøm (BMS).",
+          "maks_afladestroem_a": "Batteriets maks. afladestrøm (BMS).",
+          "maks_netladestroem_a": "Typisk lavere end ladestrømmen. Start lavt, fx 100 A.",
+          "maks_netladeeffekt_w": "Effekt ved tvungen netladning (\"Lad nu\", fuldladning), fx 2/3 af importgrænsen."
+        }
+      },
+      "elnet": {
+        "title": "Elnet og sikringer",
+        "description": "Grænserne beskytter dine sikringer, også når planen tager fejl. Spørg din elinstallatør, hvis du er i tvivl.",
+        "data": {
+          "fase_graense_a": "maks. strøm pr. fase (under hovedsikringen)",
+          "import_graense_w": "maks. samlet import fra nettet (netladning)",
+          "maks_netimport_w": "plan-grænse import fra nettet",
+          "maks_eksport_w": "plan-grænse eksport til nettet"
+        },
+        "data_description": {
+          "fase_graense_a": "Lidt under hovedsikringen. 3 × 20 A sikring → fx 16 A.",
+          "import_graense_w": "Samlet import under netladning, fx 3 × 16 A × 230 V ≈ 11 000 W.",
+          "maks_netimport_w": "Højeste import i planen – højst importgrænsen.",
+          "maks_eksport_w": "Den eksport, du har lov til."
+        }
+      },
+      "priser": {
+        "title": "Priser",
+        "description": "Tallene står på din elregning eller netselskabets hjemmeside. Sommer- og vintertarif retter du selv senere.",
+        "data": {
+          "nettarif_lav": "nettarif lav (kl. 0–6)",
+          "nettarif_hoej": "nettarif høj (kl. 6–17 og 21–24)",
+          "nettarif_spids": "nettarif spids (kl. 17–21)",
+          "elafgift": "elafgift + Energinet-tariffer",
+          "tillaeg": "elselskabets tillæg (inkl. moms)",
+          "salg_nettarif": "indfødningstarif ved salg",
+          "salg_gebyr": "elselskabets gebyr ved salg",
+          "solcelle_slid": "solcellernes slid pr. kWh",
+          "kulde_w_pr_grad": "ekstra husforbrug pr. grad koldere (valgfri)"
+        },
+        "data_description": {
+          "nettarif_lav": "Netselskabets tarif uden moms, kl. 0–6 (står på elregningen).",
+          "nettarif_hoej": "Uden moms, kl. 6–17 og 21–24.",
+          "nettarif_spids": "Uden moms, kl. 17–21.",
+          "elafgift": "Elafgift + Energinets tariffer, uden moms.",
+          "tillaeg": "Elselskabets tillæg pr. kWh inkl. moms (valgfri).",
+          "salg_nettarif": "Indfødningstarif uden moms (valgfri).",
+          "salg_gebyr": "Elselskabets gebyr pr. solgt kWh (valgfri).",
+          "solcelle_slid": "Hvad en kWh solstrøm koster i slid, fx 0,10 (valgfri).",
+          "kulde_w_pr_grad": "Ekstra husforbrug pr. grad koldere. Varmepumpe: 50–150. 0 = ingen justering (valgfri)."
+        }
+      }
+    },
+    "error": {
+      "forkert_entitet": "Vælg entiteten, der slutter på den viste endelse.",
+      "kun_deye": "En ekstra inverter kræver Deye.",
+      "mangler_effekt": "Vælg den ekstra inverters effekt-sensor.",
+      "mangler": "Der mangler stadig noget med ❌.",
+      "bekraeft": "Sæt flueben for at fortsætte trods advarslerne.",
+      "adresse": "Adressen skal starte med http:// eller https://",
+      "noegle": "Nøglen er for kort.",
+      "prognose_format": "Sensoren har ikke en prognose med datetime og watts.",
+      "prognose_kvarter": "Prognosen skal have en værdi pr. 15 minutter (se SOLPROGNOSE.md).",
+      "over_nul": "Skal være større end 0."
+    },
+    "abort": {
+      "single_instance_allowed": "Wattlas er allerede sat op.",
+      "anden_styring": "Der findes allerede en batteristyring i {sti}. Fjern den først – to styringer må ikke køre på samme inverter.",
+      "install_fejl": "Installationen blev ikke gennemført: {fejl}"
+    }
+  },
+  "selector": {
+    "kanal": {
+      "options": {
+        "deye": "Deye (via Solarman)",
+        "sunmate": "SunMate"
+      }
+    },
+    "tilslutning": {
+      "options": {
+        "gen": "På Deyes GEN-/mikroinverter-port",
+        "ac": "I eltavlen (AC-koblet)"
+      }
+    }
+  },
+  "issues": {
+    "genstart": {
+      "title": "Genstart for at fuldføre Wattlas",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Genstart Home Assistant",
+            "description": "Wattlas er lagt på plads. Home Assistant skal genstarte én gang, før automationer, kort og dashboards virker. Det tager et par minutter."
+          }
+        }
+      }
+    }
+  }
+}

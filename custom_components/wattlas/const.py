@@ -1,0 +1,44 @@
+"""Konstanter for Wattlas-integrationen."""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import yaml
+
+DOMAIN = "wattlas"
+EMHASS_SLUG = "5b918bf2_emhass"
+EMHASS_REPO = "https://github.com/davidusb-geek/emhass-add-on"
+
+# Knapper til det, der mangler (my.home-assistant.io åbner den rigtige side i brugerens egen HA)
+LINK = {
+    "emhass": "https://my.home-assistant.io/redirect/supervisor_addon/?addon=5b918bf2_emhass&repository_url=https%3A%2F%2Fgithub.com%2Fdavidusb-geek%2Femhass-add-on",
+    "workday": "https://my.home-assistant.io/redirect/config_flow_start/?domain=workday",
+    "energidataservice": "https://my.home-assistant.io/redirect/hacs_repository/?owner=MTrab&repository=energidataservice&category=integration",
+    "helios": "https://my.home-assistant.io/redirect/hacs_repository/?owner=ReikanYsora&repository=Helios-Forecast&category=integration",
+    "solarman": "https://my.home-assistant.io/redirect/hacs_repository/?owner=davidrapan&repository=ha-solarman&category=integration",
+}
+
+# Hvilke indstillinger der vises i hvilket trin (samme navne som input_number.wattlas_…)
+TRIN = {
+    "batteri": ["batteri_kwh", "maks_ladeeffekt_w", "maks_afladeeffekt_w", "maks_ladestroem_a", "maks_afladestroem_a",
+                "maks_netladestroem_a", "maks_netladeeffekt_w"],
+    "elnet": ["fase_graense_a", "import_graense_w", "maks_netimport_w", "maks_eksport_w"],
+    "priser": ["nettarif_lav", "nettarif_hoej", "nettarif_spids", "elafgift", "tillaeg", "salg_nettarif", "salg_gebyr",
+               "solcelle_slid", "kulde_w_pr_grad"],
+}
+
+_INDST = Path(__file__).parent / "payload" / "packages" / "wattlas" / "wattlas_indstillinger.yaml"
+
+
+def _laes_indstillinger() -> tuple[dict, list[str]]:
+    """input_number-definitionerne og listen over påkrævede tal – direkte fra pakken, så de aldrig kommer ud af trit."""
+    tekst = _INDST.read_text(encoding="utf-8")
+    tal = {k.removeprefix("wattlas_"): v for k, v in (yaml.safe_load(tekst.split("\ninput_text:")[0]) or {})["input_number"].items()}
+    m = re.search(r"\{% set tal = \[(.*?)\] %\}", tekst, re.S)
+    paakraevet = re.findall(r"'([a-z0-9_]+)'", m.group(1)) if m else []
+    return tal, paakraevet
+
+
+TAL, PAAKRAEVET = _laes_indstillinger()
+assert set(PAAKRAEVET) <= {k for v in TRIN.values() for k in v}, "et påkrævet tal mangler i opsætningen"

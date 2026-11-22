@@ -1,0 +1,153 @@
+script:
+  emhass_diagnose_log:
+    alias: EMHASS diagnose – gem målinger
+    mode: queued
+    max: 20
+    sequence:
+    - variables:
+        snapshot: |
+          {% set p='sensor.emhass_m_' %}
+          {% set ns=namespace(reasons=[],data={}) %}
+          {% set required=['load_w_totalpower','grid_out_total_power','external_ct_w_l1','external_ct_w_l2','external_ct_w_l3'] %}
+          {% set all=required+['battery_soc','battery_voltage','battery_output_w_power','grid_current_v_l1','grid_current_v_l2','grid_current_v_l3','inverter_status','battery_temperature','inverter_temperature'] %}
+          {% for name in all %}
+          {% set e=states[p~name] %}
+          {% set age=(as_timestamp(now())-as_timestamp(e.last_reported,0))|round(1) if e is defined and e is not none else none %}
+          {% set changed=(as_timestamp(now())-as_timestamp(e.last_changed,0))|round(1) if e is defined and e is not none else none %}
+          {% set v=states(p~name) %}
+          {% set ns.data=dict(ns.data,**{name:dict(value=v,reported_s=age,changed_s=changed)}) %}
+          {% if name in required %}
+          {% if not is_number(v) %}{% set ns.reasons=ns.reasons+[name~': ikke numerisk ('~v~')'] %}
+          {% endif %}
+          {% endif %}
+          {% endfor %}
+          {% if not is_number(states(p~'battery_output_w_power')) %}{% set ns.reasons=ns.reasons+['Batterieffekt ikke numerisk'] %}{% endif %}
+          {% if not is_state('binary_sensor.emhass_ui_beskeddata_ok','on') %}{% set ns.reasons=ns.reasons+['beskeddata_ok='~states('binary_sensor.emhass_ui_beskeddata_ok')] %}{% endif %}
+          {% for i in range(1,4) %}
+          {% set v=states(p~'grid_current_v_l'~i)|float(none) %}
+          {% if v is none or not 210<=v<=250 %}{% set ns.reasons=ns.reasons+['L'~i~': spænding uden for 210–250 V'] %}{% endif %}
+          {% endfor %}
+          {% set raw=states(p~'battery_soc')|float(none) %}{% set helper=states('sensor.emhass_m_battery_soc')|float(none) %}
+          {% if raw is none or not 15<=raw<=100 %}{% set ns.reasons=ns.reasons+['Original SOC uden for 15–100 %'] %}{% endif %}
+          {% if helper is none or not 15<=helper<=100 %}{% set ns.reasons=ns.reasons+['SOC-hjælper uden for 15–100 %'] %}{% endif %}
+          {% if raw is not none and helper is not none and (raw-helper)|abs>=0.1 %}{% set ns.reasons=ns.reasons+['SOC original/hjælper afviger: '~raw~' / '~helper] %}{% endif %}
+          {% set v=states(p~'battery_voltage')|float(none) %}
+          {% if v is none or not 45<=v<=58 %}{% set ns.reasons=ns.reasons+['Batterispænding uden for 45–58 V: '~v] %}{% endif %}
+          {% if not is_state(p~'inverter_status','Normal') %}{% set ns.reasons=ns.reasons+['Inverterstatus: '~states(p~'inverter_status')] %}{% endif %}
+          {% set e=states['sensor.emhass_ui_energi_uden_soc_aendring'] %}
+          {% set age=(as_timestamp(now())-as_timestamp(e.last_reported,0))|round(1) if e is defined and e is not none else none %}
+          {% set suspicion=state_attr('sensor.emhass_ui_energi_uden_soc_aendring','mistanke') %}
+          {% set valid=state_attr('sensor.emhass_ui_energi_uden_soc_aendring','gyldig') %}
+          {% set phases=namespace(values={}) %}
+          {% for i in range(1,4) %}
+          {% set w=states(p~'external_ct_w_l'~i)|float(none) %}{% set v=states(p~'grid_current_v_l'~i)|float(none) %}
+          {% set phases.values=dict(phases.values,**{'L'~i:((w/v)|round(2) if w is not none and v is not none and v>0 else none)}) %}
+          {% endfor %}
+          {% set alarms=namespace(values={}) %}
+          {% for id in ['planfejl','datafejl','netbelastning','temperatur','inverterfejl','lav_soc','indstillingsfejl','lader_ikke','soc_afvigelse','styrekanalfejl'] %}
+          {% set alarms.values=dict(alarms.values,**{id:states('binary_sensor.emhass_ui_'~id)}) %}
+          {% endfor %}
+          {{ dict(source=states('sensor.emhass_maalekilde'),raw_reported=state_attr('sensor.emhass_maalekilde','raw_reported'),control_channel=states('binary_sensor.emhass_styrekanal_ok'),plan_mode=states('sensor.emhass_planvalg'),time=now().isoformat(),control=states('binary_sensor.emhass_ui_data_frisk'),control_reasons=ns.reasons,readings=ns.data,soc_helper=states('sensor.emhass_m_battery_soc'),watt_soc=dict(energy_kwh=states('sensor.emhass_ui_energi_uden_soc_aendring'),reported_s=age,mistanke=suspicion,gyldig=valid,anchor_soc=state_attr('sensor.emhass_ui_energi_uden_soc_aendring','soc'),previous_watt=state_attr('sensor.emhass_ui_energi_uden_soc_aendring','watt'),sample_time=state_attr('sensor.emhass_ui_energi_uden_soc_aendring','tid')),phases_w_div_v=phases.values,alarms=alarms.values,active=states('input_boolean.emhass_styring_aktiv'),plan_fresh=states('binary_sensor.emhass_ui_plan_frisk'),plan_battery_w=states('input_number.emhass_plan_batteri_w'),grid_charge=states('switch.wattlas_netladning'),period_soc=states('sensor.emhass_ui_periode_soc'),period_power=states('sensor.emhass_ui_periode_effekt')) }}
+        event_cause: '{{ cause | default(''Manuel diagnose'') }}'
+    - event: emhass_diagnose_record
+      event_data:
+        cause: '{{ event_cause }}'
+        snapshot: '{{ snapshot }}'
+    - action: system_log.write
+      data:
+        level: info
+        logger: emhass.diagnose
+        message: EMHASS_DIAG {{ dict(cause=event_cause,snapshot=snapshot)|to_json }}
+automation:
+- id: emhass_diagnose_capture
+  alias: EMHASS diagnose – fejl og genetablering
+  mode: queued
+  max: 20
+  triggers:
+  - trigger: state
+    entity_id:
+    - binary_sensor.emhass_ui_data_frisk
+    - binary_sensor.emhass_ui_beskeddata_ok
+    - binary_sensor.emhass_ui_datafejl
+    - binary_sensor.emhass_ui_netbelastning
+    - binary_sensor.emhass_ui_planfejl
+    - binary_sensor.emhass_ui_temperatur
+    - binary_sensor.emhass_ui_inverterfejl
+    - binary_sensor.emhass_ui_lav_soc
+    - binary_sensor.emhass_ui_indstillingsfejl
+    - binary_sensor.emhass_ui_lader_ikke
+    - binary_sensor.emhass_ui_soc_afvigelse
+    - sensor.emhass_maalekilde
+    - sensor.emhass_planvalg
+    - binary_sensor.emhass_ui_styrekanalfejl
+    to: null
+    id: transition
+  - trigger: time_pattern
+    minutes: /5
+    seconds: '15'
+    id: sample
+  conditions:
+  - condition: template
+    value_template: '{{ trigger.id == ''transition'' or (is_state(''input_boolean.emhass_styring_aktiv'',''on'')
+      and (not is_state(''binary_sensor.emhass_ui_data_frisk'',''on'') or is_state(''binary_sensor.emhass_ui_datafejl'',''on'')
+      or is_state(''binary_sensor.emhass_ui_netbelastning'',''on'') or is_state(''binary_sensor.emhass_ui_planfejl'',''on'')
+      or is_state(''binary_sensor.emhass_ui_temperatur'',''on'') or is_state(''binary_sensor.emhass_ui_inverterfejl'',''on'')
+      or is_state(''binary_sensor.emhass_ui_lav_soc'',''on'') or is_state(''binary_sensor.emhass_ui_indstillingsfejl'',''on'')
+      or is_state(''binary_sensor.emhass_ui_lader_ikke'',''on'') or is_state(''binary_sensor.emhass_ui_soc_afvigelse'',''on'')
+      or is_state(''binary_sensor.emhass_ui_styrekanalfejl'',''on''))) }}'
+  actions:
+  - action: script.emhass_diagnose_log
+    data:
+      cause: '{% if trigger.id==''transition'' %}{{ trigger.entity_id }}: {{ trigger.from_state.state if trigger.from_state
+        is not none else ''ingen'' }} -> {{ trigger.to_state.state if trigger.to_state is not none else ''ingen''
+        }}{% else %}Fem-minutters prøve under fejl{% endif %}'
+- id: emhass_limit_audit
+  alias: EMHASS – log ændring af batterigrænser
+  mode: queued
+  triggers:
+  - trigger: state
+    entity_id:
+    - sensor.wattlas_maks_ladestroem
+    - sensor.wattlas_maks_afladestroem
+  actions:
+  - action: system_log.write
+    data:
+      level: warning
+      logger: emhass.limit_audit
+      message: '{{ dict(entity=trigger.entity_id,old=trigger.from_state.state if trigger.from_state is not none
+        else none,new=trigger.to_state.state if trigger.to_state is not none else none,context=trigger.to_state.context.id
+        if trigger.to_state is not none else none,user=trigger.to_state.context.user_id if trigger.to_state is not
+        none else none,parent=trigger.to_state.context.parent_id if trigger.to_state is not none else none)|to_json
+        }}'
+template:
+- triggers:
+  - trigger: event
+    event_type: emhass_diagnose_record
+  sensor:
+  - name: EMHASS diagnose seneste
+    unique_id: emhass_diagnose_seneste
+    default_entity_id: sensor.emhass_diagnose_seneste
+    state: '{{ trigger.event.data.snapshot.time }}'
+    attributes:
+      aarsag: '{{ trigger.event.data.cause }}'
+      snapshot: '{{ trigger.event.data.snapshot }}'
+      seneste_haendelser: |-
+        {% set s=trigger.event.data.snapshot %}
+        {% set summary=dict(time=s.time,cause=trigger.event.data.cause,source=s.source,plan=s.plan_mode,control=s.control_channel,alarms=s.alarms) %}
+        {% set ns=namespace(old=[]) %}
+        {% for e in this.attributes.get('seneste_haendelser',[]) or [] %}
+         {% if 'snapshot' not in e %}{% set ns.old=ns.old+[e] %}{% endif %}
+        {% endfor %}
+        {{ ([summary]+ns.old)[:8] }}
+- triggers:
+  - trigger: event
+    event_type: emhass_plan_record
+  sensor:
+  - name: EMHASS planarkiv
+    unique_id: emhass_planarkiv
+    default_entity_id: sensor.emhass_planarkiv
+    state: '{{ trigger.event.data.time }}'
+    attributes:
+      input: '{{ trigger.event.data.input }}'
+      output: '{{ trigger.event.data.output }}'
+      settings: '{{ trigger.event.data.settings }}'

@@ -1,0 +1,81 @@
+template:
+- triggers:
+  - trigger: time_pattern
+    seconds: /30
+  - trigger: homeassistant
+    event: start
+  sensor:
+  - name: EMHASS besparelse regnskab
+    unique_id: emhass_besparelse_regnskab
+    default_entity_id: sensor.emhass_besparelse_regnskab
+    state: '{{ now().isoformat() }}'
+    icon: mdi:cash-clock
+    attributes:
+      regnskab: |
+        {% set t=as_timestamp(now()) %}
+        {% set day=now().strftime('%Y-%m-%d') %}
+        {% set midnight=as_timestamp(today_at('00:00')) %}
+        {% set yesterday=(now().date()-timedelta(days=1))|string %}
+        {% set old=this.attributes.get('regnskab',{}) %}
+        {% set zero=dict(import_cost=0.0,import_coverage=0.0,base=0.0,actual=0.0,solar=0.0,coverage=0.0,arb=0.0,arb_buy=0.0,arb_avoid=0.0,kwh=0.0) %}
+        {% set sample=namespace(ok=true) %}
+        {% set ids=['sensor.emhass_m_load_w_totalpower','sensor.emhass_m_grid_out_total_power','sensor.emhass_solproduktion_samlet','sensor.emhass_m_battery_output_w_power','sensor.emhass_m_battery_soc'] %}
+        {% for id in ids %}{% if not is_number(states(id)) %}{% set sample.ok=false %}{% endif %}{% endfor %}
+        {% if not is_state('binary_sensor.emhass_ui_netdata_ok','on') %}{% set sample.ok=false %}{% endif %}
+        {% set price=namespace(values=[]) %}
+        {% for r in (state_attr('sensor.energi_data_service','raw_today') or [])+(state_attr('sensor.energi_data_service','raw_tomorrow') or []) %}
+        {% set rt=as_timestamp(r.get('hour'),0) %}
+        {% if rt<=t<rt+3600 and is_number(r.get('price')) %}{% set price.values=price.values+[r.price|float] %}{% endif %}
+        {% endfor %}
+        {% if price.values|count!=1 %}{% set sample.ok=false %}{% endif %}
+        {% set l=states(ids[0])|float(0) %}{% set g=states(ids[1])|float(0) %}{% set pv=states(ids[2])|float(0) %}{% set b=states(ids[3])|float(0) %}{% set soc=states(ids[4])|float(0) %}
+        {% if l<0 or pv<0 or not 0<=soc<=100 %}{% set sample.ok=false %}{% endif %}
+        {% set spot=price.values[0] if price.values|count==1 else 0 %}
+        {% set net=(states('input_number.wattlas_nettarif_lav')|float(0)) if now().hour<6 else (states('input_number.wattlas_nettarif_spids')|float(0)) if 17<=now().hour<21 else (states('input_number.wattlas_nettarif_hoej')|float(0)) %}
+        {% set buy=spot+(net+(states('input_number.wattlas_elafgift')|float(0)))*1.25+(states('input_number.wattlas_tillaeg')|float(0)) %}{% set sell=spot/1.25-(states('input_number.wattlas_salg_nettarif')|float(0))*1.25-(states('input_number.wattlas_salg_gebyr')|float(0)) %}
+        {% set dt=t-old.get('t',t) %}
+        {% set valid=sample.ok and old.get('valid',false) and 0<dt<=90 %}
+        {% set ns=namespace(cur=old.get('current',zero),prev=old.get('yesterday',{}),d=old.get('day',day),start=old.get('day_start',midnight),q=old.get('grid_kwh',0.0),cost=old.get('grid_cost',0.0),other=old.get('other_kwh',[0,(soc-15)*(states('input_number.wattlas_batteri_kwh')|float(0))/100]|max)) %}
+        {% if valid and 'other_kwh' in old and old.get('reserve_soc',20)>15 %}{% set ns.other=ns.other+([0,([soc,old.get('reserve_soc',20)]|min)-15]|max)*(states('input_number.wattlas_batteri_kwh')|float(0))/100 %}{% endif %}
+        {# stock_start/stock_end = hvad netstrømmen i batteriet kostede ved dagens start/slut.
+           Sparet = base - actual + stock_end - stock_start, så nattens opladning til næste dag ikke tælles som dagens udgift. #}
+        {# datahul nulstiller ikke længere batteriets indhold. Puljerne tilpasses batteriniveauet:
+           er der brugt strøm i hullet, tages den forholdsmæssigt fra net- og solpuljen; er der ladet, regnes det som sol/ukendt. #}
+        {% if not valid and sample.ok %}
+        {% set e=[0,(soc-15)*(states('input_number.wattlas_batteri_kwh')|float(0))/100]|max %}{% set tot=ns.q+ns.other %}
+        {% if tot>e and tot>0 %}{% set f=e/tot %}{% set ns.q=ns.q*f %}{% set ns.cost=ns.cost*f %}{% set ns.other=ns.other*f %}
+        {% else %}{% set ns.other=ns.other+e-tot %}{% endif %}
+        {% endif %}
+        {% set prior=old.get('sample',{}) %}
+        {% set parts=[dict(day=ns.d,seconds=dt)] if ns.d==day else [dict(day=ns.d,seconds=[0,midnight-old.get('t',t)]|max),dict(day=day,seconds=[0,t-midnight]|max)] %}
+        {% for part in parts %}
+        {% if part.day!=ns.d %}
+        {% if ns.d==yesterday %}
+        {% set ns.prev=dict(date=ns.d,import_cost=ns.cur.get('import_cost',0),import_coverage=ns.cur.get('import_coverage',0),base=ns.cur.base,actual=ns.cur.actual,solar=ns.cur.solar,coverage=ns.cur.coverage,day_seconds=midnight-ns.start,arb=ns.cur.arb,arb_buy=ns.cur.arb_buy,arb_avoid=ns.cur.arb_avoid,kwh=ns.cur.kwh,stock_start=ns.cur.get('stock_start',0.0),stock_end=ns.cost) %}
+        {% else %}{% set ns.prev={} %}{% endif %}
+        {% set ns.cur=dict(zero,stock_start=ns.cost) %}{% set ns.d=day %}{% set ns.start=midnight %}
+        {% endif %}
+        {% if valid and part.seconds>0 %}
+        {% set h=part.seconds/3600 %}
+        {% set pl=prior.l %}{% set pg=prior.g %}{% set pp=prior.pv %}{% set pb=prior.b %}{% set cb=prior.buy %}{% set cs=prior.sell %}
+        {% set base=pl*h/1000*cb %}
+        {% set actual=pg*h/1000*(cb if pg>=0 else cs) %}
+        {% set no_batt=pl-pp %}{% set solar=no_batt*h/1000*(cb if no_batt>=0 else cs) %}
+        {% set a=namespace(paid=0.0,avoided=0.0,kwh=0.0) %}
+        {% if pb < -100 %}
+        {% set dc=-pb*h/1000 %}
+        {% set grid_ac=[0,pg-([0,pl-pp]|max)]|max %}
+        {% set grid_dc=[dc,grid_ac*h/1000*0.95]|min %}
+        {% set ns.q=ns.q+grid_dc %}{% set ns.cost=ns.cost+grid_dc/0.95*cb %}{% set ns.other=ns.other+dc-grid_dc %}
+        {% elif pb > 100 and ns.q+ns.other>0 %}
+        {% set total=ns.q+ns.other %}
+        {% set take=[pb*h/1000,total]|min %}{% set grid_take=take*ns.q/total %}
+        {% set home_fraction=[1,([0,pl-pp]|max)/(pb*0.95)]|min %}
+        {% set consumed_cost=ns.cost*grid_take/ns.q if ns.q>0 else 0 %}
+        {% set a.paid=consumed_cost*home_fraction %}{% set a.kwh=grid_take*0.95*home_fraction %}{% set a.avoided=a.kwh*cb %}
+        {% set ns.q=[0,ns.q-grid_take]|max %}{% set ns.cost=ns.cost-consumed_cost %}{% set ns.other=[0,ns.other-(take-grid_take)]|max %}
+        {% endif %}
+        {% set ns.cur=dict(import_cost=ns.cur.get('import_cost',0)+([0,pg]|max)*h/1000*cb,import_coverage=ns.cur.get('import_coverage',0)+part.seconds,base=ns.cur.base+base,actual=ns.cur.actual+actual,solar=ns.cur.solar+solar,coverage=ns.cur.coverage+part.seconds,arb=ns.cur.arb+a.avoided-a.paid,arb_buy=ns.cur.arb_buy+a.paid,arb_avoid=ns.cur.arb_avoid+a.avoided,kwh=ns.cur.kwh+a.kwh,stock_start=ns.cur.get('stock_start',0.0)) %}
+        {% endif %}
+        {% endfor %}
+        {{ dict(schema_version=2,reserve_soc=15,day=day,day_start=ns.start,t=t,valid=sample.ok,sample=dict(l=l,g=g,pv=pv,b=b,buy=buy,sell=sell),current=ns.cur,yesterday=ns.prev,grid_kwh=ns.q,grid_cost=ns.cost,other_kwh=ns.other) }}

@@ -1,0 +1,150 @@
+# Hvad strømmen reelt koster lige nu.
+# Batteri: det, der bruges nu, skal fyldes op igen ved næste planlagte opladning i EMHASS-planen.
+#   Netladning koster købsprisen, solladning koster solcellernes slid (input_number.wattlas_solcelle_slid).
+#   Pris pr. kWh til huset = genopfyldningspris / (0,95 × 0,95) + slid 0,25 kr. (samme slidpris som EMHASS).
+# Hus: blandingspris af net, batteri og sol efter hvor husets forbrug kommer fra lige nu.
+template:
+  - sensor:
+      - name: Pris for at bruge batteriet
+        unique_id: batteri_brugspris
+        default_entity_id: sensor.batteri_brugspris
+        unit_of_measurement: DKK/kWh
+        icon: mdi:battery-sync
+        state: >-
+          {% set b = state_attr('sensor.p_batt_forecast', 'battery_scheduled_power') or [] %}
+          {% set g = state_attr('sensor.p_grid_forecast', 'forecasts') or [] %}
+          {% set k = state_attr('sensor.unit_load_cost', 'unit_load_cost_forecasts') or [] %}
+          {% set s = state_attr('sensor.unit_prod_price', 'unit_prod_price_forecasts') or [] %}
+          {% set sol = states('input_number.wattlas_solcelle_slid') | float(0.10) %}
+          {% set ns = namespace(e=0.0, cost=0.0, net=0.0, started=false, done=false) %}
+          {% for i in range(b | count) %}
+            {% if not ns.done and i < g | count and i < k | count and i < s | count
+                  and g[i].date == b[i].date and k[i].date == b[i].date and s[i].date == b[i].date %}
+              {% set pb = b[i].p_batt_forecast | float(0) %}
+              {% if pb < -150 %}
+                {% set kwh = -pb / 2000 %}
+                {% set fra_net = [kwh, ([g[i].p_grid_forecast | float(0), 0] | max) / 2000] | min %}
+                {% set ns.cost = ns.cost + fra_net * (k[i].unit_load_cost | float(0))
+                                 + (kwh - fra_net) * sol %}
+                {% set ns.e = ns.e + kwh %}{% set ns.net = ns.net + fra_net %}{% set ns.started = true %}
+              {% elif pb > 150 and ns.started %}
+                {% set ns.done = true %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ (ns.cost / ns.e / 0.9025 + 0.25) | round(2) if ns.e > 0.2 else none }}
+        availability: >-
+          {{ (state_attr('sensor.p_batt_forecast', 'battery_scheduled_power') or []) | count > 0
+             and is_state('binary_sensor.emhass_ui_plan_frisk', 'on') }}
+        attributes:
+          genopfyldning: >-
+            {% set b = state_attr('sensor.p_batt_forecast', 'battery_scheduled_power') or [] %}
+            {% set g = state_attr('sensor.p_grid_forecast', 'forecasts') or [] %}
+            {% set ns = namespace(e=0.0, net=0.0, start=none, slut=none, started=false, done=false) %}
+            {% for i in range(b | count) %}
+              {% if not ns.done and i < g | count and g[i].date == b[i].date %}
+                {% set pb = b[i].p_batt_forecast | float(0) %}
+                {% if pb < -150 %}
+                  {% set kwh = -pb / 2000 %}
+                  {% set ns.net = ns.net + ([kwh, ([g[i].p_grid_forecast | float(0), 0] | max) / 2000] | min) %}
+                  {% set ns.e = ns.e + kwh %}
+                  {% if not ns.started %}{% set ns.start = b[i].date %}{% endif %}
+                  {% set ns.slut = b[i].date %}{% set ns.started = true %}
+                {% elif pb > 150 and ns.started %}
+                  {% set ns.done = true %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ dict(kwh=ns.e | round(1), net_andel=((ns.net / ns.e * 100) | round(0)) if ns.e > 0 else 0,
+                    start=ns.start, slut=ns.slut) }}
+          slid_kr_pr_kwh: 0.25
+
+      - name: Husets strømpris med slid
+        unique_id: hus_strompris_nu
+        default_entity_id: sensor.hus_strompris_nu
+        unit_of_measurement: DKK/kWh
+        icon: mdi:home-lightning-bolt
+        state: >-
+          {% set l = states('sensor.emhass_m_load_w_totalpower') | float(0) %}
+          {% set g = states('sensor.emhass_m_grid_out_total_power') | float(0) %}
+          {% set bt = states('sensor.emhass_m_battery_output_w_power') | float(0) %}
+          {% set buy = states('sensor.emhass_ui_koebspris') | float(0) %}
+          {% set sell = [states('sensor.emhass_ui_salgspris') | float(0), 0] | max %}
+          {# batteriet regnes med hvad strømmen i det faktisk kostede + slid (sensor.batteri_pris_med_slid) #}
+          {% set bp = states('sensor.batteri_pris_med_slid') | float(buy) %}
+          {# egen solstrøm regnes som slid (input_number.wattlas_solcelle_slid), ikke salgspris #}
+          {% set sol = states('input_number.wattlas_solcelle_slid') | float(0.10) %}
+          {% set fb = [[bt, 0] | max, l] | min %}
+          {% set fg = [[g, 0] | max, l - fb] | min %}
+          {% set fs = [l - fb - fg, 0] | max %}
+          {{ ((fg * buy + fb * bp + fs * sol) / l) | round(2) }}
+        availability: >-
+          {{ states('sensor.emhass_m_load_w_totalpower') | float(0) > 50
+             and is_number(states('sensor.emhass_ui_koebspris')) }}
+        attributes:
+          fra_net_w: >-
+            {% set l = states('sensor.emhass_m_load_w_totalpower') | float(0) %}
+            {% set fb = [[states('sensor.emhass_m_battery_output_w_power') | float(0), 0] | max, l] | min %}
+            {{ [[states('sensor.emhass_m_grid_out_total_power') | float(0), 0] | max, l - fb] | min | round(0) }}
+          fra_batteri_w: >-
+            {% set l = states('sensor.emhass_m_load_w_totalpower') | float(0) %}
+            {{ [[states('sensor.emhass_m_battery_output_w_power') | float(0), 0] | max, l] | min | round(0) }}
+
+      # to priser efter ønske – "kontant" (som elregningen, sol = 0 kr, intet slid) og "med slid".
+      # Batteriets indhold prissættes efter hvad strømmen i det faktisk kostede (EMHASS-regnskabet):
+      # netstrøm med købsprisen inkl. 5 % ladetab, sol 0 kr; 5 % afladetab ved brug.
+      - name: Batteri kontantpris
+        unique_id: batteri_kontantpris
+        default_entity_id: sensor.batteri_kontantpris
+        unit_of_measurement: DKK/kWh
+        icon: mdi:battery-heart-variant
+        state: >-
+          {% set r = state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') %}
+          {% set tot = (r.grid_kwh | float(0) + r.other_kwh | float(0)) if r is mapping else 0 %}
+          {# er puljen tom (batteriet brugt), vises genopfyldningsprisen uden slid i stedet for 0 kr #}
+          {% set bp = states('sensor.batteri_brugspris') %}
+          {{ (r.grid_cost | float(0) / (tot * 0.95)) | round(2) if tot > 0.05 else (((bp | float - 0.25) * 0.9025 / 0.95) | round(2) if is_number(bp) else 0) }}
+        availability: "{{ state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') is mapping }}"
+        attributes:
+          fra_net_procent: >-
+            {% set r = state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') %}
+            {% set tot = (r.grid_kwh | float(0) + r.other_kwh | float(0)) if r is mapping else 0 %}
+            {{ (r.grid_kwh | float(0) / tot * 100) | round(0) if tot > 0.05 else 0 }}
+
+      - name: Batteri pris med slid
+        unique_id: batteri_pris_med_slid
+        default_entity_id: sensor.batteri_pris_med_slid
+        unit_of_measurement: DKK/kWh
+        icon: mdi:battery-sync
+        state: >-
+          {% set r = state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') %}
+          {% set sol = states('input_number.wattlas_solcelle_slid') | float(0.10) %}
+          {% set tot = (r.grid_kwh | float(0) + r.other_kwh | float(0)) if r is mapping else 0 %}
+          {# er puljen tom, bruges genopfyldningsprisen (sensor.batteri_brugspris) i stedet for ren solpris #}
+          {% set bp = states('sensor.batteri_brugspris') %}
+          {{ ((r.grid_cost | float(0) + r.other_kwh | float(0) * sol) / (tot * 0.95) + 0.25) | round(2) if tot > 0.05 else (bp | float | round(2) if is_number(bp) else (sol / 0.95 + 0.25) | round(2)) }}
+        availability: "{{ state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') is mapping }}"
+
+      - name: Husets strømpris kontant
+        unique_id: hus_strompris_kontant
+        default_entity_id: sensor.hus_strompris_kontant
+        unit_of_measurement: DKK/kWh
+        icon: mdi:home-currency-usd
+        state: >-
+          {% set l = states('sensor.emhass_m_load_w_totalpower') | float(0) %}
+          {% set g = states('sensor.emhass_m_grid_out_total_power') | float(0) %}
+          {% set bt = states('sensor.emhass_m_battery_output_w_power') | float(0) %}
+          {% set buy = states('sensor.emhass_ui_koebspris') | float(0) %}
+          {% set bk = states('sensor.batteri_kontantpris') | float(0) %}
+          {% set fb = [[bt, 0] | max, l] | min %}
+          {% set fg = [[g, 0] | max, l - fb] | min %}
+          {{ ((fg * buy + fb * bk) / l) | round(2) }}
+        availability: >-
+          {{ states('sensor.emhass_m_load_w_totalpower') | float(0) > 50
+             and is_number(states('sensor.emhass_ui_koebspris')) }}
+        attributes:
+          eksport_w: "{{ [-(states('sensor.emhass_m_grid_out_total_power') | float(0)), 0] | max | round(0) }}"
+          tjener_pr_kwh: >-
+            {% set g = states('sensor.emhass_m_grid_out_total_power') | float(0) %}
+            {% set s = states('sensor.emhass_ui_salgspris') %}
+            {{ s | float(0) | round(2) if g < -50 and is_number(s) else none }}

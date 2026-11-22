@@ -1,0 +1,1056 @@
+input_boolean:
+  emhass_opstart_klar:
+    name: EMHASS opstart klar
+    initial: false
+  emhass_opstartsfejl:
+    name: EMHASS opstartsfejl
+    initial: false
+  emhass_styring_aktiv:
+    name: EMHASS styring aktiv
+    icon: mdi:solar-power
+  emhass_plan_gyldig:
+    name: EMHASS plan gyldig
+    initial: false
+  emhass_har_overtaget:
+    name: EMHASS har overtaget
+input_datetime:
+  emhass_plan_tid:
+    name: EMHASS seneste godkendte plan
+    has_date: true
+    has_time: true
+input_number:
+  emhass_plan_batteri_w:
+    name: EMHASS plan batterieffekt
+    min: -50000
+    max: 50000
+    step: 0.01
+    unit_of_measurement: W
+  emhass_plan_soc:
+    name: EMHASS plan SOC
+    min: 15
+    max: 100
+    step: 0.01
+    unit_of_measurement: '%'
+  emhass_plan_net_w:
+    name: EMHASS plan neteffekt
+    min: -50000
+    max: 50000
+    step: 0.01
+    unit_of_measurement: W
+# EMHASS (0.18+) kræver API-nøgle (Bearer). Nøglen står i input_text.wattlas_emhass_noegle (sæt den i Wattlas Styring → Indstillinger).
+rest_command:
+  emhass_test_forbindelse:
+    url: "{{ states('input_text.wattlas_emhass_adresse') | trim('/') }}/"
+    headers:
+      Authorization: "Bearer {{ states('input_text.wattlas_emhass_noegle') }}"
+    method: GET
+    timeout: 15
+  emhass_beregn_helios:
+    url: "{{ states('input_text.wattlas_emhass_adresse') | trim('/') }}/action/naive-mpc-optim"
+    headers:
+      Authorization: "Bearer {{ states('input_text.wattlas_emhass_noegle') }}"
+    method: POST
+    content_type: application/json
+    timeout: 120
+    payload: '{{ beregning | to_json }}'
+  emhass_publicer_plan:
+    url: "{{ states('input_text.wattlas_emhass_adresse') | trim('/') }}/action/publish-data"
+    headers:
+      Authorization: "Bearer {{ states('input_text.wattlas_emhass_noegle') }}"
+    method: POST
+    content_type: application/json
+    timeout: 60
+    payload: >-
+      {"method_ts_round":"first","continual_publish":false{% if med_forbruger | default(false) %},"number_of_deferrable_loads":1,"custom_deferrable_forecast_id":[{"entity_id":"sensor.p_deferrable0","unit_of_measurement":"W","friendly_name":"Wattlas fleksibel forbruger"}]{% endif %}}
+  # Wattlas hvad-hvis – publicerer under prefix hh_, så de rigtige sensorer ikke røres
+  emhass_publicer_hvadhvis:
+    url: "{{ states('input_text.wattlas_emhass_adresse') | trim('/') }}/action/publish-data"
+    headers:
+      Authorization: "Bearer {{ states('input_text.wattlas_emhass_noegle') }}"
+    method: POST
+    content_type: application/json
+    timeout: 60
+    payload: >-
+      {"method_ts_round":"first","continual_publish":false,"publish_prefix":"hh_"{% if med_forbruger | default(false) %},"number_of_deferrable_loads":1,"custom_deferrable_forecast_id":[{"entity_id":"sensor.p_deferrable0","unit_of_measurement":"W","friendly_name":"Wattlas fleksibel forbruger"}]{% endif %}}
+script:
+  emhass_test_helios:
+    alias: EMHASS – beregn og publicer Helios-plan
+    mode: single
+    sequence:
+    - condition: state
+      entity_id: binary_sensor.wattlas_konfigureret
+      state: 'on'
+    - variables:
+        soc: '{{ states(''sensor.emhass_m_battery_soc'') | float(-1) }}'
+        start_ts: '{{ (as_timestamp(now()) // 1800) * 1800 }}'
+        charge_limit: '{{ states(''sensor.emhass_ui_plan_ladegraense_w'')|float(0) }}'
+        discharge_limit: '{{ states(''sensor.emhass_ui_plan_afladegraense_w'')|float(0) }}'
+    - if:
+      - condition: template
+        value_template: '{{ not (15 <= soc <= 100) }}'
+      then:
+      - stop: SOC mangler eller er uden for 15–100 procent.
+        error: true
+    - if:
+      - condition: template
+        value_template: '{{ charge_limit<=0 or discharge_limit<=0 }}'
+      then:
+      - stop: Inverterens lade- eller afladegrænse mangler. Ingen ny plan.
+        error: true
+    - variables:
+        prognose: |-
+          {%- set pv = state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') or [] -%} {%- set priser = (state_attr('sensor.energi_data_service', 'raw_today') or [])
+            + (state_attr('sensor.energi_data_service', 'raw_tomorrow') or []) -%}
+          {%- set extent = namespace(end=start_ts | float) -%}
+          {%- for p in priser -%}
+            {%- set pt = as_timestamp(p.hour, 0) -%}
+            {%- if pt > 0 and is_number(p.price) -%}
+              {%- set extent.end = [extent.end, pt + 3600] | max -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {#- Horisont: alle kendte priser, men aldrig længere end solprognosen (ellers fejler
+              beregningen) og højst 72 halvtimer (36 t). Den gemte plan bruger de første 48. -#}
+          {%- set pvend = namespace(end=start_ts | float) -%}
+          {%- for p in pv -%}
+            {%- set pt = as_timestamp(p.datetime, 0) -%}
+            {%- if pt > 0 and is_number(p.watts) -%}
+              {%- set pvend.end = [pvend.end, pt + 900] | max -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {%- set slut = [extent.end, pvend.end] | min -%}
+          {%- set n = [72, [0, ((slut - start_ts | float) / 1800) | int] | max] | min -%}
+          {%- set ns = namespace(pv=[], koeb=[], salg=[], fejl=[]) -%} {%- for i in range(n) -%}
+            {%- set ts = (start_ts | float) + i * 1800 -%}
+            {%- set slot = namespace(watts=[], priser=[]) -%}
+            {%- for p in pv -%}
+              {%- set pt = as_timestamp(p.datetime, 0) -%}
+              {%- if ts <= pt < ts + 1800 and is_number(p.watts) -%}
+                {%- set slot.watts = slot.watts + [p.watts | float] -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- for p in priser -%}
+              {%- set pt = as_timestamp(p.hour, 0) -%}
+              {%- if pt <= ts < pt + 3600 and is_number(p.price) -%}
+                {%- set slot.priser = slot.priser + [p.price | float] -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {# Helios kan udelade den gentagne nattetime ved vintertid.
+               Udfyld kun tomme intervaller i anden kl. 02-time, med
+               entydig nulprognose umiddelbart før og efter hele hullet. #}
+            {%- set repeated = (ts | timestamp_custom('%H', true)) == '02'
+                and (ts | timestamp_custom('%Y-%m-%d %H:%M', true)) == ((ts-3600) | timestamp_custom('%Y-%m-%d %H:%M', true))
+                and (ts | timestamp_custom('%z', true)) != ((ts-3600) | timestamp_custom('%z', true)) -%}
+            {%- if slot.watts | count == 0 and repeated -%}
+              {%- set hour_start = ts - ((ts | timestamp_custom('%M', true) | int) * 60) -%}
+              {%- set edge = namespace(before=[], after=[]) -%}
+              {%- for p in pv -%}
+                {%- set pt = as_timestamp(p.datetime, 0) -%}
+                {%- if pt == hour_start-900 -%}
+                  {%- set edge.before = edge.before + [p.watts | float(none)] -%}
+                {%- elif pt == hour_start+3600 -%}
+                  {%- set edge.after = edge.after + [p.watts | float(none)] -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {%- if edge.before == [0.0] and edge.after == [0.0] -%}
+                {%- set slot.watts = [0.0, 0.0] -%}
+              {%- endif -%}
+            {%- endif -%}
+            {%- if slot.watts | count == 2 and slot.priser | count == 1 -%}
+              {%- set h = ts | timestamp_custom('%H', true) | int -%}
+              {%- set net = (states('input_number.wattlas_nettarif_lav')|float(0)) if h < 6 else (states('input_number.wattlas_nettarif_spids')|float(0)) if 17 <= h < 21 else (states('input_number.wattlas_nettarif_hoej')|float(0)) -%}
+              {%- set spot = slot.priser[0] -%}
+              {%- set ns.pv = ns.pv + [((slot.watts | sum) / 2) | round(2)] -%}
+              {%- set ns.koeb = ns.koeb + [(spot + (net + (states('input_number.wattlas_elafgift')|float(0))) * 1.25 + (states('input_number.wattlas_tillaeg')|float(0))) | round(6)] -%}
+              {%- set ns.salg = ns.salg + [(spot / 1.25 - (states('input_number.wattlas_salg_nettarif')|float(0)) * 1.25 - (states('input_number.wattlas_salg_gebyr')|float(0))) | round(6)] -%}
+            {%- else -%}
+              {%- set ns.fejl = ns.fejl + [ts | timestamp_custom('%d/%m %H:%M %z')] -%}
+            {%- endif -%}
+          {%- endfor -%} {{ dict(pv=ns.pv, koeb=ns.koeb, salg=ns.salg, fejl=ns.fejl, intervaller=n) }}
+    - if:
+      - condition: template
+        value_template: '{{ prognose.intervaller < 4 or prognose.fejl | count > 0 or prognose.pv | count != prognose.intervaller
+          }}'
+      then:
+      - action: persistent_notification.create
+        data:
+          notification_id: emhass_planfejl
+          title: EMHASS – prognosedata mangler
+          message: 'Ingen ny plan. {{ prognose.intervaller }} halvtimer med prisdækning (mindst 4 kræves). Manglende
+            eller tvetydige data: {{ prognose.fejl | join(", ") }}'
+      - stop: Mindst to timers sammenhængende, komplette pris- og solprognosedata kræves.
+        error: true
+    # Husprognose: gennemsnit af samme halve time de sidste 7 døgn, justeret for at det
+    # bliver koldere eller varmere end i ugen der gik (varmepumperne). Mangler der data,
+    # bruges EMHASS' egen "som i går" (naive) som reserve.
+    - action: weather.get_forecasts
+      continue_on_error: true
+      target:
+        entity_id: "{{ states('input_text.wattlas_vejr_entitet') }}"
+      data:
+        type: hourly
+      response_variable: vejr
+    - variables:
+        # Watt ekstra forbrug pr. grad koldere end ugens gennemsnit (input_number.wattlas_kulde_w_pr_grad, 0 = ingen justering).
+        kulde_w_pr_grad: "{{ states('input_number.wattlas_kulde_w_pr_grad')|float(0) }}"
+        hus: |-
+          {%- set raw = state_attr('sensor.emhass_husforbrug_historik', 'data') -%}
+          {%- set rows = (raw | from_json if raw is string else raw) or [] -%}
+          {%- set traw = state_attr('sensor.emhass_udetemperatur_historik', 'data') -%}
+          {%- set trows = (traw | from_json if traw is string else traw) or [] -%}
+          {%- set L = namespace(d={}) -%}
+          {%- for r in rows -%}{%- if r | count == 2 and is_number(r[1]) -%}{%- set L.d = dict(L.d, **{(r[0] | int | string): r[1] | float}) -%}{%- endif -%}{%- endfor -%}
+          {%- set T = namespace(d={}) -%}
+          {%- for r in trows -%}{%- if r | count == 2 and is_number(r[1]) -%}{%- set T.d = dict(T.d, **{(r[0] | int | string): r[1] | float}) -%}{%- endif -%}{%- endfor -%}
+          {%- set F = namespace(d={}) -%}
+          {%- set fc = (vejr[states('input_text.wattlas_vejr_entitet')].forecast if vejr is defined and vejr[states('input_text.wattlas_vejr_entitet')] is defined else []) -%}
+          {%- for f in fc -%}
+            {%- set ft = as_timestamp(f.datetime, 0) -%}
+            {%- if ft > 0 and is_number(f.temperature) -%}{%- set F.d = dict(F.d, **{(((ft // 3600) * 3600) | int | string): f.temperature | float}) -%}{%- endif -%}
+          {%- endfor -%}
+          {%- set nu_temp = states('sensor.wattlas_udetemperatur') -%}
+          {%- set ns = namespace(liste=[], fejl=0, juster=0) -%}
+          {%- for i in range(prognose.intervaller | int) -%}
+            {%- set ts = (start_ts | float + i * 1800) | int -%}
+            {%- set h = namespace(v=[], t=[]) -%}
+            {%- for k in range(1, 8) -%}
+              {%- set key = (ts - k * 86400) | string -%}
+              {%- if key in L.d -%}{%- set h.v = h.v + [L.d[key]] -%}{%- endif -%}
+              {%- set tkey = (((ts - k * 86400) // 3600) * 3600) | string -%}
+              {%- if tkey in T.d -%}{%- set h.t = h.t + [T.d[tkey]] -%}{%- endif -%}
+            {%- endfor -%}
+            {%- if h.v | count >= 3 -%}
+              {%- set base = (h.v | sum) / (h.v | count) -%}
+              {%- set fkey = ((ts // 3600) * 3600) | string -%}
+              {%- set tf = F.d[fkey] if fkey in F.d else (nu_temp | float if is_number(nu_temp) else none) -%}
+              {%- set t7 = (h.t | sum) / (h.t | count) if h.t | count >= 3 else none -%}
+              {%- set adj = kulde_w_pr_grad * (t7 - tf) if (t7 is not none and tf is not none and [t7, tf] | min < 15) else 0 -%}
+              {%- set adj = [-1500, [3000, adj] | min] | max -%}
+              {%- set ns.juster = ns.juster + adj -%}
+              {%- set ns.liste = ns.liste + [[150, (base + adj) | round(0)] | max] -%}
+            {%- else -%}
+              {%- set ns.fejl = ns.fejl + 1 -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ dict(ok=(ns.fejl == 0 and ns.liste | count == prognose.intervaller | int), liste=ns.liste, fejl=ns.fejl,
+                  kwh=((ns.liste | sum) / 2000) | round(1), kulde_kwh=(ns.juster / 2000) | round(1), vejr_timer=F.d | count) }}
+    - variables:
+        beregning_basis:
+          prediction_horizon: '{{ prognose.intervaller | int }}'
+          optimization_time_step: 30
+          method_ts_round: first
+          weather_forecast_method: list
+          load_forecast_method: naive
+          load_cost_forecast_method: list
+          production_price_forecast_method: list
+          pv_power_forecast: '{{ prognose.pv }}'
+          load_cost_forecast: '{{ prognose.koeb }}'
+          prod_price_forecast: '{{ prognose.salg }}'
+          soc_init: '{{ soc / 100 }}'
+          # Wattlas-indstillinger (wattlas_styring.yaml). Reserve højst nuværende SOC, ellers kan EMHASS ikke løse opgaven.
+          battery_minimum_state_of_charge: "{{ ([15, [states('input_number.wattlas_reserve') | float(15), soc | float(15)] | min] | max) / 100 }}"
+          soc_final: "{{ ([states('input_number.wattlas_slut_soc') | float(30), [15, [states('input_number.wattlas_reserve') | float(15), soc | float(15)] | min] | max] | max) / 100 }}"
+          battery_nominal_energy_capacity: "{{ (states('input_number.wattlas_batteri_kwh')|float(0) * 1000) | int }}"
+          battery_charge_power_max: '{{ charge_limit|int }}'
+          battery_discharge_power_max: '{{ discharge_limit|int }}'
+          maximum_power_from_grid: "{{ ([1000, [states('input_number.wattlas_maks_netimport_w')|float(0), states('input_number.wattlas_max_net_kw') | float(0) * 1000] | min] | max) | int }}"
+          set_nodischarge_to_grid: true
+          continual_publish: false
+          battery_charge_efficiency: 0.95
+          battery_discharge_efficiency: 0.95
+          # Slidpris pr. kWh, der tages ud af batteriet (batteriets pris / (kapacitet × cykler),
+          # fx 40.000 kr. / (20 kWh × 6000) ≈ 0,33 kr./kWh – input_number.wattlas_slid), så runder der ikke betaler sig, fravælges
+          weight_battery_discharge: "{{ [0, [1, states('input_number.wattlas_slid') | float(0.25)] | min] | max }}"
+          weight_battery_charge: 0
+    # Wattlas – fleksibel forbruger (wattlas_styring.yaml) og hvad-hvis (kaldt med data hvadhvis={...})
+    - variables:
+        hh: "{{ hvadhvis if hvadhvis is defined and hvadhvis is mapping else none }}"
+    - variables:
+        fb_ekstra: >-
+          {% set med = is_state('input_boolean.wattlas_forbruger1_aktiv', 'on') if hh is none else hh.get('forbruger', is_state('input_boolean.wattlas_forbruger1_aktiv', 'on')) %}
+          {% set P = states('input_number.wattlas_forbruger1_effekt') | float(0) %}
+          {% set rest = ([0, states('input_number.wattlas_forbruger1_timer') | float(0) - states('input_number.wattlas_forbruger1_koert') | float(0)] | max * 2) | round(0) / 2 %}
+          {% set dl = today_at(states('input_datetime.wattlas_forbruger1_faerdig')) %}{% if dl <= now() %}{% set dl = dl + timedelta(days=1) %}{% endif %}
+          {% set slut = [1, [((dl - now()).total_seconds() / 1800) | int, prognose.intervaller | int] | min] | max %}
+          {% if med and P >= 100 and rest > 0 %}{{ dict(number_of_deferrable_loads=1, nominal_power_of_deferrable_loads=[P], minimum_power_of_deferrable_loads=[0],
+             operating_hours_of_each_deferrable_load=[rest], start_timesteps_of_each_deferrable_load=[0], end_timesteps_of_each_deferrable_load=[slut],
+             treat_deferrable_load_as_semi_cont=[true], set_deferrable_load_single_constant=[false], set_deferrable_startup_penalty=[0],
+             set_deferrable_max_startups=[0]) }}{% else %}{{ {} }}{% endif %}
+        hh_ekstra: >-
+          {% if hh is none %}{{ {} }}{% else %}
+          {% set r = [15, [hh.get('reserve', 15) | float(15), soc | float(15)] | min] | max %}
+          {{ dict(battery_minimum_state_of_charge=r / 100, soc_final=([hh.get('slut_soc', 30) | float(30), r] | max) / 100,
+                  maximum_power_from_grid=([6, [11, hh.get('max_net_kw', 11) | float(11)] | min] | max * 1000) | int,
+                  weight_battery_discharge=[0, [1, hh.get('slid', 0.25) | float(0.25)] | min] | max, publish_prefix='hh_') }}{% endif %}
+    - action: rest_command.emhass_beregn_helios
+      data:
+        beregning: >-
+          {% set b = dict(beregning_basis, load_forecast_method='list', load_power_forecast=hus.liste) if hus.ok else beregning_basis %}
+          {% set c = dict(b, **fb_ekstra) %}{{ dict(c, **hh_ekstra) }}
+      response_variable: emhass_svar
+    - if:
+      - condition: template
+        value_template: '{{ hh is not none }}'
+      then:
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.wattlas_hvadhvis_status
+        data:
+          value: "{{ ('ok ' if emhass_svar.status | int == 200 else 'fejl ' ~ emhass_svar.status ~ ' ') ~ now().strftime('%H:%M') }}"
+      - if:
+        - condition: template
+          value_template: '{{ emhass_svar.status | int == 200 }}'
+        then:
+        - action: rest_command.emhass_publicer_hvadhvis
+          data:
+            med_forbruger: "{{ fb_ekstra | count > 0 }}"
+      - stop: Hvad-hvis færdig – den rigtige plan er ikke ændret.
+    - if:
+      - condition: template
+        value_template: '{{ emhass_svar.status | int != 200 }}'
+      then:
+      - action: persistent_notification.create
+        data:
+          notification_id: emhass_planfejl
+          title: EMHASS – beregning fejlede
+          message: 'HTTP {{ emhass_svar.status }}: {{ (emhass_svar.content | string)[:1500] }}'
+      - stop: EMHASS returnerede en fejl. Seneste godkendte tidsplan bevares.
+        error: true
+    - variables:
+        publiceret_fra: '{{ as_timestamp(now()) }}'
+    - action: rest_command.emhass_publicer_plan
+      data:
+        med_forbruger: "{{ fb_ekstra | count > 0 }}"
+      response_variable: publicering
+    - delay:
+        seconds: 2
+    - variables:
+        resultater_ok: |-
+          {% set ns = namespace(ok=true) %} {% for id in ['sensor.optim_status','sensor.p_batt_forecast',
+                        'sensor.soc_batt_forecast','sensor.p_grid_forecast'] %}
+            {% set s = states[id] %}
+            {% if s is not defined or s.state in ['unknown','unavailable'] %}
+              {% set ns.ok = false %}
+            {% elif as_timestamp(s.last_reported, 0) < (publiceret_fra | float) %}
+              {% set ns.ok = false %}
+            {% endif %}
+          {% endfor %} {{ ns.ok and publicering.status | int == 200
+             and states('sensor.optim_status') | lower == 'optimal'
+             and is_number(states('sensor.p_batt_forecast'))
+             and is_number(states('sensor.soc_batt_forecast'))
+             and is_number(states('sensor.p_grid_forecast'))
+             and -charge_limit <= states('sensor.p_batt_forecast') | float(99999) <= discharge_limit
+             and 15 <= states('sensor.soc_batt_forecast') | float(-1) <= 100
+             and -(states('input_number.wattlas_maks_eksport_w')|float(0)) <= states('sensor.p_grid_forecast') | float(99999) <= states('input_number.wattlas_maks_netimport_w')|float(0)
+             and (as_timestamp(now()) // 1800) * 1800 == start_ts | float }}
+    - if:
+      - condition: template
+        value_template: '{{ not resultater_ok }}'
+      then:
+      - stop: Publicerede data er manglende, forældede eller ikke Optimal. Kør igen.
+        error: true
+    - variables:
+        candidate_event:
+          time: '{{ now().isoformat() }}'
+          input:
+            start_ts: '{{ start_ts }}'
+          output: |-
+            {% set ns=namespace(data={}) %}
+            {% for id,attr,key in [('sensor.p_batt_forecast','battery_scheduled_power','p_batt_forecast'),('sensor.p_grid_forecast','forecasts','p_grid_forecast'),('sensor.p_load_forecast','forecasts','p_load_forecast'),('sensor.p_pv_forecast','forecasts','p_pv_forecast'),('sensor.soc_batt_forecast','battery_scheduled_soc','soc_batt_forecast')] %}
+             {% set row=namespace(values=[]) %}
+             {% for p in (state_attr(id,attr) or [])[:48] %}{% set row.values=row.values+[[as_timestamp(p.date,0)|int,p.get(key)|float(none)]] %}{% endfor %}
+             {% set ns.data=dict(ns.data,**{key:row.values}) %}
+            {% endfor %}{{ ns.data }}
+    - variables:
+        candidate: |-
+          {% set d=candidate_event %}{% set out=d.get('output',{}) %}
+          {% set b=out.get('p_batt_forecast',[]) %}{% set g=out.get('p_grid_forecast',[]) %}{% set s=out.get('soc_batt_forecast',[]) %}
+          {% set ct=as_timestamp(d.get('time'),0) %}{% set start=d.get('input',{}).get('start_ts',0)|float(0) %}
+          {% set ns=namespace(ok=4<=b|count<=48 and b|count==g|count and b|count==s|count and 0<=as_timestamp(now())-ct<=60,rows=[]) %}
+          {% for i in range(b|count) %}
+           {% if i<g|count and i<s|count and b[i]|count==2 and g[i]|count==2 and s[i]|count==2 %}
+            {% set ts=b[i][0]|float(0) %}
+            {% if not (ts==start+i*1800 and ts==g[i][0]|float(-1) and ts==s[i][0]|float(-1)
+              and is_number(b[i][1]) and is_number(g[i][1]) and is_number(s[i][1])
+              and -(states('input_number.wattlas_maks_ladeeffekt_w')|float(0))<=b[i][1]|float<=states('input_number.wattlas_maks_afladeeffekt_w')|float(0) and -(states('input_number.wattlas_maks_eksport_w')|float(0))<=g[i][1]|float<=states('input_number.wattlas_maks_netimport_w')|float(0) and 15<=s[i][1]|float<=100) %}
+             {% set ns.ok=false %}
+            {% else %}{% set ns.rows=ns.rows+[[ts|int,b[i][1]|float,g[i][1]|float,s[i][1]|float]] %}{% endif %}
+           {% else %}{% set ns.ok=false %}{% endif %}
+          {% endfor %}
+          {{ dict(ok=ns.ok,rows=ns.rows,created=ct) }}
+    - if:
+      - condition: template
+        value_template: '{{ not candidate.ok }}'
+      then:
+      - stop: Den publicerede tidsplan er ufuldstændig eller ugyldig. Den gemte plan bevares.
+        error: true
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.emhass_plan_batteri_w
+      data:
+        value: '{{ states(''sensor.p_batt_forecast'') | float }}'
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.emhass_plan_soc
+      data:
+        value: '{{ states(''sensor.soc_batt_forecast'') | float }}'
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.emhass_plan_net_w
+      data:
+        value: '{{ states(''sensor.p_grid_forecast'') | float }}'
+    - action: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.emhass_plan_tid
+      data:
+        timestamp: '{{ as_timestamp(now()) }}'
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.emhass_plan_gyldig
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: emhass_planfejl
+    - event: emhass_plan_record
+      event_data:
+        time: '{{ now().isoformat() }}'
+        input: '{{ beregning if beregning is defined else dict(pv=prognose.pv,buy=prognose.koeb,sell=prognose.salg,soc_init=soc/100,charge_limit=charge_limit,discharge_limit=discharge_limit,start_ts=start_ts)
+          }}'
+        output: '{{ candidate_event.output }}'
+        settings: '{{ dict(max_charge=states(''sensor.wattlas_maks_ladestroem''),max_discharge=states(''sensor.wattlas_maks_afladestroem''),grid_charge=states(''number.wattlas_netladestroem''),minimum_soc=15,capacity_wh=(states(''input_number.wattlas_batteri_kwh'')|float(0)*1000)|int,efficiency=0.95,grid_limit_w=states(''input_number.wattlas_maks_netimport_w'')|float(0),phase_estimate_limit_a=states(''input_number.wattlas_fase_graense_a'')|float(0),version=''wattlas-0.1.0'')
+          }}'
+    - wait_template: '{{ as_timestamp(states(''sensor.emhass_gemt_plan''),0)>=publiceret_fra|float and is_state(''binary_sensor.emhass_plan_brugbar'',''on'')
+        }}'
+      timeout: 00:00:15
+      continue_on_timeout: false
+    max_exceeded: silent
+  emhass_skriv_tal:
+    alias: EMHASS – skriv kun ændret tal
+    mode: queued
+    max: 30
+    sequence:
+    - condition: state
+      entity_id: binary_sensor.wattlas_konfigureret
+      state: 'on'
+    - if:
+      - condition: template
+        value_template: '{{ not is_number(states(entitet)) }}'
+      then:
+      - stop: Styringsentiteten mangler.
+        error: true
+    - if:
+      - condition: template
+        value_template: '{{ not is_number(vaerdi) or vaerdi|float < state_attr(entitet,''min'')|float(-999999) or
+          vaerdi|float > state_attr(entitet,''max'')|float(999999) }}'
+      then:
+      - stop: Ønsket indstilling er uden for entitetens gyldige område.
+        error: true
+    - if:
+      - condition: template
+        value_template: '{{ (states(entitet) | float - vaerdi | float) | abs > 0.1 }}'
+      then:
+      - action: number.set_value
+        target:
+          entity_id: '{{ entitet }}'
+        data:
+          value: '{{ vaerdi | float }}'
+      - wait_template: '{{ (states(entitet) | float(-99999) - vaerdi | float) | abs < 0.1 }}'
+        timeout: 00:00:15
+        continue_on_timeout: false
+  emhass_netopladning_fra:
+    alias: EMHASS – stop netopladning
+    mode: queued
+    sequence:
+    - condition: state
+      entity_id: binary_sensor.wattlas_konfigureret
+      state: 'on'
+    - repeat:
+        for_each:
+        - switch.wattlas_netladning
+        - switch.emhass_netladning_p1
+        - switch.emhass_netladning_p2
+        - switch.emhass_netladning_p3
+        - switch.emhass_netladning_p4
+        - switch.emhass_netladning_p5
+        - switch.emhass_netladning_p6
+        sequence:
+        - if:
+          - condition: template
+            value_template: '{{ not is_state(repeat.item, ''off'') }}'
+          then:
+          - action: switch.turn_off
+            continue_on_error: true
+            target:
+              entity_id: '{{ repeat.item }}'
+  emhass_selvforbrug:
+    alias: EMHASS – tilbage til selvforbrug
+    mode: single
+    sequence:
+    - action: script.emhass_netopladning_fra
+    - wait_template: |-
+        {% set ns = namespace(ok=is_state('switch.wattlas_netladning','off')) %} {% for i in range(1,7) %}
+          {% if not is_state('switch.emhass_netladning_p' ~ i,'off') %}
+            {% set ns.ok=false %}
+          {% endif %}
+        {% endfor %} {{ ns.ok }}
+      timeout: 00:00:15
+      continue_on_timeout: false
+    - repeat:
+        count: 6
+        sequence:
+        - action: script.emhass_skriv_tal
+          data:
+            entitet: number.wattlas_program_{{ repeat.index }}_soc
+            vaerdi: 15
+        # Grænsen står kortvarigt på 0 ved genstart. 0 W må ikke skrives, for ved fuldt batteri lukker Deye så for solen.
+        - if:
+          - condition: template
+            value_template: "{{ states('sensor.emhass_ui_afladegraense_w') | float(0) > 0 }}"
+          then:
+          - action: script.emhass_skriv_tal
+            data:
+              entitet: number.wattlas_program_{{ repeat.index }}_power
+              vaerdi: '{{ states(''sensor.emhass_ui_afladegraense_w'')|float(0)|int }}'
+  emhass_reguler:
+    alias: EMHASS – reguler aktiv periode
+    mode: single
+    sequence:
+    - condition: state
+      entity_id: binary_sensor.wattlas_konfigureret
+      state: 'on'
+    - condition: state
+      entity_id: input_boolean.emhass_styring_aktiv
+      state: 'on'
+    - condition: state
+      entity_id: input_boolean.emhass_har_overtaget
+      state: 'on'
+    - variables:
+        selected: |-
+          {% set t=as_timestamp(now()) %}
+          {% set ct=as_timestamp(states('sensor.emhass_gemt_plan'),0) %}
+          {% set age=t-ct %}{% set slot=(t//1800)*1800 %}
+          {% set rows=state_attr('sensor.emhass_gemt_plan','rows') or [] %}
+          {% set ns=namespace(rows=[]) %}
+          {% if state_attr('sensor.emhass_gemt_plan','schema')==1 and 0<=age<7200 %}
+           {% for r in rows %}
+            {% if r|count==4 and r[0]|float(-1)==slot and is_number(r[1]) and is_number(r[2]) and is_number(r[3])
+              and -(states('input_number.wattlas_maks_ladeeffekt_w')|float(0))<=r[1]|float<=states('input_number.wattlas_maks_afladeeffekt_w')|float(0) and -(states('input_number.wattlas_maks_eksport_w')|float(0))<=r[2]|float<=states('input_number.wattlas_maks_netimport_w')|float(0) and 15<=r[3]|float<=100 %}
+             {% set ns.rows=ns.rows+[r] %}
+            {% endif %}
+           {% endfor %}
+          {% endif %}
+          {% set valid=ns.rows|count==1 %}
+          {{ dict(mode=('Frisk' if age<720 and ct//1800==t//1800 else 'Reserve') if valid else 'Ingen',
+           valid=valid,row=ns.rows[0] if valid else [],created=ct,age=age) }}
+    - variables:
+        plan_alder: '{{ as_timestamp(now()) - as_timestamp(states(''input_datetime.emhass_plan_tid''), 0) }}'
+        periode: '{{ 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour
+          < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 }}'
+        soc: '{{ states(''sensor.emhass_m_battery_soc'') | float(-1) }}'
+        p_batt: '{{ selected.row[1] if selected.valid else 0 }}'
+        p_net: '{{ selected.row[2] if selected.valid else 0 }}'
+        maal: '{{ selected.row[3] if selected.valid else 15 }}'
+        drift_ok: '{{ selected.valid and is_state(''binary_sensor.emhass_ui_data_frisk'',''on'') and is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
+          and 15<=soc<=100 }}'
+    # Har batteriet ikke stået fuldt i 1 time i 7 dage: lad op om natten og hvil 1 time i toppen (emhass_fuldladning.yaml)
+    - variables:
+        fuld_kraevet: >-
+          {% set s = states('input_datetime.emhass_sidst_fuld') | as_datetime %}
+          {{ is_state('input_boolean.emhass_fuld_opladning', 'on') and s is not none and s.year > 2000
+             and (now().date() - s.date()).days >= 7 }}
+        fuld_minutter: '{{ ([100 - soc, 0] | max) * (states(''input_number.wattlas_batteri_kwh'')|float(0)) / 100 / 0.95 / ([states(''input_number.wattlas_maks_netladeeffekt_w'')|float(0) / 1000, 1] | max) * 60 }}'
+        fuld_aktiv: >-
+          {{ fuld_kraevet and selected.valid and now().hour < 6
+             and (now().hour * 60 + now().minute) >= 300 - fuld_minutter | float(0) }}
+        fuld_hvile: >-
+          {% set f = states.binary_sensor.emhass_batteri_fuldt %}
+          {{ fuld_kraevet and f is not none and f.state == 'on' and (now() - f.last_changed).total_seconds() < 3600
+             and states('sensor.emhass_ui_koebspris') | float(9) < 4 }}
+    - variables:
+        p_batt: '{{ (0 if soc >= 100 else -(states(''input_number.wattlas_maks_netladeeffekt_w'')|float(0))) if fuld_aktiv else (0 if fuld_hvile and p_batt | float(0) > 150 else p_batt) }}'
+        p_net: '{{ states(''input_number.wattlas_maks_netladeeffekt_w'')|float(0) if fuld_aktiv and soc < 100 else p_net }}'
+        maal: '{{ 100 if fuld_aktiv or fuld_hvile else maal }}'
+    # Wattlas-tilsidesættelse (wattlas_styring.yaml) – ændrer kun planens tal; alle hårde grænser nedenfor gælder stadig
+    - variables:
+        # rækkefølge: manuel tilsidesættelse > tidsstyret regel (sensor.wattlas_aktiv_regel) > planen
+        ts: >-
+          {% if is_state('binary_sensor.wattlas_tilsidesaettelse_aktiv', 'on') %}{{ states('input_select.wattlas_tilsidesaettelse') }}
+          {% elif states('sensor.wattlas_aktiv_regel') in ['lad', 'ingen_netladning', 'gem', 'brug'] %}{{ states('sensor.wattlas_aktiv_regel') }}
+          {% else %}ingen{% endif %}
+        ts_soc: >-
+          {{ states('input_number.wattlas_tilsidesaet_soc') | float(80) if is_state('binary_sensor.wattlas_tilsidesaettelse_aktiv', 'on')
+             else [20, [100, state_attr('sensor.wattlas_aktiv_regel', 'soc') | float(80)] | min] | max }}
+    - variables:
+        p_batt: >-
+          {% if ts == 'lad' %}{{ p_batt if soc >= ts_soc else -(states('input_number.wattlas_maks_netladeeffekt_w')|float(0)) }}
+          {% elif ts == 'ingen_netladning' %}{{ 0 if p_batt | float(0) < -150 and p_net | float(0) > 150 else p_batt }}
+          {% elif ts == 'gem' %}{{ [p_batt | float(0), 0] | min }}
+          {% elif ts == 'brug' %}{{ [states('input_number.wattlas_maks_afladeeffekt_w')|float(0) - 500, states('sensor.emhass_ui_afladegraense_w') | float(0)] | min if soc > 20 else 0 }}
+          {% else %}{{ p_batt }}{% endif %}
+        p_net: "{{ states('input_number.wattlas_maks_netladeeffekt_w')|float(0) if ts == 'lad' and soc < ts_soc else p_net }}"
+        maal: >-
+          {% if ts == 'lad' %}{{ ts_soc if soc < ts_soc else maal }}
+          {% elif ts == 'gem' %}{{ [100, [maal | float(15), (soc / 5) | round(0, 'ceil') * 5] | max] | min }}
+          {% elif ts == 'brug' %}{{ [15, states('input_number.wattlas_reserve') | float(15)] | max }}
+          {% else %}{{ maal }}{% endif %}
+    - if:
+      - condition: template
+        value_template: '{{ not drift_ok }}'
+      then:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.emhass_plan_gyldig
+      - action: script.emhass_selvforbrug
+      - stop: Ingen brugbar tidsplan, målinger eller styrekanal. Selvforbrug forsøgt.
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.emhass_plan_gyldig
+    - action: input_number.set_value
+      data:
+        value: '{{ p_batt }}'
+      target:
+        entity_id: input_number.emhass_plan_batteri_w
+    - action: input_number.set_value
+      data:
+        value: '{{ p_net }}'
+      target:
+        entity_id: input_number.emhass_plan_net_w
+    - action: input_number.set_value
+      data:
+        value: '{{ maal }}'
+      target:
+        entity_id: input_number.emhass_plan_soc
+    - variables:
+        fase_ok: |-
+          {% set ns = namespace(ok=is_state('binary_sensor.emhass_ui_data_frisk','on')) %} {% for i in range(1,4) %}
+            {% set ps = states['sensor.emhass_m_external_ct_w_l' ~ i] %}
+            {% set vs = states['sensor.emhass_m_grid_current_v_l' ~ i] %}
+            {% if ps is not defined or vs is not defined or not is_number(ps.state) or not is_number(vs.state) %}
+              {% set ns.ok=false %}
+            {% elif not (210 <= vs.state | float <= 250)
+                %}
+              {% set ns.ok=false %}
+            {% endif %}
+          {% endfor %} {{ ns.ok }}
+        ladebudget_w: |-
+          {% set b=states('sensor.emhass_m_battery_output_w_power')|float(0) %}
+          {% set load=states('sensor.emhass_m_load_w_totalpower')|float(0) %}
+          {% set pv=states('sensor.emhass_solproduktion_samlet')|float(0) %}
+          {% set surplus=[0,pv-load]|max %}
+          {% set existing=[0,-b/0.95-surplus]|max if is_state('switch.wattlas_netladning','on') else 0 %}
+          {% set desired=[0,-p_batt-surplus]|max %}
+          {% set vb=states('sensor.emhass_m_battery_voltage')|float(0) %}
+          {% set a=[states('input_number.wattlas_maks_ladestroem_a')|float(0),states('sensor.wattlas_maks_ladestroem')|float(0)]|min %}
+          {% set hardware=[0,a*vb/0.95-surplus]|max %}
+          {# netladning holdes under fasegrænsen (input_number.wattlas_fase_graense_a) og importloftet inkl. husets forbrug #}
+          {% set ns=namespace(budget=states('input_number.wattlas_import_graense_w')|float(0)-states('sensor.emhass_m_grid_out_total_power')|float(99999)+existing) %}
+          {% for i in range(1,4) %}
+           {% set p=states('sensor.emhass_m_external_ct_w_l'~i)|float(99999) %}
+           {% set v=states('sensor.emhass_m_grid_current_v_l'~i)|float(0) %}
+           {% set ns.budget=[ns.budget,3*(states('input_number.wattlas_fase_graense_a')|float(0)*v-p)+existing]|min %}
+          {% endfor %}
+          {{ [0,[ns.budget,desired,hardware]|min]|max }}
+        ladeamp: |-
+          {% set v=states('sensor.emhass_m_battery_voltage')|float(0) %}
+          {% set current=states('number.wattlas_netladestroem')|float(0) if is_state('switch.wattlas_netladning','on') else 0 %}
+          {% set installed=states('sensor.wattlas_maks_ladestroem')|float(0) %}
+          {% set register_max=state_attr('number.wattlas_netladestroem','max')|float(160) %}
+          {% set step=state_attr('number.wattlas_netladestroem','step')|float(1) %}
+          {% set target=[states('input_number.wattlas_maks_netladestroem_a')|float(0),installed,register_max,current+10,((ladebudget_w|float)*0.95/v)|round(0,'floor')]|min if 45<=v<=58 else 0 %}
+          {% set ny=((target/step)|round(0,'floor')*step) if step>0 else 0 %}
+          {# færre skrivninger: 5 A er ca. 260 W #}
+          {{ current if current>0 and ny>0 and (0<=ny-current<10 or 0<current-ny<5) else ny }}
+        netladning: "{{ is_state('binary_sensor.wattlas_pv_maaling_ok', 'on')\
+          \ and p_batt < -150 and p_net > 150 and fase_ok and ladeamp | float >= 5 and (fuld_aktiv or ts == 'lad' or not is_state('switch.wattlas_netladning','off') or (now() - states.switch.wattlas_netladning.last_changed).total_seconds() >= 600)\n   and 45 <= states('sensor.emhass_m_battery_voltage')\
+          \ | float(0) <= 58\n   \n   and soc < ([100, ((maal / 5) | round(0,'ceil') * 5)] | min) }}"
+    - if:
+      - condition: template
+        value_template: '{{ netladning }}'
+      then:
+      - action: script.emhass_skriv_tal
+        data:
+          entitet: number.wattlas_netladestroem
+          vaerdi: '{{ ladeamp | int }}'
+      - action: script.emhass_skriv_tal
+        data:
+          entitet: number.wattlas_program_{{ periode }}_soc
+          vaerdi: '{{ [100, [15, (maal / 5) | round(0,''ceil'') * 5] | max] | min }}'
+      - repeat:
+          count: 6
+          sequence:
+          - if:
+            - condition: template
+              value_template: '{{ repeat.index != periode | int and not is_state(''switch.emhass_netladning_p''
+                ~ repeat.index, ''off'') }}'
+            then:
+            - action: switch.turn_off
+              target:
+                entity_id: switch.emhass_netladning_p{{ repeat.index }}
+      - condition: state
+        entity_id: input_boolean.emhass_styring_aktiv
+        state: 'on'
+      - action: switch.turn_on
+        target:
+          entity_id:
+          - switch.wattlas_netladning
+          - switch.emhass_netladning_p{{ periode }}
+      else:
+      - action: script.emhass_netopladning_fra
+      - action: script.emhass_skriv_tal
+        data:
+          entitet: number.wattlas_program_{{ periode }}_soc
+          vaerdi: '{{ 100 if soc >= 99 and p_batt <= 150 else [100, [15, (maal / 5) | round(0,''floor'') * 5] | max] | min }}'
+      - action: script.emhass_skriv_tal
+        data:
+          entitet: number.wattlas_program_{{ periode }}_power
+          vaerdi: |-
+            {% set b=p_batt %}
+            {% set g=p_net %}
+            {# hele 500 W, så Deyes tidsplan ikke skrives om for hver lille ændring #}
+            {% set cap=((states('sensor.emhass_ui_afladegraense_w')|float(0)) / 500) | round(0,'floor') * 500 %}
+            {% set kap=[100, [15, (maal / 5) | round(0,'floor') * 5] | max] | min %}
+            {% if b>150 and g is not none and g|abs<=50 %}
+              {{ cap }}
+            {% elif kap >= 100 or soc <= kap or (soc >= 99 and b <= 150) %}
+              {# Batteriet kan ikke aflade under kapaciteten alligevel. 0 W her (kapacitet nået
+                 eller over SOC) får Deye til at lukke ned for solcellerne og købe til huset. #}
+              {{ cap }}
+            {% else %}
+              {{ [cap,[0,((b / 100) | round(0,'floor') * 100)]|max]|min }}
+            {% endif %}
+  emhass_start:
+    alias: EMHASS – klargør og start
+    mode: single
+    sequence:
+    - condition: state
+      entity_id: binary_sensor.wattlas_konfigureret
+      state: 'on'
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.emhass_har_overtaget
+    - condition: template
+      value_template: '{{ is_state(''binary_sensor.emhass_ui_data_frisk'',''on'') and is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
+        }}'
+    - if:
+      - condition: template
+        value_template: '{{ is_state(''binary_sensor.emhass_plan_brugbar'',''on'') }}'
+      then:
+      - action: script.emhass_reguler
+      - action: script.turn_on
+        target:
+          entity_id: script.emhass_test_helios
+      else:
+      - action: script.emhass_selvforbrug
+      - action: script.emhass_test_helios
+        continue_on_error: true
+      - action: script.emhass_reguler
+  emhass_genoptag:
+    alias: EMHASS – genoptag med brugbar tidsplan
+    mode: single
+    max_exceeded: silent
+    sequence:
+    - condition: state
+      entity_id: binary_sensor.wattlas_konfigureret
+      state: 'on'
+    - condition: state
+      entity_id: input_boolean.emhass_styring_aktiv
+      state: 'on'
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.emhass_opstart_klar
+    - action: script.emhass_netopladning_fra
+      continue_on_error: true
+    - wait_template: |-
+        {% set ns=namespace(ok=is_state('binary_sensor.emhass_ui_data_frisk','on')) %}
+        {% for i in range(1,7) %}
+         {% if not is_number(states('number.wattlas_program_' ~ i ~ '_soc'))
+            or not is_number(states('number.wattlas_program_' ~ i ~ '_power'))
+            or not has_value('switch.emhass_netladning_p' ~ i) %}
+          {% set ns.ok=false %}
+         {% endif %}
+        {% endfor %}
+        {{ ns.ok and has_value('switch.wattlas_netladning')
+         and is_state('binary_sensor.wattlas_tidsprogram_aktiv','on') }}
+      timeout: 00:03:00
+      continue_on_timeout: true
+    - condition: state
+      entity_id: input_boolean.emhass_styring_aktiv
+      state: 'on'
+    - if:
+      - condition: template
+        value_template: '{{ not wait.completed }}'
+      then:
+      - action: script.emhass_netopladning_fra
+        continue_on_error: true
+      - action: script.emhass_selvforbrug
+        continue_on_error: true
+      - if:
+        - condition: state
+          entity_id: input_boolean.emhass_opstartsfejl
+          state: 'off'
+        then:
+        - action: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.emhass_opstartsfejl
+        - action: persistent_notification.create
+          data:
+            notification_id: emhass_opstartsfejl
+            title: EMHASS afventer automatisk genoptagelse
+            message: Friske målinger, inverterkontakt eller en ny godkendt plan mangler. Netopladning er forsøgt
+              stoppet og selvforbrug forsøgt valgt. Kontrollér faktisk drift. Der prøves automatisk igen.
+        - action: script.wattlas_besked
+          continue_on_error: true
+          data:
+            title: EMHASS kan ikke genoptage endnu
+            message: Kontrollér forbindelsen til inverteren og EMHASS. Netopladning er forsøgt stoppet. Automatisk genoptagelse
+              forsøges igen.
+            data:
+              tag: emhass_opstart
+              group: emhass
+              url: /wattlas-styring/app#overvaagning
+      - stop: Afventer data. Nyt forsøg ved næste minuttjek.
+    - variables:
+        forsog_start: '{{ as_timestamp(now()) }}'
+    - action: script.emhass_start
+      continue_on_error: true
+    - condition: state
+      entity_id: input_boolean.emhass_styring_aktiv
+      state: 'on'
+    - if:
+      - condition: template
+        value_template: '{{ is_state(''binary_sensor.emhass_plan_brugbar'',''on'') and is_state(''binary_sensor.emhass_ui_data_frisk'',''on'')
+          and is_state(''binary_sensor.emhass_styrekanal_ok'',''on'') }}'
+      then:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.emhass_opstart_klar
+      - if:
+        - condition: state
+          entity_id: input_boolean.emhass_opstartsfejl
+          state: 'on'
+        then:
+        - action: persistent_notification.dismiss
+          data:
+            notification_id: emhass_opstartsfejl
+        - action: script.wattlas_besked
+          continue_on_error: true
+          data:
+            title: EMHASS er genoptaget
+            message: '{{ ''Forbindelsen er godkendt. Styringen er genoptaget med '' ~ (''den gemte reserveplan.''
+              if is_state(''sensor.emhass_planvalg'',''Reserve'') else ''en frisk plan.'') }}'
+            data:
+              tag: emhass_opstart
+              group: emhass
+              url: /wattlas-styring/app#overvaagning
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.emhass_opstartsfejl
+      else:
+      - action: script.emhass_netopladning_fra
+        continue_on_error: true
+      - action: script.emhass_selvforbrug
+        continue_on_error: true
+      - if:
+        - condition: state
+          entity_id: input_boolean.emhass_opstartsfejl
+          state: 'off'
+        then:
+        - action: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.emhass_opstartsfejl
+        - action: persistent_notification.create
+          data:
+            notification_id: emhass_opstartsfejl
+            title: EMHASS afventer automatisk genoptagelse
+            message: Friske målinger, inverterkontakt eller en ny godkendt plan mangler. Netopladning er forsøgt
+              stoppet og selvforbrug forsøgt valgt. Kontrollér faktisk drift. Der prøves automatisk igen.
+        - action: script.wattlas_besked
+          continue_on_error: true
+          data:
+            title: EMHASS kan ikke genoptage endnu
+            message: Kontrollér forbindelsen til inverteren og EMHASS. Netopladning er forsøgt stoppet. Automatisk genoptagelse
+              forsøges igen.
+            data:
+              tag: emhass_opstart
+              group: emhass
+              url: /wattlas-styring/app#overvaagning
+automation:
+- id: emhass_hovedafbryder
+  alias: EMHASS – hovedafbryder
+  mode: restart
+  triggers:
+  - trigger: state
+    entity_id: input_boolean.emhass_styring_aktiv
+    from: 'off'
+    to: 'on'
+  - trigger: state
+    entity_id: input_boolean.emhass_styring_aktiv
+    from: 'on'
+    to: 'off'
+  actions:
+  - choose:
+    - conditions: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') }}'
+      sequence:
+      - action: script.emhass_genoptag
+    default:
+    - action: script.turn_off
+      target:
+        entity_id:
+        - script.emhass_genoptag
+        - script.emhass_test_helios
+        - script.emhass_start
+        - script.emhass_reguler
+        - script.emhass_skriv_tal
+    - action: input_boolean.turn_off
+      target:
+        entity_id:
+        - input_boolean.emhass_opstart_klar
+        - input_boolean.emhass_plan_gyldig
+    - if:
+      - condition: state
+        entity_id: input_boolean.emhass_har_overtaget
+        state: 'on'
+      then:
+      - action: script.emhass_selvforbrug
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.emhass_har_overtaget
+- id: emhass_genberegn
+  alias: EMHASS – genberegn hvert femte minut
+  mode: single
+  triggers:
+  - trigger: time_pattern
+    minutes: /5
+    seconds: '10'
+  conditions:
+  - condition: state
+    entity_id: input_boolean.emhass_opstart_klar
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.emhass_styring_aktiv
+    state: 'on'
+  - condition: state
+    entity_id: script.emhass_start
+    state: 'off'
+  actions:
+  - action: script.emhass_test_helios
+    continue_on_error: true
+  - action: script.emhass_reguler
+- id: emhass_reguler_periodisk
+  alias: EMHASS – regulering og overvågning
+  mode: single
+  triggers:
+  - trigger: time_pattern
+    seconds: /30
+  conditions:
+  - condition: state
+    entity_id: input_boolean.emhass_opstart_klar
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.emhass_styring_aktiv
+    state: 'on'
+  - condition: state
+    entity_id: script.emhass_start
+    state: 'off'
+  actions:
+  - action: script.emhass_reguler
+- id: emhass_oprydning_efter_genstart
+  alias: EMHASS – oprydning efter genstart eller afbrudt stop
+  mode: single
+  triggers:
+  - trigger: homeassistant
+    event: start
+  - trigger: time_pattern
+    minutes: /1
+  conditions:
+  - condition: state
+    entity_id: input_boolean.emhass_styring_aktiv
+    state: 'off'
+  - condition: state
+    entity_id: input_boolean.emhass_har_overtaget
+    state: 'on'
+  actions:
+  - action: script.emhass_selvforbrug
+  - action: input_boolean.turn_off
+    target:
+      entity_id: input_boolean.emhass_har_overtaget
+- id: emhass_automatisk_genoptagelse
+  alias: EMHASS – automatisk genoptagelse og nyt forsøg
+  mode: single
+  max_exceeded: silent
+  triggers:
+  - trigger: homeassistant
+    event: start
+  - trigger: time_pattern
+    minutes: /1
+    seconds: '20'
+  conditions:
+  - condition: state
+    entity_id: input_boolean.emhass_styring_aktiv
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.emhass_opstart_klar
+    state: 'off'
+  - condition: state
+    entity_id: script.emhass_genoptag
+    state: 'off'
+  actions:
+  - action: script.emhass_genoptag
+
+# Solsalg er en tilladelse til overskudseksport, ikke tvungen batteriafladning.
+# Uafhængig af prognosens neteffekt, så uventet sol også kan sælges.
+- id: emhass_solsalg_efter_netto_salgspris
+  alias: EMHASS – solsalg ved positiv salgspris
+  description: >-
+    Tillader solsalg når den beregnede salgspris efter fradrag er positiv.
+    Blokerer ved nul, negativ eller ukendt pris. Batteriplanen ændres ikke.
+    Kører kun når EMHASS har overtaget og styrekanalen er klar.
+  mode: single
+  max_exceeded: silent
+  triggers:
+  - trigger: time_pattern
+    seconds: /30
+  - trigger: state
+    entity_id:
+    - sensor.emhass_ui_salgspris
+    - input_boolean.emhass_styring_aktiv
+    - input_boolean.emhass_har_overtaget
+    - input_boolean.emhass_opstart_klar
+    - binary_sensor.emhass_styrekanal_ok
+    - switch.wattlas_solsalg
+    - binary_sensor.wattlas_solsalg_stoppet
+    - sensor.wattlas_aktiv_regel
+  conditions:
+  - condition: state
+    entity_id: binary_sensor.wattlas_konfigureret
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.emhass_styring_aktiv
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.emhass_har_overtaget
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.emhass_opstart_klar
+    state: 'on'
+  - condition: state
+    entity_id: binary_sensor.emhass_styrekanal_ok
+    state: 'on'
+  - condition: template
+    value_template: >-
+      {{ states('switch.wattlas_solsalg') in ['on','off'] }}
+  actions:
+  - variables:
+      pris: "{{ states('sensor.emhass_ui_salgspris') }}"
+      salg_tilladt: "{{ is_number(pris) and pris|float(0) > 0 and not is_state('binary_sensor.wattlas_solsalg_stoppet', 'on') and not is_state('sensor.wattlas_aktiv_regel', 'solsalg_stop') }}"
+      oensket: "{{ 'on' if salg_tilladt else 'off' }}"
+  - condition: template
+    value_template: >-
+      {{ states('switch.wattlas_solsalg') != oensket }}
+  - action: system_log.write
+    data:
+      level: info
+      logger: emhass.solsalg
+      message: >-
+        EMHASS anmoder om Solar sell={{ oensket }}; salgspris={{ pris }} DKK/kWh.
+  - action: "{{ 'switch.turn_on' if salg_tilladt else 'switch.turn_off' }}"
+    target:
+      entity_id: switch.wattlas_solsalg
