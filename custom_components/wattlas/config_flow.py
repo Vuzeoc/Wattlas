@@ -133,16 +133,17 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         info = []
         self.d["omdoeb"] = {}
         for ønsket, platform, navn, link, hjælp in [
-                ("sensor.energi_data_service", "energidataservice", "Energi Data Service", LINK["energidataservice"], "og opsæt den med priser inkl. moms."),
-                ("binary_sensor.workday_sensor", "workday", "Workday", LINK["workday"], "land Danmark.")]:
+                ("sensor.energi_data_service", "energidataservice", "Energi Data Service", None, "Indstillinger → Markedsplads → søg *Energi Data Service* → Installér, genstart og tilføj den med priser inkl. moms."),
+                ("binary_sensor.workday_sensor", "workday", "Workday", LINK["workday"], "vælg Danmark.")]:
             if hass.states.get(ønsket) is not None:
                 continue
             fundet = _platform_entitet(hass, ønsket.split(".")[0], platform)
             if fundet:  # findes under et andet navn (fx binary_sensor.workday_sensor_dk) – Wattlas giver den det navn, pakkerne bruger
                 self.d["omdoeb"][fundet] = ønsket
-                info.append(f"ℹ️ **{navn}** findes som `{fundet}` – Wattlas omdøber den til `{ønsket}`.")
+                info.append(f"ℹ️ **{navn}** findes som `{fundet}` – Wattlas omdøber den til `{ønsket}`. "
+                            "Bruger dine egne automationer det gamle navn, så ret dem bagefter.")
             else:
-                blok.append(f"❌ **{navn}** mangler – [tilføj den]({link}), {hjælp}")
+                blok.append(f"❌ **{navn}** mangler – " + (f"[tilføj den]({link}), {hjælp}" if link else hjælp))
         mangler = [e for e in installer.entiteter_i_kanal(self.d["kanal"], self.d["prefix"])
                    if hass.states.get(e) is None and not e.endswith("_microinverter_power")]
         if mangler:
@@ -151,7 +152,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
                        "Har din inverter-integration slået nogle fra, så slå dem til. Ellers kan dele af styringen mangle.")
         prognoser = [s.entity_id for s in hass.states.async_all("sensor") if isinstance(s.attributes.get("forecast"), list)]
         if not prognoser:
-            adv.append(f"⚠️ Ingen solprognose fundet – [Helios Forecast]({LINK['helios']}) anbefales (se SOLPROGNOSE.md).")
+            adv.append("⚠️ Ingen solprognose fundet – *Helios Forecast* fra Markedspladsen anbefales (se SOLPROGNOSE.md).")
         if not hass.states.async_all("weather"):
             adv.append("⚠️ Ingen vejr-entitet fundet – tilføj fx Met.no.")
         pkg = await hass.async_add_executor_job(installer.packages_mappe, hass.config.config_dir)
@@ -228,10 +229,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
     # 5 – installér, tjek konfigurationen, rul tilbage ved fejl
     async def async_step_installer(self, user_input=None) -> ConfigFlowResult:
         hass = self.hass
-        reg = er.async_get(hass)
-        for gammel, ny in (self.d.pop("omdoeb", None) or {}).items():
-            if reg.async_get(gammel) and not reg.async_get(ny):
-                reg.async_update_entity(gammel, new_entity_id=ny)
+        omdoeb = self.d.pop("omdoeb", None) or {}
         try:
             kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, self.d["kanal"],
                                                      self.d["prefix"], self.d.get("inverter2"), VERSION)
@@ -242,6 +240,10 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             await hass.async_add_executor_job(installer.rul_tilbage, kvit)
             return self.async_abort(reason="install_fejl", description_placeholders={
                 "fejl": "Home Assistants konfigurationstjek fejlede, alt er rullet tilbage: " + "; ".join(str(e.message) for e in res.errors[:3])})
+        reg = er.async_get(hass)
+        for gammel, ny in omdoeb.items():
+            if reg.async_get(gammel) and not reg.async_get(ny):
+                reg.async_update_entity(gammel, new_entity_id=ny)
         ir.async_create_issue(hass, DOMAIN, "genstart", is_fixable=True, is_persistent=True,
                               severity=ir.IssueSeverity.WARNING, translation_key="genstart")
         data = {k: v for k, v in self.d.items() if k != "emhass_adresse_fundet"}

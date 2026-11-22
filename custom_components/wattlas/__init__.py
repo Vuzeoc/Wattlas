@@ -10,6 +10,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.helpers.start import async_at_started
 
 from . import installer
@@ -25,8 +26,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     d = entry.data
     if d.get("version") != VERSION:  # ny version fra markedspladsen: læg de nye filer på plads
         try:
-            await hass.async_add_executor_job(installer.installer, hass.config.config_dir, d["kanal"], d["prefix"],
-                                              d.get("inverter2"), VERSION)
+            kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, d["kanal"], d["prefix"],
+                                                     d.get("inverter2"), VERSION)
+            res = await async_check_ha_config_file(hass)
+            if res.errors:  # den nye version passer ikke til denne HA: læg den gamle tilbage
+                await hass.async_add_executor_job(installer.rul_tilbage, kvit)
+                raise RuntimeError("; ".join(str(e.message) for e in res.errors[:3]))
             hass.config_entries.async_update_entry(entry, data={**d, "version": VERSION})
             ir.async_create_issue(hass, DOMAIN, "genstart", is_fixable=True, is_persistent=True,
                                   severity=ir.IssueSeverity.WARNING, translation_key="genstart")

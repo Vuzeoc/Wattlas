@@ -14,9 +14,6 @@ EMHASS_REPO = "https://github.com/davidusb-geek/emhass-add-on"
 LINK = {
     "emhass": "https://my.home-assistant.io/redirect/supervisor_addon/?addon=5b918bf2_emhass&repository_url=https%3A%2F%2Fgithub.com%2Fdavidusb-geek%2Femhass-add-on",
     "workday": "https://my.home-assistant.io/redirect/config_flow_start/?domain=workday",
-    "energidataservice": "https://my.home-assistant.io/redirect/hacs_repository/?owner=MTrab&repository=energidataservice&category=integration",
-    "helios": "https://my.home-assistant.io/redirect/hacs_repository/?owner=ReikanYsora&repository=Helios-Forecast&category=integration",
-    "solarman": "https://my.home-assistant.io/redirect/hacs_repository/?owner=davidrapan&repository=ha-solarman&category=integration",
 }
 
 # Hvilke indstillinger der vises i hvilket trin (samme navne som input_number.wattlas_…)
