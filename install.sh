@@ -9,7 +9,7 @@
 # installerer resten. Kør scriptet igen for at opdatere til en nyere udgave.
 #
 # Valg: --kilde <mappe|fil.tar.gz> (installér fra en lokal kopi), --config <mappe> (standard /config).
-# Miljø: WATTLAS_VERSION (et tag, fx v0.2.0). Uden den hentes nyeste udgave fra main.
+# Miljø: WATTLAS_VERSION (et tag, fx v0.2.2). Uden den hentes nyeste udgave fra main.
 set -eu
 
 VERSION="${WATTLAS_VERSION:-}"

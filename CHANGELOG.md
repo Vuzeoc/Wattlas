@@ -2,6 +2,11 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.2.2
+- **Rettet:** på telefonen kunne siden hoppe op til toppen, mens man rullede, fordi appen byggede sig selv om hvert 5. sekund. Nu bygges den kun om, når noget faktisk er ændret, og rullepositionen holdes fast
+- En ekstra inverter, der slukker om natten, vises som *Sover – for lidt lys* i stedet for en tabel med "unavailable". Svarer den ikke, mens der er sol på hovedanlægget, vises en advarsel
+- Billeder fra telefonen på forsiden
+
 ## 0.2.1
 Klar til Markedspladsens katalog. Ingen ændringer i styringen.
 - Automatiske tjek på GitHub (HACS og hassfest)

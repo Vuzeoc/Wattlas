@@ -226,7 +226,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       else if (a === 'tog') { const s = this.st(v); if (!s) return;
         if (v === 'input_boolean.emhass_styring_aktiv' && !confirm(s.state === 'on' ? 'Stop Wattlas-styringen? Batteriet går i selvforbrug med 15 % reserve.' : 'Start Wattlas-styringen? EMHASS overtager inverterens tidsprogrammer.')) return;
         this._hass.callService('input_boolean', 'toggle', {entity_id: v}); return; }
-      this._last = 0; this._render();
+      this._last = 0; this._html = null; this._render();
       if (a === 'tab') window.scrollTo({top: 0}); // kun ved faneskift: tilbage til toppen (HA's topbjælke dækker ellers)
     }
 
@@ -246,17 +246,32 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
           sol: () => this.solprognose()}[this._tab]?.() || this.live();
       } catch (e) { body = `<div class="card">Fejl i visningen: ${esc(e.message)}</div>`; console.error(e); }
       const offline = this.st('binary_sensor.wattlas_forbindelse')?.state !== 'on';
-      this.shadowRoot.innerHTML = `<style>${CSS}</style><div class="app">
+      const html = `<style>${CSS}</style><div class="app">
         <header><div class="brand"><img src="${LOGO}" alt=""><div><b>WATTLAS</b><span>${esc(this._cfg?.undertitel || 'Energi-intelligens')}</span></div>${andet ? `<a class="lnk swap" href="${esc(andet.url)}">${esc(andet.navn)} ›</a>` : ''}</div>
         <nav>${tabs.map(([k, i, n]) => `<button data-a="tab" data-v="${k}" class="${this._tab === k ? 'on' : ''}"><ha-icon icon="${i}"></ha-icon><span>${n}</span></button>`).join('')}</nav></header>
         ${offline ? `<div class="alert"><ha-icon icon="mdi:alert-circle"></ha-icon> Inverteren svarer ikke – tallene står stille.</div>` : ''}
         ${this.st('binary_sensor.wattlas_konfigureret')?.state !== 'on' ? `<div class="alert warn"><ha-icon icon="mdi:shield-lock"></ha-icon> Wattlas er ikke færdigindstillet – styringen er spærret. Mangler: ${esc((this.a('binary_sensor.wattlas_konfigureret', 'mangler') || ['binary_sensor.wattlas_konfigureret']).join(', '))}</div>` : ''}
         ${this._fejl ? `<div class="alert warn">Historik kunne ikke hentes: ${esc(this._fejl)} <button data-a="reload">Prøv igen</button></div>` : ''}
         <div class="page">${body}</div></div>`;
+      if (html === this._html) return; // intet nyt at vise – lad siden være i fred
+      this._html = html;
+      const rul = this._rulleflade(), top = rul.scrollTop;
+      this.style.minHeight = this.offsetHeight + 'px'; // højden må ikke falde sammen, mens indholdet skiftes
+      this.shadowRoot.innerHTML = html;
+      if (rul.scrollTop !== top) rul.scrollTop = top;
+      requestAnimationFrame(() => { this.style.minHeight = ''; if (rul.scrollTop !== top && top <= rul.scrollHeight - rul.clientHeight) rul.scrollTop = top; });
       const host = this.shadowRoot.querySelector('.plan-host');
       if (host && !customElements.get('emhass-plan-card')) { host.textContent = 'Henter planens logik …'; setTimeout(() => { this._last = 0; this._render(); }, 500); }
       else if (host) { if (!this._planEl) this._planEl = document.createElement('emhass-plan-card'); try { this._planEl.setConfig({}); } catch (e) {}
         this._planEl.hass = this._hass; host.appendChild(this._planEl); }
+    }
+
+    // det element, siden ruller i (HA's visning eller selve dokumentet)
+    _rulleflade() {
+      for (let el = this.parentNode; el; el = el.parentNode || el.host) {
+        if (el.nodeType === 1 && el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) return el;
+      }
+      return document.scrollingElement || document.documentElement;
     }
 
     // ---------- komponenter ----------
@@ -510,7 +525,14 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         rel = id => R ? this.st('switch.' + R + id) || this.st('binary_sensor.' + R + id) : null;
       const pv2 = [1, 2].map(i => `<div class="mppt"><div class="mh">MPPT ${i}</div><div class="mv">${v2(`pv${i}_power`, 0)}</div><div class="ms"><span>${v2(`pv${i}_voltage`)}</span><span>${v2(`pv${i}_current`, 2)}</span></div></div>`).join('');
       const fejl = ['overheating', 'overpowering', 'overvoltage', 'overcurrent'].filter(k => rel('_' + k)?.state === 'on');
-      const inv2 = `<div class="mppts">${pv2}<div class="mppt"><div class="mh">AC ud</div><div class="mv">${v2('output_ac_power', 0)}</div><div class="ms"><span>i dag ${v2('today_production')}</span></div></div></div>
+      const c2 = d('connection', I2)?.state, a2 = d('output_ac_power', I2)?.state;
+      const vaek2 = c2 ? c2 !== 'on' : (!a2 || ['unavailable', 'unknown'].includes(a2));
+      const solNu = parseFloat(d('pv_power')?.state) || 0; // producerer hovedinverteren, er det ikke nat
+      const relae2 = rel('') ? `<p class="note">Relæ: ${esc(rel('').state)}${fejl.length ? ` · <b style="color:${C.err}">${fejl.join(', ')}</b>` : ''}</p>` : '';
+      const inv2 = vaek2 ? (solNu > 300
+        ? `<div class="sover warn"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><div><b>Svarer ikke</b><span>Der er sol på hovedanlægget (${nf(solNu / 1000, 1)} kW), men inverter 2 svarer ikke. Tjek forbindelsen eller relæet.</span></div></div>${relae2}`
+        : `<div class="sover"><ha-icon icon="mdi:weather-night"></ha-icon><div><b>Sover – for lidt lys</b><span>Inverteren slukker sig selv, når solen ikke giver nok strøm, og vågner igen af sig selv.</span></div></div>${relae2}`)
+        : `<div class="mppts">${pv2}<div class="mppt"><div class="mh">AC ud</div><div class="mv">${v2('output_ac_power', 0)}</div><div class="ms"><span>i dag ${v2('today_production')}</span></div></div></div>
         <table class="tbl tk"><thead><tr><th>Net</th><th>L1</th><th>L2</th><th>L3</th><th>Øvrigt</th></tr></thead><tbody>
         <tr><td>Spænding</td>${[1, 2, 3].map(i => `<td>${v2(`grid_l${i}_voltage`)}</td>`).join('')}<td>${v2('grid_frequency', 2)}</td></tr>
         <tr><td>Strøm</td>${[1, 2, 3].map(i => `<td>${v2(`grid_l${i}_current`, 2)}</td>`).join('')}<td>${v2('output_apparent_power', 0)}</td></tr>
@@ -872,6 +894,9 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
   .tbl{width:100%;border-collapse:collapse;font-size:13px}.tbl th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--secondary-text-color);font-weight:700;padding:8px;border-bottom:1px solid var(--divider-color);background:rgba(34,211,238,.05)}
   .tbl td{padding:8px;border-bottom:1px solid var(--divider-color)}.cell{display:inline-block;color:#06101f;font-weight:700;padding:4px 10px;border-radius:8px;min-width:90px}
   .note{color:var(--secondary-text-color);font-size:12px;line-height:1.55;margin:10px 0 0}
+.sover{display:flex;gap:14px;align-items:center;padding:14px;border-radius:14px;background:rgba(148,163,184,.08)}
+.sover ha-icon{--mdc-icon-size:30px;color:#a78bfa;flex:none}.sover.warn ha-icon{color:${C.warn}}
+.sover b{display:block;margin-bottom:3px}.sover span{color:var(--secondary-text-color);font-size:13px;line-height:1.5}
   .ins,.rek,.plc,.ml,.logl{list-style:none;margin:0;padding:0}
   .ins li{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--divider-color)}.ins li:last-child{border:0}.ins b{display:block;font-size:14px}.ins span{color:var(--secondary-text-color);font-size:13px}
   .rek li{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--divider-color)}.rek li>div:nth-child(2){flex:1}.rek b{display:block;font-size:14px}.rek span{font-size:12px;color:var(--secondary-text-color)}.rek em{font-style:normal;font-weight:700}

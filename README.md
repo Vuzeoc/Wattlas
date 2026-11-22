@@ -90,7 +90,13 @@ og fleksibel forbruger.
 |---|---|
 | ![Teknik – inverter og net](docs/billeder/teknik.png) | ![Teknik – batteri og tidsprogrammer](docs/billeder/teknik_batteri.png) |
 
-*Live, planens logik, elpris og solprognose er vist med opdigtede demotal. De øvrige billeder er fra en rigtig installation.*
+### På telefonen
+
+| Live | Økonomi | Styring | Planens logik |
+|---|---|---|---|
+| ![Live på telefon](docs/billeder/mobil/live.jpg) | ![Økonomi på telefon](docs/billeder/mobil/okonomi.jpg) | ![Styring på telefon](docs/billeder/mobil/styring.jpg) | ![Planens logik på telefon](docs/billeder/mobil/plan.jpg) |
+
+*Live, planens logik, elpris og solprognose i de store billeder er vist med opdigtede demotal. De øvrige billeder, også dem fra telefonen, er fra en rigtig installation.*
 
 ## Hvilke invertere
 
