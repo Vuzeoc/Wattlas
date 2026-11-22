@@ -13,6 +13,29 @@ Wattlas lader [EMHASS](https://emhass.readthedocs.io/) lægge en plan for de næ
 nettarif, solprognose og husets forbrug. Wattlas følger planen hvert 30. sekund og skriver kun til inverteren, når noget skal ændres.
 Hårde grænser for sikringer, batteri og fase-strøm gælder altid, uanset hvad planen siger.
 
+## Hvorfor Wattlas
+
+Mange anlæg kommer med en færdig AI-styring fra leverandøren. Wattlas blev til, fordi den slags styring faldt ud for tit,
+tog beslutninger, man ikke kunne få forklaret, og ikke kunne arbejde sammen med resten af huset.
+
+| | Færdig AI-styring fra leverandøren | Wattlas |
+|---|---|---|
+| **Hvor den kører** | Typisk i leverandørens sky. Falder forbindelsen ud, står styringen | Lokalt i dit eget Home Assistant |
+| **Når noget går galt** | Du opdager det ofte først bagefter | Skifter selv til selvforbrug, sender besked og genoptager |
+| **Hvorfor gør den sådan?** | Sjældent en forklaring | Hver beslutning vises med priser og regnestykke, plus 7 automatiske tjek |
+| **Sikringerne** | Lader ofte uden at se på, hvad huset bruger imens | Grænse pr. fase og samlet loft, som du selv sætter |
+| **Resten af huset** | Kun det udstyr, leverandøren har valgt | Alt, Home Assistant kender, kan kobles på: varmepumper, termostater, ladestander, hvidevarer |
+| **Din kontrol** | Få indstillinger | Tilsidesættelser med ét tryk, faste regler og hvad-hvis-beregning |
+| **Dine data** | Typisk hos leverandøren | Bliver i dit hus |
+| **Koden** | Lukket | Open source – du kan se og ændre alt |
+| **Nye ønsker** | Du venter på leverandøren | Opret et issue – gode forslag bygges ind |
+
+I udviklerens eget hus sparede Wattlas 15–22 kr. om dagen efter slid i en efterårsmåned, sammenlignet med den
+almindelige selvforbrugs-styring, inverteren selv kan. Hele historien, tallene bag og hvad der er indbygget i dag, står i
+**[docs/OM_WATTLAS.md](docs/OM_WATTLAS.md)**.
+
+Wattlas er open source. Idéer og ønsker er meget velkomne – opret et issue, så bygger vi de gode forslag ind.
+
 ## Hvad får du
 
 | | |
@@ -75,6 +98,9 @@ Wattlas taler med inverteren gennem en **styrekanal**, en fil med adapter-entite
 | `styrekanaler/sunmate` – SunMate.IO pulse styrer inverteren | **ikke testet** med denne version |
 | Sunsynk / Sol-Ark / andre Deye-kloner | brug Deye-kanalen, hvis dine entiteter hedder det samme; ellers skriv din egen ([STYREKANALER.md](docs/STYREKANALER.md)) |
 
+Vi har kun en Deye at teste på. Har du en anden inverter, hjælper vi gerne med at bygge og teste en direkte kobling
+sammen med dig – opret et issue og fortæl, hvilken inverter du har.
+
 Begrænsninger i alpha: kun 48 V-batterier (spændingsvindue 45–58 V), 3-faset net, dansk nettarif med tre tidsperioden
 (0–6, 6–17/21–24, 17–21), spotpris fra Energi Data Service og solprognose i kvarterstal (Helios Forecast anbefales).
 
@@ -87,8 +113,9 @@ Begrænsninger i alpha: kun 48 V-batterier (spændingsvindue 45–58 V), 3-faset
 2. [docs/KONFIGURATION.md](docs/KONFIGURATION.md) – hvad hvert tal betyder, og hvordan du finder dit.
 3. [docs/BRUG.md](docs/BRUG.md) – sådan bruger du styringen: tilsidesættelser, indstillinger, hvad-hvis, fleksibel
    forbruger, regler og planens logik.
-4. [docs/SOLPROGNOSE.md](docs/SOLPROGNOSE.md) – hvorfor Helios Forecast, og hvad en anden prognose skal kunne.
-5. [docs/FAQ.md](docs/FAQ.md)
+4. [docs/OM_WATTLAS.md](docs/OM_WATTLAS.md) – hvorfor Wattlas findes, sammenligning med en færdig AI-styring og et eksempel fra et rigtigt hus.
+5. [docs/SOLPROGNOSE.md](docs/SOLPROGNOSE.md) – hvorfor Helios Forecast, og hvad en anden prognose skal kunne.
+6. [docs/FAQ.md](docs/FAQ.md)
 
 ## Udvikling
 

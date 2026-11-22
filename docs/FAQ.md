@@ -29,5 +29,8 @@ Ikke i alpha. Spændingsvinduet 45–58 V er bygget ind som sikkerhedsgrænse.
 *Overvågning* viser alarmer og de seneste beskeder. Logbogen viser hver skrivning (`emhass.solsalg`, diagnoselog).
 Traces på `script.emhass_reguler` viser hver regulering.
 
-**Varmepumper, isolering …?**
-Er ikke med. Wattlas handler kun om batteri, sol og elpris. En varmtvandsbeholder kan styres som fleksibel forbruger.
+**Kan Wattlas styre min varmepumpe, mine radiatorer eller min ladestander?**
+Ikke med en færdig opsætning endnu. I alpha er der én *fleksibel forbruger* (en kontakt, som planen lægger i de bedste
+timer), og Wattlas' priser, plan og soloverskud er almindelige sensorer, du kan bruge i dine egne automationer.
+[OM_WATTLAS.md](OM_WATTLAS.md) viser, hvordan udviklerens eget hus gør. Færdige koblinger står højt på ønskelisten –
+skriv gerne, hvad du har.
