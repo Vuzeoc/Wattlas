@@ -27,7 +27,7 @@ template:
 automation:
   - id: emhass_sidst_fuld_registrer
     alias: EMHASS – registrér fuldt batteri
-    description: Gemmer datoen, når batteriet har stået fuldt i 1 time. Første start bruger 7/11-2026, hvor det sidst stod fuldt.
+    description: Gemmer datoen, når batteriet har stået fuldt i 1 time. Første start bruger installationsdagen.
     triggers:
       - trigger: state
         entity_id: binary_sensor.emhass_batteri_fuldt
