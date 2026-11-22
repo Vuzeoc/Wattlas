@@ -18,11 +18,12 @@
       },
       "huawei": {
         "title": "Huawei: batteri og elmåler",
-        "description": "Huawei Solar opretter batteriet og elmåleren som egne enheder. Vælg dem her – de er udfyldt, hvis de har standardnavnene. Har du en **EMMA**, sidder elmåleren på den: vælg EMMA, og vælg EMMA-målerens *Phase A active power*. EMMA's *ESS Control Mode* skal stå på *Maximum self consumption* eller *Third-party dispatch*.\n\nWattlas skal kunne skrive til inverteren: sæt Huawei Solar op med *elevate permissions* (installatør-adgangskoden). Slå også elmålerens **Phase A/B/C voltage** til under enheden *Power meter* – de er slået fra som standard, og fasegrænsen skal bruge dem. Batteriets *Working Mode* skal stå på *Maximise self consumption*. Slå også **BMS temperature** til under *Battery 1* (og *Battery 2*), så Wattlas kan advare om et for varmt eller koldt batteri.",
+        "description": "Huawei Solar opretter batteriet og elmåleren som egne enheder. Vælg dem her – de er udfyldt, hvis de har standardnavnene.\n\n**Har du en EMMA?** Så sidder elmåleren på den: vælg *EMMA* og EMMA's **Feed in power**. EMMA's *ESS Control Mode* skal stå på *Maximum self consumption* eller *Third-party dispatch*.\n\n**Slå disse sensorer til først** (de er slået fra som standard i Huawei Solar): elmålerens **Phase A/B/C voltage** – og med EMMA også **Phase A/B/C active power** – under enheden *Power meter* eller *EMMA*. Næste trin viser, hvis nogen mangler.\n\nWattlas skal kunne skrive til inverteren: sæt Huawei Solar op med *elevate permissions* (installatør-adgangskoden). Uden EMMA skal batteriets *Working Mode* stå på *Maximise self consumption*. Slå gerne **BMS temperature** til under *Battery 1* (og *Battery 2*), så Wattlas kan advare om et for varmt eller koldt batteri.",
         "data": {
           "elmaaler": "Hvor sidder elmåleren?",
-          "batteri": "Batteriernes ladeniveau (slutter på _state_of_capacity)",
-          "maaler": "Elmåleren: Huawei-elmåler → dens Active power · EMMA → dens Phase A active power"
+          "batteri": "Batteriernes ladeniveau (State of capacity)",
+          "maaler": "Elmåler: uden EMMA → Power meter's Active power · med EMMA → EMMA's Feed in power",
+          "ekstern_maaler": "Kun EMMA: der sidder en ekstra elmåler (DTSU) på EMMA'en"
         }
       },
       "inverter2": {
@@ -122,7 +123,8 @@
     },
     "error": {
       "forkert_entitet": "Vælg entiteten, der slutter på den viste endelse.",
-      "forkert_maaler": "Huawei-elmåler: vælg dens …_active_power. EMMA: vælg EMMA-målerens …_phase_a_active_power.",
+      "forkert_maaler": "Vælg elmålerens \"Active power\" (enheden Power meter). Har du en EMMA, så vælg EMMA ovenfor.",
+      "forkert_emma": "Vælg EMMA's \"Feed in power\" (enheden EMMA).",
       "kun_deye": "En ekstra inverter kræver Deye.",
       "mangler_effekt": "Vælg den ekstra inverters effekt-sensor.",
       "navn_tegn": "Brug kun bogstaver, tal, mellemrum, punktum og bindestreg.",

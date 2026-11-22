@@ -99,8 +99,9 @@ Den **er ikke kørt på et rigtigt anlæg endnu**. Følg den nøje den første d
 ### Med EMMA (`styrekanaler/huawei_emma`) – eksperimentel, ikke kørt i drift
 
 Har du en **EMMA** (Huawei Energy Management Assistant), sidder elmåleren på den, og EMMA bestemmer over batteriet.
-Vælg *EMMA* i opsætningen, og vælg EMMA-målerens **Phase A active power** – den indbyggede måler, eller den eksterne
-(DTSU), der hedder det samme med `_2` bagpå. Wattlas finder selv resten af målerens sensorer.
+Vælg *EMMA* i opsætningen og EMMA's **Feed in power**. Huawei Solar opretter to sæt målersensorer: den indbyggede måler
+og en ekstern (DTSU) med `_2` bagpå. Sæt kun hak ved *ekstra elmåler*, hvis du faktisk har en DTSU – uden den viser de
+to sæt det samme.
 
 Forskelle fra udgaven uden EMMA:
 - Fasetal og -spændinger, husforbrug, sol og salg til nettet læses på EMMA. Slå EMMA-målerens **Phase A/B/C active
@@ -112,8 +113,8 @@ Forskelle fra udgaven uden EMMA:
 - Batteriet styres som uden EMMA (tvungen opladning og afladeeffekt på batteriet).
 
 **Regnestykke-tjek (begge udgaver):** fortegnene er ikke bekræftet på et rigtigt anlæg, så Wattlas regner efter hvert
-10. sekund. Uden EMMA: sol ind − batteriets ladning ≈ inverterens AC-effekt. Med EMMA: sol − batteriets ladning − salg ≈
-husforbrug, og de tre faser ≈ salget. Passer det ikke i 2 minutter i træk (Huawei Solar læser inverter, batteri og måler hver for sig, så et enkelt
+10. sekund. Uden EMMA: sol ind − batteriets ladning ≈ inverterens AC-effekt. Med EMMA: køb fra nettet + sol − batteriets ladning ≈
+husforbrug, og de tre faser ≈ købet (EMMA's *Feed in power* er positiv ved køb – bekræftet på en EMMA-A02). Passer det ikke i 2 minutter i træk (Huawei Solar læser inverter, batteri og måler hver for sig, så et enkelt
 skævt øjeblik er normalt), bruges målingerne ikke, og Wattlas styrer ikke. Det fanger et forkert
 fortegn på batteriet (og med EMMA også på salg og faser) inden for et par minutter – men det erstatter ikke, at du selv
 ser efter den første dag. Se `balance_ok` på `sensor.emhass_maalekilde`.

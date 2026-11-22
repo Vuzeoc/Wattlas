@@ -1,4 +1,5 @@
 # Wattlas styrekanal – Huawei: målinger fra Huawei Solar (inverter min_huawei_*, batterier min_luna_*, elmåler min_hmaaler_*).
+# EMMA-udgaven: EMMA's "Feed in power" og måler er positive ved KØB (modsat Huaweis egen elmåler).
 # Fortegn til kernen: net positiv = køb, batteri positiv = afladning. Huawei bruger det modsatte: elmåleren er positiv
 # ved salg til nettet (Huaweis Modbus-dokumentation, register 37113 og 37132–37136), batteriet positivt ved ladning.
 # Fasetallene er nettets udveksling pr. fase ved elmåleren (inkl. batteriets egen ladning) – det, fasegrænsen skal bruge.
@@ -21,16 +22,16 @@ template:
         {% set bt = ['sensor.battery_1_bms_temperature', 'sensor.battery_2_bms_temperature'] | map('states') | select('is_number') | map('float') | list %}
         {% set m = dict(
           load_w_totalpower = states('sensor.wattlas_huawei_husforbrug'),
-          grid_out_total_power = -(states('sensor.min_emma_feed_in_power') | float(0)),
+          grid_out_total_power = states('sensor.min_emma_feed_in_power') | float(0),
           battery_output_w_power = -(states('sensor.min_luna_charge_discharge_power') | float(0)),
           battery_soc = states('sensor.min_luna_state_of_capacity'),
           battery_voltage = 50,
           inverter_status = 'Normal' if normal else status,
           battery_temperature = (bt | max) if bt else 'unavailable',
           inverter_temperature = states('sensor.min_huawei_internal_temperature'),
-          external_ct_w_l1 = -(states('sensor.min_hmaaler_phase_a_active_power') | float(0)),
-          external_ct_w_l2 = -(states('sensor.min_hmaaler_phase_b_active_power') | float(0)),
-          external_ct_w_l3 = -(states('sensor.min_hmaaler_phase_c_active_power') | float(0)),
+          external_ct_w_l1 = states('sensor.min_hmaaler_phase_a_active_power') | float(0),
+          external_ct_w_l2 = states('sensor.min_hmaaler_phase_b_active_power') | float(0),
+          external_ct_w_l3 = states('sensor.min_hmaaler_phase_c_active_power') | float(0),
           grid_current_v_l1 = states('sensor.min_hmaaler_phase_a_voltage'),
           grid_current_v_l2 = states('sensor.min_hmaaler_phase_b_voltage'),
           grid_current_v_l3 = states('sensor.min_hmaaler_phase_c_voltage')) %}
@@ -44,15 +45,15 @@ template:
           {% if s is none or not is_number(s.state) %}{% set ns.ok = false %}
           {% else %}{% set ns.aeldst = [ns.aeldst, as_timestamp(s.last_reported, 0)] | min %}{% endif %}
         {% endfor %}
-        {# Regnestykke-tjek (fortegnene for EMMA er ikke dokumenteret): sol − batteriets ladning − salg = husforbrug, og
-           faserne skal tilsammen give salget. Passer det ikke, bruges målingerne ikke, og Wattlas styrer ikke. #}
+        {# Regnestykke-tjek: køb fra nettet + sol − batteriets ladning = husforbrug (bekræftet på en EMMA-A02), og
+           faserne skal tilsammen give købet. Passer det ikke, bruges målingerne ikke, og Wattlas styrer ikke. #}
         {% set f = states('sensor.min_emma_feed_in_power') | float(0) %}
         {% set pv = states('sensor.min_emma_pv_output_power') | float(0) %}
         {% set hus = states('sensor.min_emma_load_power') | float(0) %}
         {% set b = states('sensor.min_luna_charge_discharge_power') | float(0) %}
         {% set fs = ['sensor.min_hmaaler_phase_a_active_power', 'sensor.min_hmaaler_phase_b_active_power',
                      'sensor.min_hmaaler_phase_c_active_power'] | map('states') | map('float', 0) | sum %}
-        {% set balance_ok = (pv - b - f - hus) | abs <= 300 + 0.15 * (pv + hus) and (fs - f) | abs <= 300 + 0.1 * (f | abs) %}
+        {% set balance_ok = (f + pv - b - hus) | abs <= 300 + 0.15 * (pv + hus) and (fs - f) | abs <= 300 + 0.1 * (f | abs) %}
         {# Blokér først, når det har fejlet i 2 min i træk: Huawei Solar læser inverter, batteri og måler hver for sig
            (hvert 30. s, ikke samtidig), så et enkelt skævt øjeblik er normalt. Et forkert fortegn varer ved. #}
         {% set fejl_siden = 0 if balance_ok else (state_attr('sensor.emhass_maalekilde', 'balance_fejl_siden') | float(0) or t) %}

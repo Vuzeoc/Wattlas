@@ -86,9 +86,11 @@ async def main():
     for forventet, tal in [(True, dict(pv=0, b=2500, ac=-2500)), (False, dict(pv=0, b=-2500, ac=-2500)),
                            (True, dict(pv=6000, b=2000, ac=3900)), (False, dict(pv=6000, b=-2000, ac=3900))]:
         assert balance('huawei', **tal) is forventet, ('huawei', tal)
-    for forventet, tal in [(True, dict(pv=0, b=2500, hus=600, f=-3100, fs=-3100)), (False, dict(pv=0, b=2500, hus=600, f=3100, fs=3100)),
-                           (False, dict(pv=0, b=2500, hus=600, f=-3100, fs=3100)), (True, dict(pv=6000, b=2400, hus=600, f=3000, fs=3000)),
-                           (False, dict(pv=6000, b=2400, hus=600, f=-3000, fs=-3000))]:
+    # EMMA: "Feed in power" (f) er positiv ved køb. De tre første er målt på en rigtig EMMA-A02: køb, netladning og salg
+    for forventet, tal in [(True, dict(pv=0, b=0, hus=3559, f=3559, fs=3559)), (True, dict(pv=0, b=9674, hus=1123, f=10797, fs=10797)),
+                           (True, dict(pv=0, b=-2805, hus=1584, f=-1221, fs=-1221)), (True, dict(pv=6000, b=2400, hus=600, f=-3000, fs=-3000)),
+                           (False, dict(pv=0, b=9674, hus=1123, f=-10797, fs=-10797)), (False, dict(pv=0, b=-9674, hus=1123, f=10797, fs=10797)),
+                           (False, dict(pv=0, b=9674, hus=1123, f=10797, fs=-10797))]:
         assert balance('huawei_emma', **tal) is forventet, ('huawei_emma', tal)
     print('Huawei regnestykke-tjek: OK')
     await hass.async_stop(force=True)

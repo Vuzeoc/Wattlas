@@ -14,6 +14,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import selector as sel
 from homeassistant.helpers.check_config import async_check_ha_config_file
+from homeassistant.loader import async_get_integration
 
 from . import installer
 from .const import DOMAIN, EMHASS_SLUG, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TRIN
@@ -76,6 +77,11 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         anden = await self.hass.async_add_executor_job(installer.anden_styring, self.hass.config.config_dir, pkg)
         if anden:
             return self.async_abort(reason="anden_styring", description_placeholders={"sti": anden})
+        # Opdateret uden genstart: HA kører den nye kode med de gamle tekster (rå feltnavne på skærmen). Teksten her er derfor
+        # en, der også fandtes i den gamle version.
+        if str((await async_get_integration(self.hass, DOMAIN)).version) != VERSION:
+            return self.async_abort(reason="install_fejl", description_placeholders={
+                "fejl": f"Wattlas er lige blevet opdateret til {VERSION}. Genstart Home Assistant, og sæt Wattlas op bagefter."})
         if user_input is not None:
             self.d["kanal"] = user_input["kanal"]
             return await self.async_step_inverter()
@@ -105,35 +111,37 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         }), description_placeholders={"suffix": suf})
 
     # 2a – kun Huawei: batteriet og elmåleren er egne enheder i Huawei Solar-integrationen. Elmåleren sidder enten på
-    # inverteren ("Power meter", vælg dens Active power) eller på en EMMA (vælg EMMA-målerens Phase A active power;
-    # den eksterne måler hedder som den indbyggede + "_2", som Wattlas så bruger på alle målerens sensorer).
+    # inverteren ("Power meter", vælg dens Active power) eller på en EMMA (vælg EMMA's Feed in power – den er slået til som
+    # standard; målerens fasetal er det ikke, dem melder tjekket bagefter). En ekstern måler på EMMA hedder som den
+    # indbyggede + "_2", som Wattlas så bruger på alle målerens sensorer.
     async def async_step_huawei(self, user_input=None) -> ConfigFlowResult:
         fejl: dict[str, str] = {}
         if user_input is not None:
             bat, maaler, emma = user_input["batteri"], user_input["maaler"], user_input.get("elmaaler") == "emma"
             mb = re.fullmatch(r"sensor\.([a-z0-9_]+)_state_of_capacity", bat)
-            mm = re.fullmatch(r"sensor\.([a-z0-9_]+)_phase_a_active_power(_\d+)?" if emma else r"sensor\.([a-z0-9_]+)_active_power", maaler)
+            mm = re.fullmatch(r"sensor\.([a-z0-9_]+)_feed_in_power" if emma else r"sensor\.([a-z0-9_]+)_active_power", maaler)
             if not mb:
                 fejl["batteri"] = "forkert_entitet"
             if not mm:
-                fejl["maaler"] = "forkert_maaler"
+                fejl["maaler"] = "forkert_emma" if emma else "forkert_maaler"
             if not fejl:
                 self.d["ekstra"] = {"min_luna": mb.group(1), "min_hmaaler": mm.group(1)}
                 if emma:
                     self.d["kanal"] = "huawei_emma"
                     self.d["ekstra"]["min_emma"] = mm.group(1)
-                    if mm.group(2):
-                        self.d["ekstra"]["min_hmaaler"] += "|" + mm.group(2)
+                    if user_input.get("ekstern_maaler"):
+                        self.d["ekstra"]["min_hmaaler"] += "|_2"
                 return await self.async_step_tjek()
         har = lambda e: (s := self.hass.states.get(e)) is not None and s.state not in ("unknown", "unavailable")  # noqa: E731
         std_emma = not har("sensor.power_meter_active_power") and har("sensor.emma_feed_in_power")
         std = {"batteri": "sensor.batteries_state_of_capacity",
-               "maaler": "sensor.emma_phase_a_active_power" if std_emma else "sensor.power_meter_active_power"}
+               "maaler": "sensor.emma_feed_in_power" if std_emma else "sensor.power_meter_active_power"}
         skema = {vol.Required("elmaaler", default="emma" if std_emma else "huawei"): sel.SelectSelector(sel.SelectSelectorConfig(
             options=["huawei", "emma"], translation_key="elmaaler", mode=sel.SelectSelectorMode.LIST))}
         for felt in ("batteri", "maaler"):
             skema[vol.Required(felt, **({"default": std[felt]} if self.hass.states.get(std[felt]) else {}))] = sel.EntitySelector(
                 sel.EntitySelectorConfig(domain="sensor"))
+        skema[vol.Optional("ekstern_maaler", default=False)] = sel.BooleanSelector()
         return self.async_show_form(step_id="huawei", errors=fejl, data_schema=vol.Schema(skema))
 
     # 2b – kun hvis der også er en inverter uden batteri

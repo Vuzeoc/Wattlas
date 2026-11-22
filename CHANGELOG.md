@@ -2,6 +2,14 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.3.1
+- **Huawei med EMMA:** fortegnet på EMMA's målinger var vendt forkert (EMMA's *Feed in power* er positiv ved køb – nu bekræftet
+  med data fra en rigtig EMMA-A02). I 0.3.0 fik det regnestykke-tjekket til at afvise målingerne, så Wattlas ikke styrede
+  et EMMA-anlæg. Stadig eksperimentel: fasetallene og selve batteristyringen under EMMA er ikke bekræftet endnu
+- Opsætning med EMMA: du vælger nu EMMA's *Feed in power* (før en fasesensor, der er slået fra som standard og derfor ikke kunne vælges)
+- Er Wattlas opdateret uden at Home Assistant er genstartet, siger opsætningen det – i stedet for at vise felter uden tekst
+- Ingen ændringer for Deye, SunMate og Huawei uden EMMA
+
 ## 0.3.0
 - **Ny styrekanal: Huawei** – SUN2000 (hybrid) med LUNA2000-batteri og Huawei-elmåler via [Huawei Solar](https://github.com/wlcrs/huawei_solar).
   Netladning i de billige timer (i 10 minutter ad gangen, så ladningen stopper af sig selv, hvis Home Assistant går ned),

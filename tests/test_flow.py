@@ -252,11 +252,12 @@ async def main():
     r = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.inverter_input_power', 'inverter2': False})
     assert r['step_id'] == 'huawei', r
     fejl = await fm.async_configure(r['flow_id'], {'elmaaler': 'emma', 'batteri': 'sensor.batteries_state_of_capacity',
-                                                   'maaler': 'sensor.emma_feed_in_power'})
-    assert fejl['errors'] == {'maaler': 'forkert_maaler'}, fejl
+                                                   'maaler': 'sensor.emma_load_power'})  # en anden EMMA-sensor end Feed in power
+    assert fejl['errors'] == {'maaler': 'forkert_emma'}, fejl
     r = await fm.async_configure(r['flow_id'], {'elmaaler': 'emma', 'batteri': 'sensor.batteries_state_of_capacity',
-                                                'maaler': 'sensor.emma_phase_a_active_power_2'})
+                                                'maaler': 'sensor.emma_feed_in_power', 'ekstern_maaler': True})
     assert r['step_id'] == 'tjek', r
+    assert 'sensor.emma_phase_a_active_power_2' in r['description_placeholders']['liste'] or 'entiteter' in r['description_placeholders']['liste'], 'slåede-fra fasesensorer skal nævnes'
     r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
     r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
@@ -276,6 +277,16 @@ async def main():
     assert issue(hass, 'opdatering_fejlede') is None and entry.data['version'] != '0.0.1'
     assert "device_id('sensor.emma_feed_in_power')" in (cfg / 'packages/wattlas_kanal/wattlas_kanal_huawei.yaml').read_text(encoding='utf-8')
     print('E Huawei med EMMA opdatering: OK')
+    await hass.async_stop(force=True)
+
+    # F: opdateret uden genstart (koden på disken er nyere end den version, HA læste ved start) → opsætningen beder om genstart
+    hass, cfg = await ny_hass('default_config:\n')
+    CF = sys.modules['custom_components.wattlas.config_flow']
+    rigtig, CF.VERSION = CF.VERSION, '99.0.0'
+    r = await hass.config_entries.flow.async_init('wattlas', context={'source': 'user'})
+    CF.VERSION = rigtig
+    assert r['type'] == 'abort' and r['reason'] == 'install_fejl' and 'Genstart' in r['description_placeholders']['fejl'], r
+    print('F opdateret uden genstart: OK')
     await hass.async_stop(force=True)
 
 asyncio.run(main())
