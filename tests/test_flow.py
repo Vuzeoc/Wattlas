@@ -14,6 +14,7 @@ TAL = {'batteri': {'batteri_kwh': 20, 'maks_ladeeffekt_w': 10000, 'maks_afladeef
        'elnet': {'fase_graense_a': 16, 'import_graense_w': 11000, 'maks_netimport_w': 9000, 'maks_eksport_w': 6000},
        'priser': {'nettarif_lav': 0.1, 'nettarif_hoej': 0.3, 'nettarif_spids': 0.9, 'elafgift': 0.8}}
 STYRING, OVERTAGET = 'input_boolean.emhass_styring_aktiv', 'input_boolean.emhass_har_overtaget'
+GENSTART = 'wattlas_genstart_mangler'
 
 
 async def ny_hass(conf):
@@ -35,8 +36,8 @@ async def ny_hass(conf):
     return hass, cfg
 
 
-async def forloeb(kanal, inverter, inv2=None, conf='default_config:\n'):
-    hass, cfg = await ny_hass(conf)
+async def opsaet(hass, kanal, inverter, inv2=None):
+    """Går hele opsætningen igennem, som brugeren gør det i vinduet."""
     hass.states.async_set(inverter, '0')
     fm = hass.config_entries.flow
     r = await fm.async_init('wattlas', context={'source': 'user'})
@@ -57,28 +58,33 @@ async def forloeb(kanal, inverter, inv2=None, conf='default_config:\n'):
         assert r.get('step_id') == t, r
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
-    return hass, cfg
+    await hass.async_block_till_done()
 
 
 def issue(hass, navn):
     return ir.async_get(hass).async_get_issue('wattlas', navn)
 
 
-def fang_kald(hass):
-    """Erstatter hjælpernes tjenester og husker kaldene. turn_off slår også 'har overtaget' fra, som hovedafbryderen gør."""
+def fang_kald(hass, selvforbrug=True):
+    """Erstatter hjælpernes tjenester og husker kaldene. turn_off slår også 'har overtaget' fra, som hovedafbryderen gør –
+    undtagen med selvforbrug=False, som svarer til en inverter, der ikke svarer."""
     kald = []
 
     async def fang(call):
         kald.append((call.domain, call.service, call.data.get('entity_id'), call.data.get('value')))
         if call.service == 'turn_off':
-            for e in (STYRING, OVERTAGET):
-                hass.states.async_set(e, 'off')
+            hass.states.async_set(STYRING, 'off')
+            if selvforbrug:
+                hass.states.async_set(OVERTAGET, 'off')
     for dom, tj in (('input_number', 'set_value'), ('input_text', 'set_value'), ('input_boolean', 'turn_on'), ('input_boolean', 'turn_off')):
         hass.services.async_register(dom, tj, fang)
     return kald
 
 
-async def genindlaes(hass):
+async def genindlaes(hass, genstart=False):
+    """Indlæser integrationen igen. genstart=True svarer til, at Home Assistant er genstartet (hukommelsen er tom)."""
+    if genstart:
+        hass.data.pop(GENSTART, None)
     entry = hass.config_entries.async_entries('wattlas')[0]
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
@@ -86,8 +92,12 @@ async def genindlaes(hass):
 
 
 async def main():
-    # A: Deye, én inverter → overførsel én gang → fjernelse
-    hass, cfg = await forloeb('deye', 'sensor.min_inverter_pv_power', conf='homeassistant:\n  name: Test\n')
+    W = None  # integrationens modul, når det er indlæst
+
+    # A: Deye, én inverter → overførsel én gang → fjernelse → tilføjet igen uden genstart
+    hass, cfg = await ny_hass('homeassistant:\n  name: Test\n')
+    await opsaet(hass, 'deye', 'sensor.min_inverter_pv_power')
+    W = sys.modules['custom_components.wattlas']
     entry = hass.config_entries.async_entries('wattlas')[0]
     assert issue(hass, 'genstart') is not None
     assert entry.data['tal']['slid'] == 0.25, 'slidprisen skal være forudfyldt'
@@ -101,68 +111,95 @@ async def main():
     hass.states.async_set('input_number.wattlas_fase_graense_a', '18.0')  # allerede sat af brugeren – må ikke overskrives
     hass.states.async_set('input_text.wattlas_emhass_noegle', '')
     hass.states.async_set('input_boolean.emhass_fuld_opladning', 'off')
-    entry = await genindlaes(hass)
+    entry = await genindlaes(hass, genstart=True)
     assert ('input_number', 'set_value', 'input_number.wattlas_batteri_kwh', 20) in kald
     assert ('input_number', 'set_value', 'input_number.wattlas_slid', 0.25) in kald
     assert not any(k[2] == 'input_number.wattlas_fase_graense_a' for k in kald)
     assert ('input_text', 'set_value', 'input_text.wattlas_emhass_noegle', 'hemmelig123') in kald
     assert ('input_boolean', 'turn_on', 'input_boolean.emhass_fuld_opladning', None) in kald
     assert issue(hass, 'genstart') is None
-    assert 'emhass_noegle' not in entry.data and entry.data['overfoert'], 'nøglen må ikke blive liggende i integrationen'
+    assert 'emhass_noegle' not in entry.data and 'slid' in entry.data['overfoert'], 'nøglen må ikke blive liggende i integrationen'
     kald.clear()
-    await genindlaes(hass)
+    await genindlaes(hass, genstart=True)
     assert not kald, 'indstillingerne overføres kun én gang'
+    # en senere version får en ny indstilling med standardværdi: den skal nå en opsætning, der allerede er overført
+    W.STANDARD['ny_ting'] = 5
+    hass.states.async_set('input_number.wattlas_ny_ting', '0.0')
+    entry = await genindlaes(hass, genstart=True)
+    assert kald == [('input_number', 'set_value', 'input_number.wattlas_ny_ting', 5)], kald
+    assert 'ny_ting' in entry.data['overfoert']
+    del W.STANDARD['ny_ting']
     print('A opsætning og overførsel: OK')
+    kald.clear()
     hass.states.async_set(STYRING, 'on'); hass.states.async_set(OVERTAGET, 'on')
     await hass.config_entries.async_remove(entry.entry_id); await hass.async_block_till_done()
     assert ('input_boolean', 'turn_off', STYRING, None) in kald, 'styringen skal slås fra, før filerne flyttes'
     assert not (cfg / 'packages/wattlas').exists() and list(cfg.glob('wattlas_backup_*/packages_wattlas'))
-    assert issue(hass, 'fjernet') is not None and not issue(hass, 'fjernet').is_persistent
+    assert issue(hass, 'fjernet').translation_key == 'fjernet' and not issue(hass, 'fjernet').is_persistent
     print('A fjernelse: OK')
+    # tilføjet igen uden genstart: de gamle pakker (og sensoren) lever stadig i hukommelsen
+    kald.clear()
+    await opsaet(hass, 'deye', 'sensor.min_inverter_pv_power')
+    assert issue(hass, 'genstart') is not None, 'der skal stadig bedes om genstart'
+    assert not kald, 'intet må overføres til de gamle hjælpere'
+    await genindlaes(hass)  # "Genindlæs" på integrationen er ikke en genstart
+    assert issue(hass, 'genstart') is not None and not kald
+    hass.states.async_set('input_number.wattlas_batteri_kwh', '0.0')
+    await genindlaes(hass, genstart=True)
+    assert issue(hass, 'genstart') is None and ('input_number', 'set_value', 'input_number.wattlas_batteri_kwh', 20) in kald
+    print('A tilføjet igen uden genstart: OK')
     await hass.async_stop(force=True)
 
     # B: Deye + ekstra AC-koblet inverter → opdatering → opdatering der fejler
-    hass, cfg = await forloeb('deye', 'sensor.min_inverter_pv_power',
-                              {'inverter2_navn': 'SMA', 'inverter2_tilslutning': 'ac', 'inverter2_effekt': 'sensor.sma_power'})
+    hass, cfg = await ny_hass('default_config:\n')
+    await opsaet(hass, 'deye', 'sensor.min_inverter_pv_power',
+                 {'inverter2_navn': 'SMA', 'inverter2_tilslutning': 'ac', 'inverter2_effekt': 'sensor.sma_power'})
     assert "states('sensor.sma_power')" in (cfg / 'packages/wattlas_kanal/wattlas_kanal_deye.yaml').read_text(encoding='utf-8')
     assert 'inverter2_prefix: sma_' in (cfg / 'wattlas/dashboards/wattlas_styring.yaml').read_text(encoding='utf-8')
     print('B ekstra AC-inverter: OK')
-    entry = hass.config_entries.async_entries('wattlas')[0]
+    fang_kald(hass)
+    hass.states.async_set('binary_sensor.wattlas_konfigureret', 'on')
+    entry = await genindlaes(hass, genstart=True)
     ny_version = entry.data['version']
     fil = cfg / 'packages/wattlas/emhass_forbindelse.yaml'
-    ir.async_delete_issue(hass, 'wattlas', 'genstart')
     fil.write_text('# gammel\n', encoding='utf-8')
     hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
-    fang_kald(hass)
-    hass.states.async_set('binary_sensor.wattlas_konfigureret', 'on')  # de gamle pakker kører stadig, mens der opdateres
-    entry = await genindlaes(hass)
+    entry = await genindlaes(hass, genstart=True)  # genstart efter at markedspladsen har hentet en ny version
     assert 'gammel' not in fil.read_text(encoding='utf-8')
     assert issue(hass, 'genstart') is not None, 'efter en opdatering skal brugeren bedes om at genstarte'
     assert entry.data['version'] == ny_version and list(cfg.glob('wattlas_backup_*/packages_wattlas'))
     # efter genstarten: reparationen væk, ingen ny installation, og overførslen har ikke skrevet den gamle version tilbage
     backups = len(list(cfg.glob('wattlas_backup_*')))
-    entry = await genindlaes(hass)
+    entry = await genindlaes(hass, genstart=True)
     assert issue(hass, 'genstart') is None
-    assert entry.data['version'] == ny_version and entry.data['overfoert'] and len(list(cfg.glob('wattlas_backup_*'))) == backups
+    assert entry.data['version'] == ny_version and len(list(cfg.glob('wattlas_backup_*'))) == backups
     print('B opdatering: OK')
 
     async def tjek_fejler(_hass):
         return types.SimpleNamespace(errors=[types.SimpleNamespace(message='testfejl')])
-    sys.modules['custom_components.wattlas'].async_check_ha_config_file = tjek_fejler
+    rigtigt_tjek, W.async_check_ha_config_file = W.async_check_ha_config_file, tjek_fejler
     await asyncio.sleep(1.1)  # backup-mappen navngives pr. sekund
     fil.write_text('# gammel\n', encoding='utf-8')
     hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
-    entry = await genindlaes(hass)
+    entry = await genindlaes(hass, genstart=True)
     assert 'gammel' in fil.read_text(encoding='utf-8'), 'den gamle version skal lægges tilbage'
     assert entry.data['version'] == '0.0.1' and issue(hass, 'opdatering_fejlede') is not None
+    W.async_check_ha_config_file = rigtigt_tjek
     print('B opdatering der fejler: OK')
     await hass.async_stop(force=True)
 
-    # C: SunMate
-    hass, cfg = await forloeb('sunmate', 'number.min_sunmate_timepoint_1_power')
+    # C: SunMate → fjernelse, hvor inverteren ikke svarer
+    hass, cfg = await ny_hass('default_config:\n')
+    await opsaet(hass, 'sunmate', 'number.min_sunmate_timepoint_1_power')
     assert (cfg / 'packages/wattlas_kanal/wattlas_kanal_sunmate.yaml').exists()
     assert 'homeassistant:' in (cfg / 'configuration.yaml').read_text(encoding='utf-8')
     print('C SunMate: OK')
+    fang_kald(hass, selvforbrug=False)
+    W.VENT_S = 2
+    hass.states.async_set(STYRING, 'on'); hass.states.async_set(OVERTAGET, 'on')
+    await hass.config_entries.async_remove(hass.config_entries.async_entries('wattlas')[0].entry_id); await hass.async_block_till_done()
+    assert issue(hass, 'fjernet').translation_key == 'fjernet_tjek', 'brugeren skal have at vide, at inverteren ikke svarede'
+    print('C fjernelse uden svar fra inverteren: OK')
     await hass.async_stop(force=True)
 
 asyncio.run(main())

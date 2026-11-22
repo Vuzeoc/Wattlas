@@ -167,6 +167,17 @@
         }
       }
     },
+    "fjernet_tjek": {
+      "title": "Wattlas er fjernet – tjek inverteren",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Genstart Home Assistant",
+            "description": "**Inverteren svarede ikke**, da Wattlas ville sætte den til selvforbrug. Den står derfor i det sidste program, Wattlas gav den. Sæt selv tidsprogrammerne i inverterens app.\n\nFilerne er flyttet til `{backup}`. Automationer og dashboards forsvinder først, når Home Assistant genstarter."
+          }
+        }
+      }
+    },
     "opdatering_fejlede": {
       "title": "Wattlas-opdateringen til {version} blev ikke gennemført",
       "description": "Den nye version bestod ikke Home Assistants konfigurationstjek, så den gamle er lagt tilbage og kører videre. Wattlas prøver igen ved næste genstart.\n\nFejl: {fejl}"

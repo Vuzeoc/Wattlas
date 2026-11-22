@@ -16,7 +16,7 @@ from homeassistant.helpers import selector as sel
 from homeassistant.helpers.check_config import async_check_ha_config_file
 
 from . import installer
-from .const import DOMAIN, EMHASS_SLUG, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TRIN
+from .const import DOMAIN, EMHASS_SLUG, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TRIN
 
 VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
 SUFFIX = {"deye": ("sensor", "_pv_power"), "sunmate": ("number", "_timepoint_1_power")}
@@ -246,6 +246,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         for gammel, ny in omdoeb.items():
             if reg.async_get(gammel) and not reg.async_get(ny):
                 reg.async_update_entity(gammel, new_entity_id=ny)
+        hass.data[GENSTART] = True
         ir.async_create_issue(hass, DOMAIN, "genstart", is_fixable=True, is_persistent=True,
                               severity=ir.IssueSeverity.WARNING, translation_key="genstart")
         data = {k: v for k, v in self.d.items() if k != "emhass_adresse_fundet"}
