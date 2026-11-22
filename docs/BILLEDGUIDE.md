@@ -110,9 +110,13 @@ Netselskabets tariffer (lav, høj og spids), elafgiften og evt. elselskabets til
 elregning eller netselskabets hjemmeside. Felter mærket *valgfri* kan stå tomme.
 
 **Batterislid** er forudfyldt med 0,25 kr. pr. kWh. Regn gerne dit eget tal: batteriets pris / (kapacitet × cykler).
-Sæt den ikke til 0 – så regner planen batteriet som gratis at bruge. (Feltet er nyt og er ikke med på billedet endnu.)
+Sæt den ikke til 0 – så regner planen batteriet som gratis at bruge.
 
 ![Priser](billeder/installation/11-priser.jpg)
+
+Rul ned i samme vindue for at se de sidste felter:
+
+![Priser – batterislid nederst](billeder/installation/11b-priser-slid.jpg)
 
 ## 9. Færdig – genstart
 
