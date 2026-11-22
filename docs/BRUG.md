@@ -6,6 +6,35 @@ Wattlas kører af sig selv, når det er sat op: EMHASS lægger en ny plan hvert 
 Rækkefølgen, Wattlas følger: **manuel tilsidesættelse → første aktive regel → planen**. Sikkerhedsgrænserne (sikringer,
 faser, spænding, batteriets strømme og reserve) gælder altid, uanset hvad du vælger.
 
+**Indhold:** [De første dage](#de-første-dage) · [Hverdagen](#hverdagen) · [Styring](#wattlas-styring--styring) ·
+[Regler](#wattlas-styring--regler) · [Planens logik](#wattlas-styring--planens-logik) ·
+[Overvågning](#wattlas-styring--overvågning) · [Teknik](#wattlas-styring--teknik) · [Appen](#wattlas-appen) ·
+[Når noget går galt](#når-noget-går-galt) · [Én eller flere invertere](#én-eller-flere-invertere)
+
+## De første dage
+
+1. **Se planen an, før den styrer.** Når indstillingerne er sat, laver EMHASS planer, og appen virker, men inverteren
+   røres først, når du slår **Wattlas styrer batteriet** til. Kig på *Planens logik* et døgn eller to: giver
+   beslutningerne mening, og består de 7 tjek?
+2. **Slå styringen til, mens du er hjemme.** Hold øje med *Overvågning* og med inverterens egen app den første dag.
+   Ser noget forkert ud, så slå styringen fra – inverteren går tilbage til selvforbrug.
+3. **Sæt beskeder op.** Ret `script.wattlas_besked` til din telefon, og tryk *Send testbesked* i *Overvågning*.
+4. **Tjek økonomien efter en uge.** *Økonomi* viser, hvad Wattlas har sparet i forhold til ikke at have batteri.
+
+## Hverdagen
+
+Normalt skal du ingenting. Det, folk typisk bruger:
+
+| Situation | Gør dette |
+|---|---|
+| Storm eller varslet strømsvigt | **Lad nu** til 100 % og hæv **Reserve** et par dage |
+| Gæster, ferie eller et dyrt apparat skal køre i aften | **Gem batteriet** nogle timer i forvejen, eller en regel |
+| Strømmen er dyr nu, men planen venter | **Brug batteriet** |
+| Vinter (lidt sol, kolde nætter) | hæv **Reserve** til 20–30 % |
+| Netselskabet skifter tarif (sommer/vinter) | ret de tre nettarif-helpers (se [KONFIGURATION.md](KONFIGURATION.md)) |
+| Arbejde på inverter eller batteri | slå **Wattlas styrer batteriet** fra først |
+| Ny version af Wattlas | kør `install.sh` igen; dine indstillinger bevares |
+
 ## Wattlas Styring → Styring
 
 ### Øverst: hvad sker der nu
@@ -117,6 +146,77 @@ Kun til aflæsning. Inverterens indstillinger ændres i inverteren eller Solarma
 | **Solprognose** | prognose mod målt produktion i dag og de næste dage |
 
 Søndag aften kommer der en ugerapport som besked.
+
+## Når noget går galt
+
+Wattlas falder altid tilbage til noget sikkert: mangler planen, bruges den gemte reserveplan (højst 2 timer gammel), og
+derefter selvforbrug. Mistes målinger eller forbindelsen til inverteren, stoppes netladning, og inverteren sættes til
+selvforbrug. Du får en besked, og Wattlas prøver selv igen.
+
+| Du ser | Betyder | Gør dette |
+|---|---|---|
+| Gul linje øverst: *ikke færdigindstillet* | startspærren er aktiv | sæt de indstillinger, linjen nævner |
+| *Inverteren svarer ikke* | ingen nye målinger i 10 min | tjek loggeren/WiFi og inverter-integrationen |
+| *Mangler aktuel plan* | EMHASS har ikke lavet en brugbar plan | se beskeden *EMHASS – beregning fejlede* under Notifikationer; tjek EMHASS-app'en, nøglen og at priser og solprognose har data |
+| *EMHASS – prognosedata mangler* | solprognosen har huller | se [SOLPROGNOSE.md](SOLPROGNOSE.md) |
+| *Høj netbelastning* | en fase bruger mere end fasegrænsen + 25 % under netladning | Wattlas skruer selv ned; sker det tit, så sænk `wattlas_fase_graense_a` |
+| *Periode følger ikke planen* | inverterens tidsprogram svarer ikke til det, Wattlas skrev | tjek at "Time of use" er slået til, og at programtiderne er 01, 05, 09, 13, 17 og 21 |
+| Et tjek i *Planens logik* er gult | planen ser mærkelig ud | læs forklaringen; ofte er det ok (fx små prisforskelle) |
+
+Er du i tvivl: slå **Wattlas styrer batteriet** fra. Så kører inverteren almindeligt selvforbrug, og intet går i stykker.
+
+## Én eller flere invertere
+
+### Én inverter (det normale)
+Wattlas er bygget til **én hybrid-inverter med batteri**, og det er det, de fleste har. Du skal ikke gøre noget
+særligt: styrekanalen læser solproduktion, batteri, net og hus fra den ene inverter, og appens energiflow viser
+den samlede sol. Lad `pv_anlaeg` og `inverter2_…` være udkommenteret i dashboards.
+
+Vil du se dine to strenge (MPPT 1 og 2) hver for sig i energiflowet, så tilføj fx i `dashboards/wattlas.yaml`:
+
+```yaml
+pv_anlaeg:
+  - {navn: Syd, entitet: sensor.min_inverter_pv1_power}
+  - {navn: Vest, entitet: sensor.min_inverter_pv2_power}
+```
+
+### En ekstra inverter uden batteri
+Har du også en almindelig streng-inverter (fx et ældre anlæg), afhænger det af, hvor den sidder:
+
+| Tilslutning | Hvad Wattlas gør | Hvad du skal gøre |
+|---|---|---|
+| **På Deyes GEN-/mikroinverter-port** | tæller den automatisk med i solproduktionen (`…_microinverter_power`) og i planen | intet. Valgfrit: vis den i *Teknik* og i energiflowet (se nedenfor) |
+| **Direkte i husets eltavle** (AC-koblet) | Deyes CT ser den som lavere husforbrug. Styringen virker, men uden mere ved Wattlas ikke, at det er sol | installér med `--inverter2-ac <dens effekt-sensor>` (eller læg den til `sensor.emhass_solproduktion_samlet` i styrekanal-filen), og sørg for at solprognosen dækker begge anlæg |
+
+**Nemmest:** vælg den ved installationen, så klarer `install.sh` det hele (se
+[INSTALLATION.md](INSTALLATION.md#3-kopiér-filerne--med-scriptet-anbefalet)):
+
+```sh
+sh install.sh deye --inverter2 min_strenginverter --inverter2-navn "Streng-inverter"          # GEN-port
+sh install.sh deye --inverter2 sma --inverter2-navn "SMA" --inverter2-ac sensor.sma_power      # AC-koblet
+```
+
+Eller i hånden i `dashboards/wattlas_styring.yaml` og `dashboards/wattlas.yaml`:
+
+```yaml
+inverter2_prefix: min_strenginverter_      # Teknik-fanen: inverter 2's entiteter
+inverter2_navn: streng-inverter
+inverter2_relae: switch.min_strenginverter_relae   # valgfri: relæ der kan afbryde den
+pv_anlaeg:
+  - {navn: Hybrid, entitet: sensor.min_inverter_pv_power}
+  - {navn: Streng, entitet: sensor.min_inverter_microinverter_power}
+```
+
+Kan streng-inverteren ikke selv begrænse eksport, så kan den afbrydes med et relæ ved negativ salgspris. Se
+[eksempler/strenginverter_negativ_pris.yaml](../eksempler/strenginverter_negativ_pris.yaml).
+
+**Solprognose med flere tagflader:** prognosen skal dække al sol, Wattlas kan bruge. Har du én Helios-sensor pr.
+tagflade, så læg dem sammen til én sensor i samme format (se [SOLPROGNOSE.md](SOLPROGNOSE.md)).
+
+### To hybrid-invertere med hver sit batteri
+Understøttes **ikke** i denne version. Styrekanalen skriver til én inverters tidsprogrammer, og grænserne regnes for
+ét batteri. Kører dine invertere i parallel som ét system, hvor den ene er master og styrer begge, kan det virke at
+pege styrekanalen på master-inverteren. Det er ikke testet.
 
 ## Gode vaner
 - Følg **Overvågning** den første uge.

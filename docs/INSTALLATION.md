@@ -19,7 +19,7 @@ Regn med ca. en time. Styringen kan ikke starte, før trin 6 er gjort færdigt. 
 | **SQL** (indbygget) | husprognose og historik fra HA's database | aktiveres automatisk af pakken |
 | En **solprognose** med attributten `forecast` (liste af `{datetime, watts}`) | solen i planen | **Helios Forecast** (HACS) anbefales, Wattlas er bygget til den. Andre kræver samme format med kvarterstal, se [SOLPROGNOSE.md](SOLPROGNOSE.md) |
 | En **vejr-entitet** (`weather.…`) med timeprognose | temperatur-justeret husforbrug | fx Met.no (indbygget) |
-| En **udetemperatur-sensor** | samme | hvilken som helst `sensor.…` i °C |
+| En **udetemperatur-sensor** (valgfri) | samme | hvilken som helst `sensor.…` i °C. Udelader du den, bruges vejr-entitetens temperatur |
 | Inverterens integration | styrekanal | Deye: [ha-solarman](https://github.com/davidrapan/ha-solarman) (HACS). SunMate: SunMate-integrationen |
 
 ## 2. EMHASS-app
@@ -51,6 +51,22 @@ sh install.sh deye        # eller: sh install.sh sunmate
 ```
 
 Hedder inverterens entiteter noget andet end `min_inverter_…`, så tilføj `--prefix dit_prefix` (se trin 4).
+
+**De fleste har én inverter** og skal ikke andet. Har du *også* en inverter uden batteri (fx en ældre
+streng-inverter), kan du tilvælge den (kun med `deye`):
+
+```sh
+# på Deyes GEN-/mikroinverter-port – tælles automatisk med i solproduktionen
+sh install.sh deye --inverter2 min_strenginverter --inverter2-navn "Streng-inverter"
+
+# i eltavlen (AC-koblet) – dens effekt lægges til solproduktionen
+sh install.sh deye --inverter2 sma --inverter2-navn "SMA" --inverter2-ac sensor.sma_power
+
+# valgfrit: et relæ, der kan afbryde den
+... --inverter2-relae switch.strenginverter_relae
+```
+
+Se [BRUG.md › Én eller flere invertere](BRUG.md#én-eller-flere-invertere) for, hvad det betyder.
 
 Scriptet kopierer kernen, én styrekanal, app-kortene og begge dashboards (*Wattlas* og *Wattlas Styring*) og kører
 `ha core check`. Det genstarter ikke HA og rører ikke dine nøgler. Køres det igen (fx ved en ny version), flyttes de
@@ -112,7 +128,7 @@ Har du brugt scriptet, er du færdig med dette trin. Ellers:
 - sikringer: strøm pr. fase og importloft
 - nettarif og afgifter (fra din netselskabs- og elregning)
 - EMHASS-adresse og API-nøgle
-- solprognose-, vejr- og temperatur-entitet
+- solprognose- og vejr-entitet (udetemperatur-sensor er valgfri)
 
 Når `binary_sensor.wattlas_konfigureret` er **on**, er spærren væk.
 

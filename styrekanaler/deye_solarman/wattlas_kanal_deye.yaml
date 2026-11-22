@@ -377,7 +377,7 @@ template:
       - name: Wattlas PV-måling OK
         unique_id: wattlas_pv_maaling_ok
         default_entity_id: binary_sensor.wattlas_pv_maaling_ok
-        state: "{{ is_number(states('sensor.min_inverter_pv_power')) and is_number(states('sensor.min_inverter_microinverter_power')) }}"
+        state: "{{ is_number(states('sensor.min_inverter_pv_power')) and (is_number(states('sensor.min_inverter_microinverter_power')) or states.sensor.min_inverter_microinverter_power is none) }}"
   - sensor:
       - name: Wattlas batteri afladet i dag
         unique_id: wattlas_i_dag_afladet

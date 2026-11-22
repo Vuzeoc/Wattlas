@@ -5,6 +5,13 @@
 #   sh install.sh sunmate                   SunMate-styrekanal
 #   sh install.sh deye --prefix mit_deye    inverterens entiteter starter med mit_deye_ i stedet for min_inverter_
 #
+# Ekstra inverter uden batteri (valgfrit, kun deye – de fleste har kun én og springer dette over):
+#   --inverter2 <prefix>          dens entiteter, fx min_strenginverter (vises i Teknik og energiflowet)
+#   --inverter2-navn "<navn>"     overskrift, fx "Streng-inverter"
+#   --inverter2-relae <entitet>   valgfrit relæ, der kan afbryde den, fx switch.strenginverter_relae
+#   --inverter2-ac <sensor>       kun hvis den sidder i eltavlen (AC-koblet) og ikke på Deyes GEN-port:
+#                                 dens effekt-sensor lægges til solproduktionen, fx sensor.strenginverter_power
+#
 # Valg: --kilde <mappe|fil.tar.gz> (installér fra en lokal kopi), --config <mappe> (standard /config).
 # Miljø: WATTLAS_VERSION (standard v0.1.0-alpha).
 #
@@ -19,9 +26,13 @@ CONFIG="/config"
 KANAL=""
 PREFIX=""
 KILDE=""
+INV2=""
+INV2_NAVN="Inverter 2"
+INV2_RELAE=""
+INV2_AC=""
 
 fejl() { echo "FEJL: $*" >&2; exit 1; }
-brug() { sed -n '2,13p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 1; }
+brug() { sed -n '2,20p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -29,6 +40,10 @@ while [ $# -gt 0 ]; do
     --prefix) [ $# -ge 2 ] || brug; PREFIX="$2"; shift ;;
     --kilde) [ $# -ge 2 ] || brug; KILDE="$2"; shift ;;
     --config) [ $# -ge 2 ] || brug; CONFIG="$2"; shift ;;
+    --inverter2) [ $# -ge 2 ] || brug; INV2="$2"; shift ;;
+    --inverter2-navn) [ $# -ge 2 ] || brug; INV2_NAVN="$2"; shift ;;
+    --inverter2-relae) [ $# -ge 2 ] || brug; INV2_RELAE="$2"; shift ;;
+    --inverter2-ac) [ $# -ge 2 ] || brug; INV2_AC="$2"; shift ;;
     -h|--help) brug ;;
     *) echo "Ukendt valg: $1" >&2; brug ;;
   esac
@@ -43,6 +58,17 @@ esac
 case "$PREFIX" in
   ""|*[!a-z0-9_]*) [ -z "$PREFIX" ] || fejl "--prefix må kun indeholde små bogstaver, tal og _ (fx mit_deye)." ;;
 esac
+if [ -n "$INV2$INV2_RELAE$INV2_AC" ]; then
+  [ -n "$INV2" ] || fejl "--inverter2-relae og --inverter2-ac kræver --inverter2 <prefix>."
+  [ "$KANAL" = deye ] || fejl "En ekstra inverter understøttes kun med deye-styrekanalen."
+  case "$INV2" in *[!a-z0-9_]*) fejl "--inverter2 må kun indeholde små bogstaver, tal og _." ;; esac
+  case "$INV2_NAVN" in *[!A-Za-z0-9\ ._æøåÆØÅ-]*) fejl "--inverter2-navn må kun indeholde bogstaver, tal, mellemrum, punktum og bindestreg." ;; esac
+  for e in "$INV2_RELAE" "$INV2_AC"; do
+    case "$e" in ""|switch.*|binary_sensor.*|sensor.*) ;; *) fejl "$e ligner ikke en entitet." ;; esac
+    case "$e" in *[!a-z0-9_.]*) fejl "$e indeholder ugyldige tegn." ;; esac
+  done
+  case "$INV2_AC" in ""|sensor.*) ;; *) fejl "--inverter2-ac skal være en sensor.…" ;; esac
+fi
 
 CFG="$CONFIG/configuration.yaml"
 [ -f "$CFG" ] || fejl "Fandt ikke $CFG. Kør scriptet i Terminal & SSH-app'en, eller angiv --config."
@@ -110,6 +136,28 @@ fi
 mkdir -p "$CONFIG/www/wattlas" "$CONFIG/wattlas/dashboards"
 cp "$SRC"/dist/* "$CONFIG/www/wattlas/"
 cp "$SRC"/dashboards/*.yaml "$CONFIG/wattlas/dashboards/"
+
+# --- inverter-navne i dashboards (standard: én inverter, intet at gøre)
+P="${PREFIX:-$STD}"
+DS="$CONFIG/wattlas/dashboards"
+if [ -n "$PREFIX" ] && [ "$KANAL" = deye ]; then
+  sed -i "s|^        # inverter_prefix: min_inverter_\$|        inverter_prefix: ${P}_|" "$DS/wattlas_styring.yaml"
+fi
+if [ -n "$INV2" ]; then
+  EFFEKT="${INV2_AC:-sensor.${P}_microinverter_power}"
+  sed -i -e "s|^        # inverter2_prefix: .*|        inverter2_prefix: ${INV2}_|" \
+         -e "s|^        # inverter2_navn: .*|        inverter2_navn: \"${INV2_NAVN}\"|" "$DS/wattlas_styring.yaml"
+  [ -z "$INV2_RELAE" ] || sed -i "s|^        # inverter2_relae: .*|        inverter2_relae: ${INV2_RELAE}|" "$DS/wattlas_styring.yaml"
+  sed -i "s|^        # pv_anlaeg: .*|        pv_anlaeg: [{navn: Hybrid, entitet: sensor.${P}_pv_power}, {navn: \"${INV2_NAVN}\", entitet: ${EFFEKT}}]|" "$DS/wattlas.yaml"
+  if [ -n "$INV2_AC" ]; then
+    F="$PKG/wattlas_kanal/wattlas_kanal_deye.yaml"
+    GAMMEL="states('sensor.${P}_microinverter_power') | float(0)] | max) | round(0)"
+    grep -qF "$GAMMEL" "$F" || fejl "Fandt ikke solproduktionen i $F – kunne ikke tilføje $INV2_AC."
+    sed -i "s/states('sensor.${P}_microinverter_power') | float(0)] | max) | round(0)/states('sensor.${P}_microinverter_power') | float(0)] | max + [0, states('${INV2_AC}') | float(0)] | max) | round(0)/" "$F"
+    echo "Solproduktionen tæller nu også $INV2_AC med."
+  fi
+  echo "Ekstra inverter sat op: ${INV2}_… ($INV2_NAVN)."
+fi
 
 # --- dashboards og kort via en package (YAML-dashboards, kortet indlæses som frontend-modul)
 cat > "$PKG/wattlas/wattlas_frontend.yaml" <<EOF

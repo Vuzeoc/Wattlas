@@ -162,20 +162,25 @@ input_text:
     name: Wattlas · vejr-entitet (weather.…)
     max: 255
   wattlas_udetemperatur_entitet:
-    name: Wattlas · udetemperatur-sensor
+    name: Wattlas · udetemperatur-sensor (valgfri – ellers vejr-entitetens temperatur)
     max: 255
 
 template:
   - sensor:
-      # Spejl af den valgte udetemperatur, så husprognosen kan læse den fra langtidsstatistikken
+      # Spejl af udetemperaturen, så husprognosen kan læse den fra langtidsstatistikken.
+      # Egen sensor, hvis den er sat; ellers vejr-entitetens aktuelle temperatur.
       - name: Wattlas udetemperatur
         unique_id: wattlas_udetemperatur
         default_entity_id: sensor.wattlas_udetemperatur
         unit_of_measurement: °C
         device_class: temperature
         state_class: measurement
-        availability: "{{ is_number(states(states('input_text.wattlas_udetemperatur_entitet'))) }}"
-        state: "{{ states(states('input_text.wattlas_udetemperatur_entitet')) | float }}"
+        availability: >-
+          {{ is_number(states(states('input_text.wattlas_udetemperatur_entitet')))
+             or is_number(state_attr(states('input_text.wattlas_vejr_entitet'), 'temperature')) }}
+        state: >-
+          {% set s = states(states('input_text.wattlas_udetemperatur_entitet')) %}
+          {{ s | float if is_number(s) else state_attr(states('input_text.wattlas_vejr_entitet'), 'temperature') | float }}
   - binary_sensor:
       # Startspærre: alt der skriver til inverteren eller kalder EMHASS kræver, at denne er tændt
       - name: Wattlas konfigureret
