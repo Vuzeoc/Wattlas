@@ -2,6 +2,12 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.2.1
+Klar til Markedspladsens katalog. Ingen ændringer i styringen.
+- Automatiske tjek på GitHub (HACS og hassfest)
+- Licensfilen er ren MIT, så GitHub genkender den (ansvarsfraskrivelsen står i README og SIKKERHED.md)
+- Kodeejer, land og rækkefølge for app-oversigten i manifestet
+
 ## 0.2.0
 Første udgave med et rigtigt versionsnavn i Markedspladsen.
 - Logo i Markedspladsen og under Integrationer
