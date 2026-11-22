@@ -2,6 +2,8 @@
 
 ## Den nemme vej – uden kommandoer (anbefalet)
 
+> **Se [BILLEDGUIDE.md](BILLEDGUIDE.md)** – hele forløbet med billeder af hver skærm.
+
 1. **Tag en backup af HA** (Indstillinger → System → Sikkerhedskopier).
 2. **Markedsplads → Tilføj fra link** → `https://github.com/Vuzeoc/wattlas` (type: integration) → **Wattlas** → **Installér**,
    og genstart Home Assistant.

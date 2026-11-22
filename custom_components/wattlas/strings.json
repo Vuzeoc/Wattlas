@@ -13,23 +13,29 @@
         "description": "Vælg inverterens solcelle-effekt (entiteten slutter på `{suffix}`). De fleste har kun én inverter og skal ikke andet.\n\nHar du også en inverter **uden batteri** (fx et ældre anlæg), så slå *Ekstra inverter* til.",
         "data": {
           "inverter": "Inverterens solcelle-effekt",
-          "inverter2": "Ekstra inverter uden batteri",
-          "inverter2_navn": "Navn på den ekstra inverter",
+          "inverter2": "Jeg har også en ekstra inverter uden batteri"
+        }
+      },
+      "inverter2": {
+        "title": "Ekstra inverter uden batteri",
+        "description": "Sidder den på Deyes GEN-/mikroinverter-port, tæller Deye den allerede med. Sidder den i eltavlen, så vælg dens effekt-sensor, så Wattlas kan regne den med som sol.",
+        "data": {
+          "inverter2_navn": "Navn (vises i appen)",
           "inverter2_tilslutning": "Hvor sidder den?",
-          "inverter2_effekt": "Den ekstra inverters effekt (kræves hvis den sidder i eltavlen)",
+          "inverter2_effekt": "Dens effekt-sensor (kræves hvis den sidder i eltavlen)",
           "inverter2_relae": "Relæ, der kan afbryde den (valgfri)"
         }
       },
       "tjek": {
         "title": "Tjek af det, Wattlas skal bruge",
-        "description": "{liste}\n\nNår alt med ❌ er klaret, så tryk **Send** for at tjekke igen.",
+        "description": "{liste}",
         "data": {
           "forstaaet": "Jeg har læst advarslerne og vil fortsætte"
         }
       },
       "forbindelser": {
         "title": "Forbindelser og prognoser",
-        "description": "EMHASS-adressen er udfyldt, hvis app'en blev fundet. API-nøglen finder du i EMHASS-app'ens indstillinger.",
+        "description": "EMHASS-adressen er udfyldt, hvis app'en blev fundet.\n\n**API-nøglen vælger du selv:** åbn EMHASS-app'en → *Konfiguration*, skriv en kode på mindst 8 tegn i *emhass_api_token*, tryk Gem og genstart app'en. Skriv samme kode her.",
         "data": {
           "emhass_adresse": "EMHASS-adresse",
           "emhass_noegle": "EMHASS API-nøgle",
@@ -42,13 +48,13 @@
         "title": "Batteri og inverter",
         "description": "Find tallene i datablade for inverter og batteri. Vælg hellere for lavt end for højt.",
         "data": {
-          "batteri_kwh": "batteriets kapacitet",
-          "maks_ladeeffekt_w": "maks. ladeeffekt (batteri)",
-          "maks_afladeeffekt_w": "maks. afladeeffekt (batteri)",
-          "maks_ladestroem_a": "maks. ladestrøm (batteri, DC)",
-          "maks_afladestroem_a": "maks. afladestrøm (batteri, DC)",
-          "maks_netladestroem_a": "maks. netladestrøm (DC)",
-          "maks_netladeeffekt_w": "effekt ved tvungen netladning"
+          "batteri_kwh": "Batteriets kapacitet",
+          "maks_ladeeffekt_w": "Maks. ladeeffekt (batteri)",
+          "maks_afladeeffekt_w": "Maks. afladeeffekt (batteri)",
+          "maks_ladestroem_a": "Maks. ladestrøm (batteri, DC)",
+          "maks_afladestroem_a": "Maks. afladestrøm (batteri, DC)",
+          "maks_netladestroem_a": "Maks. netladestrøm (DC)",
+          "maks_netladeeffekt_w": "Effekt ved tvungen netladning"
         },
         "data_description": {
           "batteri_kwh": "Brugbar kapacitet for alle batterimoduler, fx 2 × 10 kWh = 20.",
@@ -64,10 +70,10 @@
         "title": "Elnet og sikringer",
         "description": "Grænserne beskytter dine sikringer, også når planen tager fejl. Spørg din elinstallatør, hvis du er i tvivl.",
         "data": {
-          "fase_graense_a": "maks. strøm pr. fase (under hovedsikringen)",
-          "import_graense_w": "maks. samlet import fra nettet (netladning)",
-          "maks_netimport_w": "plan-grænse import fra nettet",
-          "maks_eksport_w": "plan-grænse eksport til nettet"
+          "fase_graense_a": "Maks. strøm pr. fase (under hovedsikringen)",
+          "import_graense_w": "Maks. samlet import fra nettet (netladning)",
+          "maks_netimport_w": "Plan-grænse import fra nettet",
+          "maks_eksport_w": "Plan-grænse eksport til nettet"
         },
         "data_description": {
           "fase_graense_a": "Lidt under hovedsikringen. 3 × 20 A sikring → fx 16 A.",
@@ -80,15 +86,15 @@
         "title": "Priser",
         "description": "Tallene står på din elregning eller netselskabets hjemmeside. Sommer- og vintertarif retter du selv senere.",
         "data": {
-          "nettarif_lav": "nettarif lav (kl. 0–6)",
-          "nettarif_hoej": "nettarif høj (kl. 6–17 og 21–24)",
-          "nettarif_spids": "nettarif spids (kl. 17–21)",
-          "elafgift": "elafgift + Energinet-tariffer",
-          "tillaeg": "elselskabets tillæg (inkl. moms)",
-          "salg_nettarif": "indfødningstarif ved salg",
-          "salg_gebyr": "elselskabets gebyr ved salg",
-          "solcelle_slid": "solcellernes slid pr. kWh",
-          "kulde_w_pr_grad": "ekstra husforbrug pr. grad koldere (valgfri)"
+          "nettarif_lav": "Nettarif lav (kl. 0–6)",
+          "nettarif_hoej": "Nettarif høj (kl. 6–17 og 21–24)",
+          "nettarif_spids": "Nettarif spids (kl. 17–21)",
+          "elafgift": "Elafgift + Energinet-tariffer",
+          "tillaeg": "Elselskabets tillæg (inkl. moms)",
+          "salg_nettarif": "Indfødningstarif ved salg",
+          "salg_gebyr": "Elselskabets gebyr ved salg",
+          "solcelle_slid": "Solcellernes slid pr. kWh",
+          "kulde_w_pr_grad": "Ekstra husforbrug pr. grad koldere (valgfri)"
         },
         "data_description": {
           "nettarif_lav": "Netselskabets tarif uden moms, kl. 0–6 (står på elregningen).",

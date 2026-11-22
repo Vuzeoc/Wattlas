@@ -35,8 +35,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def overfoer(_hass: HomeAssistant) -> None:
         """Sætter indstillingerne fra opsætningen i hjælperne – kun dem, der stadig står tomme (0/tekst mangler)."""
-        if hass.states.get("binary_sensor.wattlas_konfigureret") is None:
-            return  # pakkerne er ikke indlæst endnu (genstart mangler)
+        s = hass.states.get("binary_sensor.wattlas_konfigureret")
+        if s is None or s.state in ("unavailable", "unknown"):
+            return  # pakkerne er ikke indlæst endnu (genstart mangler); efter en afinstallation står den som "unavailable"
         ir.async_delete_issue(hass, DOMAIN, "genstart")
         for k, v in (d.get("tal") or {}).items():
             s = hass.states.get(f"input_number.wattlas_{k}")

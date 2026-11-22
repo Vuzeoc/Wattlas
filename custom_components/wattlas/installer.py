@@ -71,7 +71,8 @@ def entiteter_i_kanal(kanal: str, prefix: str) -> list[str]:
     ids: set[str] = set()
     for f in (PAYLOAD / "styrekanaler" / mappe).glob("*.yaml"):
         for m in re.finditer(rf"\b(sensor|binary_sensor|switch|number|select|button)\.{std}_([a-z0-9_]+)", f.read_text(encoding="utf-8")):
-            ids.add(f"{m.group(1)}.{prefix}_{m.group(2)}")
+            if not m.group(2).endswith("_"):  # "program_' ~ p ~ '_power" er et navn, der bygges i skabelonen
+                ids.add(f"{m.group(1)}.{prefix}_{m.group(2)}")
     return sorted(ids)
 
 

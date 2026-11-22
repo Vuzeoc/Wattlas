@@ -10,6 +10,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import selector as sel
 from homeassistant.helpers.check_config import async_check_ha_config_file
@@ -32,6 +33,16 @@ def _emhass(hass) -> tuple[str | None, str | None]:
         if a.get("slug") == EMHASS_SLUG or str(a.get("slug", "")).endswith("_emhass"):
             return a.get("state") or "installed", f"http://{a['slug'].replace('_', '-')}:5000"
     return "mangler", None
+
+
+def _platform_entitet(hass, domæne: str, platform: str) -> str | None:
+    """Første entitet i domænet fra integrationen `platform`, fx Workday's binary_sensor."""
+    for e in er.async_get(hass).entities.values():
+        if e.domain == domæne and e.platform == platform and not e.disabled:
+            s = hass.states.get(e.entity_id)
+            if platform != "energidataservice" or (s and "raw_today" in s.attributes):
+                return e.entity_id
+    return None
 
 
 def _prognose_fejl(hass, entity_id: str) -> str | None:
@@ -67,7 +78,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required("kanal", default="deye"): sel.SelectSelector(sel.SelectSelectorConfig(
                 options=["deye", "sunmate"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
 
-    # 2 – vælg inverteren (og evt. en ekstra inverter uden batteri)
+    # 2 – vælg inverteren (de fleste har kun én)
     async def async_step_inverter(self, user_input=None) -> ConfigFlowResult:
         dom, suf = SUFFIX[self.d["kanal"]]
         fejl: dict[str, str] = {}
@@ -75,30 +86,37 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             e = user_input["inverter"]
             if not e.endswith(suf):
                 fejl["inverter"] = "forkert_entitet"
-            inv2 = None
-            if user_input.get("inverter2"):
-                if self.d["kanal"] != "deye":
-                    fejl["inverter2"] = "kun_deye"
-                ac = user_input.get("inverter2_tilslutning") == "ac"
-                if ac and not user_input.get("inverter2_effekt"):
-                    fejl["inverter2_effekt"] = "mangler_effekt"
-                eff = user_input.get("inverter2_effekt") or ""
-                inv2 = {"navn": user_input.get("inverter2_navn") or "Inverter 2", "ac": ac, "effekt": eff,
-                        "relae": user_input.get("inverter2_relae") or "",
-                        "prefix": re.sub(r"_(output_ac_power|ac_power|power)$", "", eff.split(".", 1)[-1]) if eff else ""}
-            if not fejl:
+            elif user_input.get("inverter2") and self.d["kanal"] != "deye":
+                fejl["inverter2"] = "kun_deye"
+            else:
                 self.d["prefix"] = e.split(".", 1)[1][: -len(suf)]
-                self.d["inverter2"] = inv2
-                return await self.async_step_tjek()
+                self.d["inverter2"] = None
+                return await (self.async_step_inverter2() if user_input.get("inverter2") else self.async_step_tjek())
         return self.async_show_form(step_id="inverter", errors=fejl, data_schema=vol.Schema({
             vol.Required("inverter"): sel.EntitySelector(sel.EntitySelectorConfig(domain=dom)),
             vol.Optional("inverter2", default=False): sel.BooleanSelector(),
+        }), description_placeholders={"suffix": suf})
+
+    # 2b – kun hvis der også er en inverter uden batteri
+    async def async_step_inverter2(self, user_input=None) -> ConfigFlowResult:
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            ac = user_input.get("inverter2_tilslutning") == "ac"
+            eff = user_input.get("inverter2_effekt") or ""
+            if ac and not eff:
+                fejl["inverter2_effekt"] = "mangler_effekt"
+            else:
+                self.d["inverter2"] = {"navn": user_input.get("inverter2_navn") or "Inverter 2", "ac": ac, "effekt": eff,
+                                       "relae": user_input.get("inverter2_relae") or "",
+                                       "prefix": re.sub(r"_(output_ac_power|ac_power|power)$", "", eff.split(".", 1)[-1]) if eff else ""}
+                return await self.async_step_tjek()
+        return self.async_show_form(step_id="inverter2", errors=fejl, data_schema=vol.Schema({
             vol.Optional("inverter2_navn"): sel.TextSelector(),
-            vol.Optional("inverter2_tilslutning", default="gen"): sel.SelectSelector(sel.SelectSelectorConfig(
+            vol.Required("inverter2_tilslutning", default="gen"): sel.SelectSelector(sel.SelectSelectorConfig(
                 options=["gen", "ac"], translation_key="tilslutning", mode=sel.SelectSelectorMode.LIST)),
             vol.Optional("inverter2_effekt"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="power")),
             vol.Optional("inverter2_relae"): sel.EntitySelector(sel.EntitySelectorConfig(domain="switch")),
-        }), description_placeholders={"suffix": suf})
+        }))
 
     # 3 – tjek forudsætninger
     async def async_step_tjek(self, user_input=None) -> ConfigFlowResult:
@@ -112,10 +130,19 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             blok.append(f"❌ **EMHASS-app'en** er installeret, men kører ikke – [åbn den]({LINK['emhass']}) og tryk Start.")
         elif tilstand is None:
             adv.append("⚠️ Kan ikke se apps på denne installation – sørg selv for, at EMHASS kører.")
-        if hass.states.get("sensor.energi_data_service") is None:
-            blok.append(f"❌ **Energi Data Service** (spotpriser) mangler – [installér den]({LINK['energidataservice']}), og opsæt den med priser inkl. moms.")
-        if hass.states.get("binary_sensor.workday_sensor") is None:
-            blok.append(f"❌ **Workday** (arbejdsdage/helligdage) mangler – [tilføj den]({LINK['workday']}), land Danmark.")
+        info = []
+        self.d["omdoeb"] = {}
+        for ønsket, platform, navn, link, hjælp in [
+                ("sensor.energi_data_service", "energidataservice", "Energi Data Service", LINK["energidataservice"], "og opsæt den med priser inkl. moms."),
+                ("binary_sensor.workday_sensor", "workday", "Workday", LINK["workday"], "land Danmark.")]:
+            if hass.states.get(ønsket) is not None:
+                continue
+            fundet = _platform_entitet(hass, ønsket.split(".")[0], platform)
+            if fundet:  # findes under et andet navn (fx binary_sensor.workday_sensor_dk) – Wattlas giver den det navn, pakkerne bruger
+                self.d["omdoeb"][fundet] = ønsket
+                info.append(f"ℹ️ **{navn}** findes som `{fundet}` – Wattlas omdøber den til `{ønsket}`.")
+            else:
+                blok.append(f"❌ **{navn}** mangler – [tilføj den]({link}), {hjælp}")
         mangler = [e for e in installer.entiteter_i_kanal(self.d["kanal"], self.d["prefix"])
                    if hass.states.get(e) is None and not e.endswith("_microinverter_power")]
         if mangler:
@@ -134,10 +161,15 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
                 blok.append("❌ **configuration.yaml** kan ikke rettes automatisk. Tilføj `packages: !include_dir_named packages` "
                             "under `homeassistant:` med File editor, og tryk Tjek igen.")
             else:
-                adv.append("ℹ️ Wattlas tilføjer `packages` til configuration.yaml (der tages en kopi af filen først).")
+                info.append("ℹ️ Wattlas tilføjer `packages` til configuration.yaml (der tages en kopi af filen først).")
         if user_input is not None and not blok and (not adv or user_input.get("forstaaet")):
             return await self.async_step_forbindelser()
-        liste = "\n".join(blok + adv) or "✅ Alt det nødvendige er på plads."
+        if blok or adv:
+            liste = "\n\n".join(blok + adv + info)
+            if blok:
+                liste += "\n\nNår alt med ❌ er klaret, så tryk **Send** for at tjekke igen."
+        else:
+            liste = "✅ Alt det nødvendige er på plads.\n\n" + "\n\n".join(info)
         schema = vol.Schema({vol.Optional("forstaaet", default=False): sel.BooleanSelector()} if adv and not blok else {})
         fejl = {}
         if user_input is not None:
@@ -196,6 +228,10 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
     # 5 – installér, tjek konfigurationen, rul tilbage ved fejl
     async def async_step_installer(self, user_input=None) -> ConfigFlowResult:
         hass = self.hass
+        reg = er.async_get(hass)
+        for gammel, ny in (self.d.pop("omdoeb", None) or {}).items():
+            if reg.async_get(gammel) and not reg.async_get(ny):
+                reg.async_update_entity(gammel, new_entity_id=ny)
         try:
             kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, self.d["kanal"],
                                                      self.d["prefix"], self.d.get("inverter2"), VERSION)
