@@ -2,7 +2,7 @@
 // Faner: Live · Økonomi · Historik · Elpris · Solprognose · Isolering.
 // Data: hass.states (live), sql.query (daglig historik fra langtidsstatistikken), recorder-statistik (i dag),
 // sensor.energi_dagslog (sparet kr. pr. dag).
-if (!customElements.get('emhass-plan-card')) import('./emhass-plan-card.js').catch(e => console.warn('Wattlas: planens logik kunne ikke hentes', e));
+if (!customElements.get('emhass-plan-card')) import('./emhass-plan-card.js' + new URL(import.meta.url).search).catch(e => console.warn('Wattlas: planens logik kunne ikke hentes', e));
 (() => {
   const VERSION = '3.0.5';
   // Wattlas HUD-palet (bevidst forskellig fra SunMate)
@@ -208,7 +208,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       else if (a === 'dur') this._dur = v;
       else if (a === 'tsoc') this._tsoc = Number(v);
       else if (a === 'ts') { this._tilsidesaet(v); return; }
-      else if (a === 'hhset') { const [k, d] = v.split('|'), lim = {reserve: [15, 80], slut_soc: [15, 100], max_net_kw: [1, Math.max(1, (this.n('input_number.wattlas_maks_netimport_w') || 50000) / 1000)], slid: [0, 1]}[k];
+      else if (a === 'hhset') { const [k, d] = v.split('|'), lim = {reserve: [15, 80], slut_soc: [15, 100], max_net_kw: [0, Math.max(1, (this.n('input_number.wattlas_maks_netimport_w') || 50000) / 1000)], slid: [0, 1]}[k];
         this._hh[k] = Math.max(lim[0], Math.min(lim[1], Math.round((this._hh[k] + Number(d)) * 100) / 100)); }
       else if (a === 'hhfb') this._hh.forbruger = !this._hh.forbruger;
       else if (a === 'rny') { this._reglerUdkast().push({navn: 'Ny regel', aktiv: false, type: 'gem', dage: 'hverdage', fra: '16:00', til: '21:00', soc: 80}); }

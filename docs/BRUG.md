@@ -16,6 +16,8 @@ faser, spænding, batteriets strømme og reserve) gælder altid, uanset hvad du 
 1. **Se planen an, før den styrer.** Når indstillingerne er sat, laver EMHASS planer, og appen virker, men inverteren
    røres først, når du slår **Wattlas styrer batteriet** til. Kig på *Planens logik* et døgn eller to: giver
    beslutningerne mening, og består de 7 tjek?
+   De første 3 dage kender Wattlas ikke husets forbrugsmønster endnu og regner med forbruget lige nu (eller de dage,
+   der er gået). Derefter bruger den gennemsnittet af den sidste uge, justeret efter udetemperaturen.
 2. **Slå styringen til, mens du er hjemme.** Hold øje med *Overvågning* og med inverterens egen app den første dag.
    Ser noget forkert ud, så slå styringen fra – inverteren går tilbage til selvforbrug.
 3. **Sæt beskeder op.** Ret `script.wattlas_besked` til din telefon, og tryk *Send testbesked* i *Overvågning*.
@@ -62,7 +64,7 @@ Disse tal sendes med til EMHASS ved hver beregning. Planen tager altså højde f
 |---|---|---|
 | **Reserve** | laveste batteriniveau i planen | 15–20 % til daglig; hæv den om vinteren eller ved stormvarsel |
 | **Batteri ved planens slutning** | hvor meget der skal være tilbage, når planens horisont slutter | 20–30 %, så planen ikke tømmer batteriet lige før en dyr morgen |
-| **Maks. køb fra elnettet** | højeste import, planen må bruge (kW) | under din sikringsgrænse; kan ikke sættes over `wattlas_maks_netimport_w` |
+| **Maks. køb fra elnettet** | højeste import, planen må bruge (kW) | under din sikringsgrænse; kan ikke sættes over `wattlas_maks_netimport_w`. **0 = ingen ekstra grænse** (standard) |
 | **Batterislid** | hvad en afladet kWh koster i slid | batteriets pris / (kapacitet × cykler). Højere = færre små runder |
 | **Ugentlig fuldladning** | lader til 100 % mindst én gang om ugen | lad den være slået til; LiFePO4-celler skal balanceres |
 | **Wattlas styrer batteriet** | hovedafbryderen | slå fra = inverteren kører selvforbrug med 15 % reserve |

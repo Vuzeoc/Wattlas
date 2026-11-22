@@ -61,7 +61,7 @@ rest_command:
     content_type: application/json
     timeout: 60
     payload: >-
-      {"method_ts_round":"first","continual_publish":false{% if med_forbruger | default(false) %},"number_of_deferrable_loads":1,"custom_deferrable_forecast_id":[{"entity_id":"sensor.p_deferrable0","unit_of_measurement":"W","friendly_name":"Wattlas fleksibel forbruger"}]{% endif %}}
+      {"method_ts_round":"first","continual_publish":false,"set_use_battery":true{% if med_forbruger | default(false) %},"number_of_deferrable_loads":1,"custom_deferrable_forecast_id":[{"entity_id":"sensor.p_deferrable0","unit_of_measurement":"W","friendly_name":"Wattlas fleksibel forbruger"}]{% else %},"number_of_deferrable_loads":0{% endif %}}
   # Wattlas hvad-hvis – publicerer under prefix hh_, så de rigtige sensorer ikke røres
   emhass_publicer_hvadhvis:
     url: "{{ states('input_text.wattlas_emhass_adresse') | trim('/') }}/action/publish-data"
@@ -71,7 +71,7 @@ rest_command:
     content_type: application/json
     timeout: 60
     payload: >-
-      {"method_ts_round":"first","continual_publish":false,"publish_prefix":"hh_"{% if med_forbruger | default(false) %},"number_of_deferrable_loads":1,"custom_deferrable_forecast_id":[{"entity_id":"sensor.p_deferrable0","unit_of_measurement":"W","friendly_name":"Wattlas fleksibel forbruger"}]{% endif %}}
+      {"method_ts_round":"first","continual_publish":false,"set_use_battery":true,"publish_prefix":"hh_"{% if med_forbruger | default(false) %},"number_of_deferrable_loads":1,"custom_deferrable_forecast_id":[{"entity_id":"sensor.p_deferrable0","unit_of_measurement":"W","friendly_name":"Wattlas fleksibel forbruger"}]{% else %},"number_of_deferrable_loads":0{% endif %}}
 script:
   emhass_test_helios:
     alias: EMHASS – beregn og publicer Helios-plan
@@ -228,10 +228,10 @@ script:
               {%- set ns.juster = ns.juster + adj -%}
               {%- set ns.liste = ns.liste + [[150, (base + adj) | round(0)] | max] -%}
             {%- else -%}
-              {%- set ns.fejl = ns.fejl + 1 -%}
+              {%- set ns.fejl = ns.fejl + 1 -%}{%- set nu = states('sensor.emhass_m_load_w_totalpower') -%}{%- set ns.liste = ns.liste + [[150, ((h.v | sum) / (h.v | count)) if h.v | count > 0 else (nu | float if is_number(nu) else 500)] | max | round(0)] -%}
             {%- endif -%}
           {%- endfor -%}
-          {{ dict(ok=(ns.fejl == 0 and ns.liste | count == prognose.intervaller | int), liste=ns.liste, fejl=ns.fejl,
+          {{ dict(ok=(ns.liste | count == prognose.intervaller | int), liste=ns.liste, fejl=ns.fejl,
                   kwh=((ns.liste | sum) / 2000) | round(1), kulde_kwh=(ns.juster / 2000) | round(1), vejr_timer=F.d | count) }}
     - variables:
         beregning_basis:
@@ -252,7 +252,9 @@ script:
           battery_nominal_energy_capacity: "{{ (states('input_number.wattlas_batteri_kwh')|float(0) * 1000) | int }}"
           battery_charge_power_max: '{{ charge_limit|int }}'
           battery_discharge_power_max: '{{ discharge_limit|int }}'
-          maximum_power_from_grid: "{{ ([1000, [states('input_number.wattlas_maks_netimport_w')|float(0), states('input_number.wattlas_max_net_kw') | float(0) * 1000] | min] | max) | int }}"
+          maximum_power_from_grid: "{{ ([1000, [states('input_number.wattlas_maks_netimport_w')|float(0), (states('input_number.wattlas_max_net_kw') | float(0) * 1000 or 99999)] | min] | max) | int }}"
+          number_of_deferrable_loads: 0
+          set_use_battery: true
           set_nodischarge_to_grid: true
           continual_publish: false
           battery_charge_efficiency: 0.95
@@ -279,7 +281,7 @@ script:
           {% if hh is none %}{{ {} }}{% else %}
           {% set r = [15, [hh.get('reserve', 15) | float(15), soc | float(15)] | min] | max %}
           {{ dict(battery_minimum_state_of_charge=r / 100, soc_final=([hh.get('slut_soc', 30) | float(30), r] | max) / 100,
-                  maximum_power_from_grid=([6, [11, hh.get('max_net_kw', 11) | float(11)] | min] | max * 1000) | int,
+                  maximum_power_from_grid=([1000, [states('input_number.wattlas_maks_netimport_w')|float(0), (hh.get('max_net_kw', 0) | float(0) * 1000 or 99999)] | min] | max) | int,
                   weight_battery_discharge=[0, [1, hh.get('slid', 0.25) | float(0.25)] | min] | max, publish_prefix='hh_') }}{% endif %}
     - action: rest_command.emhass_beregn_helios
       data:

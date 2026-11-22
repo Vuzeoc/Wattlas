@@ -12,5 +12,9 @@ Første offentlige udgave.
 - `install.sh` (avanceret): installerer packages, styrekanal, kort og begge dashboards med én kommando; valgfri ekstra inverter
   uden batteri (`--inverter2`, GEN-port eller AC-koblet)
 - Én inverter uden GEN-port-sensor blokerer ikke længere netladning
+- Første plan virker på en helt ny installation: husprognosen bruger det aktuelle forbrug, indtil der er 3 dages historik,
+  og Wattlas sender selv `set_use_battery` og antal fleksible forbrugere til EMHASS (kun API-nøglen skal sættes i app'en)
+- *Maks. køb fra elnettet* og hvad-hvis følger nu dit importloft (0 = ingen ekstra grænse); før kunne nye brugere starte på 1 kW
+- Planens-logik-kortet hentes med samme version som app-kortet, så det også opdateres efter en ny version
 - Brugsvejledning: [docs/BRUG.md](docs/BRUG.md)
 - Alarmen for høj netbelastning følger fasegrænsen (+25 %), og husets kuldejustering er en indstilling

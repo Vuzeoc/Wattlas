@@ -29,7 +29,7 @@
     params() { const v = (id, d) => { const x = parseFloat(this._hass.states[id]?.state); return isNaN(x) ? d : x; };
       P.minSoc = Math.max(15, v('input_number.wattlas_reserve', 15)); P.slutSoc = Math.max(P.minSoc, v('input_number.wattlas_slut_soc', 30));
       P.slid = v('input_number.wattlas_slid', 0.25); P.cap = v('input_number.wattlas_batteri_kwh', 0);
-      P.maxNet = Math.min(v('input_number.wattlas_maks_netimport_w', 0) / 1000, v('input_number.wattlas_max_net_kw', 0)) * 1000; }
+      P.maxNet = Math.min(v('input_number.wattlas_maks_netimport_w', 0) / 1000, (v('input_number.wattlas_max_net_kw', 0) || 999)) * 1000; }
     slots() {
       const m = new Map(), put = (id, attr, key, f) => (this.a(id, attr) || []).forEach(r => {
         const t = new Date(r.date).getTime(), v = parseFloat(r[key]); if (isNaN(t) || isNaN(v)) return;

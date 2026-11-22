@@ -58,10 +58,8 @@ Styringen kan ikke starte, før trin 6 er gjort færdigt. Den har en startspærr
 I EMHASS-app'ens indstillinger:
 
 - Sæt en **API-nøgle** (`emhass_api_token` eller tilsvarende). Gem den. Du skal bruge den i trin 6.
-- Slå **brug af batteri** til (`set_use_battery`).
-- Sæt **antal fleksible forbrugere** (`number_of_deferrable_loads`) til 0. Wattlas sender selv sin fleksible forbruger med,
-  når den er slået til. Afviser din EMHASS-version 0, så sæt 1 med effekt 0 W.
-- Lad resten stå. Wattlas sender batteri, priser, prognoser og grænser med hvert kald.
+- Lad resten stå. Wattlas sender selv batteri (`set_use_battery`), fleksible forbrugere, priser, prognoser og grænser
+  med hvert kald, så app'ens standardindstillinger er fine.
 
 Notér adressen: normalt `http://<din-HA-ip>:5000`. Tjek, at du kan åbne EMHASS' webside på den adresse.
 
