@@ -138,6 +138,12 @@ er overført, og reparationen er væk af sig selv.
 
 ![Wattlas Styring – styringen er slukket](billeder/installation/16-styring.jpg)
 
+Den første plan kommer inden for 5 minutter. Under *Planens logik* ser du, hvad EMHASS har planlagt, hvad det
+forventes at spare, og om de 7 tjek består. De første 3 dage regner Wattlas med husets forbrug lige nu, indtil der er
+historik nok til et rigtigt forbrugsmønster. Et enkelt orange tjek er ikke en fejl – læs forklaringen under tjekket.
+
+![Planens logik efter den første plan på en ny installation](billeder/installation/17-foerste-plan.jpg)
+
 Kun Deye: sæt inverterens 6 tidsprogrammer til **01, 05, 09, 13, 17 og 21**, og slå *Time of use* til (i inverteren
 eller Solarman). Wattlas skriver kun effekt og batteriniveau i programmerne, ikke tiderne.
 
