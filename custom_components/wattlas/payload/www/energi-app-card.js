@@ -224,6 +224,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         const x = Math.max(s.attributes.min, Math.min(s.attributes.max, Math.round((parseFloat(s.state) + Number(d)) * 100) / 100));
         this._hass.callService('input_number', 'set_value', {entity_id: id, value: x}); this._last = 0; return; }
       else if (a === 'tog') { const s = this.st(v); if (!s) return;
+        if (v === 'input_boolean.wattlas_skygge' && !confirm(s.state === 'on' ? 'Slå skygge fra? Wattlas begynder at styre inverteren.' : 'Slå skygge til? Wattlas giver inverteren tilbage (selvforbrug) og viser derefter kun, hvad den ville gøre.')) return;
         if (v === 'input_boolean.emhass_styring_aktiv' && !confirm(s.state === 'on' ? 'Stop Wattlas-styringen? Batteriet går i selvforbrug med 15 % reserve.' : 'Start Wattlas-styringen? EMHASS overtager inverterens tidsprogrammer.')) return;
         this._hass.callService('input_boolean', 'toggle', {entity_id: v}); this._last = 0; return; }
       this._last = 0; this._html = null; this._render();
@@ -388,6 +389,9 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
               <div data-a="tab" data-v="elpris" class="click"><span>Nu</span><b>${nuP ? nf(nuP.buy, 2) : '–'}</b><small>kr./kWh</small></div>
               <div data-a="tab" data-v="elpris" class="click"><span>Gennemsnit</span><b style="color:${C.warn}">${gns !== null ? nf(gns, 2) : '–'}</b><small>inkl. tariffer</small></div>
               <div data-a="tab" data-v="elpris" class="click"><span>Dyreste</span><b style="color:${C.err}">${dyr ? nf(dyr.buy, 2) : '–'}</b><small>kl. ${dyr ? String(dyr.h).padStart(2, '0') : '–'}</small></div></div>`, {icon: 'mdi:currency-usd'})}
+          ${this.card('Fremad', `<div class="set"><div><b>Batteriet</b><span>${esc(this.st('sensor.wattlas_batteri_raekker_til')?.attributes?.tekst || 'Ingen gyldig plan')}</span></div></div>
+              <div class="set"><div><b>Billigste time</b><span>${(() => { const b = this.st('sensor.wattlas_billigste_time'); const d = b && new Date(b.state);
+                return d && !isNaN(d) ? `kl. ${String(d.getHours()).padStart(2, '0')}–${String((d.getHours() + 1) % 24).padStart(2, '0')}${d.getDate() !== new Date().getDate() ? ' i morgen' : ''} · ${nf(b.attributes.pris, 2)} kr./kWh – til opvasker, vaskemaskine o.l.` : '–'; })()}</span></div></div>`, {icon: 'mdi:battery-clock'})}
           ${this.card('I dag time for time', dagChart + this.legend([['Produktion', C.sol], ['Husforbrug', C.hus]]), {icon: 'mdi:chart-line'})}
         </div></div>`;
     }
@@ -489,7 +493,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         return `<li class="${a ? 'bad' : ''}"><ha-icon icon="${a ? 'mdi:alert-circle' : 'mdi:check-circle'}" style="color:${a ? C.err : C.ok}"></ha-icon><div><b>${n}</b>${a ? `<span>${esc(e.attributes.forklaring || '')}</span>` : ''}</div></li>`; }).join('');
       const nAl = ALARM.filter(([k]) => on('binary_sensor.emhass_ui_' + k)).length;
       const chip = (ok, t) => `<span class="pill ${ok ? 'ok' : 'err'}">● ${t}</span>`;
-      const forb = `<div class="chips">${chip(['Deye', 'Solarman', 'SunMate', 'Huawei', 'Growatt', 'ESPHome'].includes(s('sensor.emhass_maalekilde')?.state), 'Måling: ' + (s('sensor.emhass_maalekilde')?.state || '–'))}${chip(on('binary_sensor.emhass_ui_data_frisk'), 'Målekontrol')}
+      const forb = `<div class="chips">${chip(['Deye', 'Solarman', 'SunMate', 'Huawei', 'Growatt', 'ESPHome', 'Sonnen'].includes(s('sensor.emhass_maalekilde')?.state), 'Måling: ' + (s('sensor.emhass_maalekilde')?.state || '–'))}${chip(on('binary_sensor.emhass_ui_data_frisk'), 'Målekontrol')}
         ${chip(on('binary_sensor.emhass_styrekanal_ok'), 'Inverterstyring')}${chip(['Frisk', 'Reserve'].includes(s('sensor.emhass_planvalg')?.state), 'Plan: ' + (s('sensor.emhass_planvalg')?.state || '–'))}
         ${chip(s('sensor.optim_status')?.state === 'Optimal', 'EMHASS: ' + (s('sensor.optim_status')?.state || '–'))}${chip(on('binary_sensor.wattlas_forbindelse'), 'Inverterforbindelse')}
         ${chip(on('input_boolean.emhass_har_overtaget'), 'Har overtaget')}${chip(on('input_boolean.emhass_opstart_klar'), 'Opstart klar')}</div>`;
@@ -602,6 +606,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
     styring() {
       if (this._log === null) this._hentLog();
       const on = this.st('input_boolean.emhass_styring_aktiv')?.state === 'on', mode = this.st('sensor.emhass_planvalg')?.state;
+      const skygge = this.st('input_boolean.wattlas_skygge')?.state === 'on', ville = this.st('sensor.wattlas_skygge')?.state;
       const pb = this.n('input_number.emhass_plan_batteri_w') || 0, pn = this.n('input_number.emhass_plan_net_w') || 0, ps = this.n('input_number.emhass_plan_soc');
       const handling = !on ? 'Styringen er slukket – inverteren kører selvforbrug' : pb < -150 ? (pn > 150 ? 'Lader batteriet fra elnettet' : 'Lader batteriet fra solen') + ` mod ${nf(ps)} %` : pb > 150 ? `Batteriet forsyner huset (${nf(pb / 1000, 1)} kW)` : 'Batteriet hviler';
       const ov = this.st('binary_sensor.wattlas_tilsidesaettelse_aktiv')?.state === 'on', aktivMode = ov ? this.st('binary_sensor.wattlas_tilsidesaettelse_aktiv').attributes.tilstand : 'ingen';
@@ -609,12 +614,14 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       const knap = (k, ic, c, t, d) => `<div class="ovc ${aktivMode === k ? 'on' : ''}" style="--c:${c}"><div class="ovh"><ha-icon icon="${ic}"></ha-icon><b>${t}</b></div><p>${d}</p>
         <button data-a="ts" data-v="${aktivMode === k ? 'ingen' : k}">${aktivMode === k ? 'Stop' : 'Start'}</button></div>`;
       const num = (id, t, u, step, d) => { const s = this.st(id); const v = s ? parseFloat(s.state) : null;
-        return `<div class="set"><div><b>${t}</b><span>${d}</span></div><div class="stp"><button data-a="num" data-v="${id}|-${step}">−</button><em>${v === null ? '–' : v === 0 && id.endsWith('max_net_kw') ? 'ingen grænse' : nf(v, step < 1 ? 2 : (step < 1 ? 1 : 0)) + ' ' + u}</em><button data-a="num" data-v="${id}|${step}">+</button></div></div>`; };
+        return `<div class="set"><div><b>${t}</b><span>${d}</span></div><div class="stp"><button data-a="num" data-v="${id}|-${step}">−</button><em>${v === null ? '–' : v === 0 && id.endsWith('max_net_kw') ? 'ingen grænse' : id.endsWith('max_net_kw') ? nf(v, 1) + ' kW · ' + nf(v * 1000 / 690) + ' A' : nf(v, step < 1 ? 2 : (step < 1 ? 1 : 0)) + ' ' + u}</em><button data-a="num" data-v="${id}|${step}">+</button></div></div>`; };
       const tog = (id, t, d) => { const s = this.st(id)?.state === 'on'; return `<div class="set"><div><b>${t}</b><span>${d}</span></div><button class="sw ${s ? 'on' : ''}" data-a="tog" data-v="${id}"><i></i></button></div>`; };
       const log = (this._log || []).map(e => { const d = new Date(e.when * 1000); return `<li><span>${String(d.getDate())}/${d.getMonth() + 1} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</span>${esc(e.message)}</li>`; }).join('') || '<li><span></span>Ingen tilsidesættelser de sidste 7 dage</li>';
-      return `<div class="hero ${on ? '' : 'off'}"><img src="${LOGO}" alt=""><div><small>WATTLAS STYRER ${on ? '' : 'IKKE'}</small><h2>${handling}</h2>
+      return `<div class="hero ${on ? '' : 'off'}"><img src="${LOGO}" alt=""><div><small>${on && skygge ? 'WATTLAS I SKYGGE – STYRER IKKE INVERTEREN' : `WATTLAS STYRER ${on ? '' : 'IKKE'}`}</small><h2>${on && skygge ? 'Planen: ' + handling.charAt(0).toLowerCase() + handling.slice(1) : handling}</h2>
+          ${on && skygge ? `<span><ha-icon icon="mdi:ghost-outline" style="--mdc-icon-size:16px"></ha-icon> ${esc(ville || '–')}</span><br>` : ''}
           <span>Plan: ${esc(mode || '–')} · EMHASS genberegner hvert 5. min · regulerer hvert 30. sek.</span></div>
-          <a class="lnk" href="#plan" data-a="tab" data-v="plan">Planens logik ›</a></div>
+          <div class="hbtn"><button class="lnk" data-a="tog" data-v="input_boolean.wattlas_skygge" title="Skygge: Wattlas viser, hvad den ville gøre, men styrer ikke inverteren"><ha-icon icon="mdi:ghost${skygge ? '' : '-off-outline'}" style="--mdc-icon-size:16px"></ha-icon> Skygge ${skygge ? 'til' : 'fra'}</button>
+          <a class="lnk" href="#plan" data-a="tab" data-v="plan">Planens logik ›</a></div></div>
         ${ov ? this.ovBanner() : ''}
         ${this.card('Elpris i dag og i morgen', this.prisStribe(), {icon: 'mdi:currency-usd', right: `<button class="lnk" data-a="tab" data-v="elpris">Elpris ›</button>`})}
         ${this.card('Manuel tilsidesættelse', `<p class="note" style="margin:0 0 12px">Tilsidesætter planen i en periode og udløber altid af sig selv. Sikkerhedsgrænserne (sikring, faser, spænding, reserve) gælder stadig.</p>
@@ -631,10 +638,11 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         <div class="grid g2">${this.card('Indstillinger til optimeringen', `<p class="note" style="margin:0 0 8px">Sendes til EMHASS ved hver beregning, så planen tager højde for dem – reglerne kæmper ikke mod planen.</p>
             ${num('input_number.wattlas_reserve', 'Reserve', '%', 5, 'Laveste batteriniveau i planen (fx højere om vinteren eller ved stormvarsel)')}
             ${num('input_number.wattlas_slut_soc', 'Batteri ved planens slutning', '%', 5, 'Hvor meget der skal være tilbage, når horisonten slutter')}
-            ${num('input_number.wattlas_max_net_kw', 'Maks. køb fra elnettet', 'kW', 0.5, 'Sikringsgrænse for opladning. 0 = kun importloftet fra opsætningen')}
+            ${num('input_number.wattlas_max_net_kw', 'Maks. køb fra elnettet', 'kW', 0.5, 'Sikringsgrænse for opladning (A = pr. fase ved 230 V). 0 = kun importloftet fra opsætningen')}
             ${num('input_number.wattlas_slid', 'Batterislid', 'kr./kWh', 0.01, 'Pris pr. afladet kWh – højere = færre små runder')}
             ${tog('input_boolean.emhass_fuld_opladning', 'Ugentlig fuldladning', 'Lad til 100 % mindst én gang om ugen (cellebalancering)')}
-            ${tog('input_boolean.emhass_styring_aktiv', 'Wattlas styrer batteriet', 'Slå fra = inverteren kører selvforbrug med 15 % reserve')}`, {icon: 'mdi:tune-variant'})}
+            ${tog('input_boolean.emhass_styring_aktiv', 'Wattlas styrer batteriet', 'Slå fra = inverteren kører selvforbrug med 15 % reserve')}
+            ${tog('input_boolean.wattlas_skygge', 'Skygge (vis kun)', 'Wattlas planlægger og viser, hvad den ville gøre, men skriver intet til inverteren – til nye anlæg eller ved siden af din nuværende styring')}`, {icon: 'mdi:tune-variant'})}
           ${this.card('Seneste tilsidesættelser', `<ul class="logl">${log}</ul>`, {icon: 'mdi:history'})}</div>
         ${this.hvadHvis()}
         <div class="grid g2">${this.forbruger()}<div></div></div>`;
@@ -918,6 +926,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
   .hero.off{border-color:rgba(251,113,133,.4);background:linear-gradient(120deg,rgba(251,113,133,.12),rgba(30,41,59,.4))}
   .hero img{width:64px;height:64px;filter:drop-shadow(0 0 12px rgba(34,211,238,.7));animation:pulse 3s ease-in-out infinite}@keyframes pulse{50%{filter:drop-shadow(0 0 22px rgba(167,139,250,.9))}}
   .hero>div{flex:1}.hero small{font-size:11px;letter-spacing:.24em;color:${C.cyan}}.hero h2{margin:4px 0;font-size:22px;color:#fff}.hero span{font-size:12px;color:var(--secondary-text-color)}
+  .hero>div.hbtn{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px}.hbtn .lnk{white-space:nowrap}
   .ovb{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:14px;margin-bottom:16px;background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.5);box-shadow:0 0 20px rgba(251,146,60,.15)}
   .ovb ha-icon{color:${C.warn};--mdc-icon-size:26px}.ovb div{flex:1}.ovb b{display:block}.ovb span{font-size:12px;color:var(--secondary-text-color)}
   .ovb button,.ovc button{padding:8px 16px;font-weight:700;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18)}

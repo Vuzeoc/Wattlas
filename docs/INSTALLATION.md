@@ -5,7 +5,7 @@
 > **Se [BILLEDGUIDE.md](BILLEDGUIDE.md)** – hele forløbet med billeder af hver skærm.
 
 1. **Tag en backup af HA** (Indstillinger → System → Sikkerhedskopier).
-2. **Markedsplads → Tilføj fra link** → `https://github.com/Vuzeoc/wattlas` (type: integration) → **Wattlas** → **Installér**,
+2. **Markedsplads → Tilføj fra link** → `https://github.com/Vuzeoc/Wattlas` (type: integration) → **Wattlas** → **Installér**,
    og genstart Home Assistant. Første gang beder Markedspladsen dig forbinde en gratis GitHub-konto
    (du får en kode, som indtastes på GitHubs side).
 3. **Indstillinger → Enheder og tjenester → Tilføj integration → Wattlas.** Opsætningen fører dig igennem:
@@ -34,7 +34,7 @@ Fjernes integrationen, slår Wattlas først styringen fra (inverteren sættes ti
 (`custom_components/wattlas`). Genstart derefter HA, og fortsæt fra trin 3 ovenfor. Kør det igen for at opdatere.
 
 ```sh
-cd /tmp && curl -fsSLO https://raw.githubusercontent.com/Vuzeoc/wattlas/main/install.sh
+cd /tmp && curl -fsSLO https://raw.githubusercontent.com/Vuzeoc/Wattlas/main/install.sh
 sh install.sh
 ```
 

@@ -105,9 +105,11 @@ Wattlas taler med inverteren gennem en **styrekanal**, en fil med adapter-entite
 | Styrekanal | Status |
 |---|---|
 | `styrekanaler/deye_solarman` – Deye (3-faset, lavvolt-batteri) via [ha-solarman](https://github.com/davidrapan/ha-solarman) | styrelogikken kører dagligt hos udvikleren; selve udgivelsesversionen (indstillinger, startspærre) er valideret med HA's config-check, men ikke kørt i drift endnu |
+| `styrekanaler/deye_parallel` – to Deye i parallel (master + slave, fælles batteri) via ha-solarman | **eksperimentel**, ikke kørt på et rigtigt parallelanlæg – se [STYREKANALER.md](docs/STYREKANALER.md) |
 | `styrekanaler/deye_esphome` – Deye (3-faset, lavvolt) via ESPHome ([klatremis/esphome-for-deye](https://github.com/klatremis/esphome-for-deye), ESP32 + RS485) | **eksperimentel**, ikke kørt på en rigtig inverter – se [STYREKANALER.md](docs/STYREKANALER.md) |
 | `styrekanaler/sunmate` – SunMate.IO pulse styrer inverteren | **ikke testet** med denne version |
 | `styrekanaler/huawei` (+ `huawei_emma`) – Huawei SUN2000 + LUNA2000 med Huawei-elmåler eller EMMA via [Huawei Solar](https://github.com/wlcrs/huawei_solar) | testet mod en simuleret Huawei, **ikke kørt i drift endnu**; EMMA-udgaven er eksperimentel – se [STYREKANALER.md](docs/STYREKANALER.md) |
+| `styrekanaler/sonnen` – SonnenBatterie via det lokale API v2 (fw 1.40+), bidrag fra [hornbech](https://github.com/hornbech) | **eksperimentel**, ikke kørt i drift; kan ikke stoppe solsalg eller gemme batteriet – se [STYREKANALER.md](docs/STYREKANALER.md) |
 | `styrekanaler/growatt` – Growatt MOD/MID TL3-XH (3-faset hybrid, højvolt) lokalt via [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | **eksperimentel**, ikke kørt i drift; Growatts sky understøttes ikke – se [STYREKANALER.md](docs/STYREKANALER.md) |
 | Sunsynk / Sol-Ark / andre Deye-kloner | brug Deye-kanalen, hvis dine entiteter hedder det samme; ellers skriv din egen ([STYREKANALER.md](docs/STYREKANALER.md)) |
 
@@ -139,4 +141,4 @@ egen installation. Ret ikke direkte i dem i en pull request – beskriv ændring
 
 ## Licens
 
-MIT – se [LICENSE](LICENSE). Wattlas er ikke tilknyttet Deye, Huawei, Growatt, SunMate, EMHASS eller Home Assistant.
+MIT – se [LICENSE](LICENSE). Wattlas er ikke tilknyttet Deye, Huawei, Growatt, Sonnen, SunMate, EMHASS eller Home Assistant.

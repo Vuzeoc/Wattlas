@@ -1,6 +1,7 @@
 # Konfiguration
 
 Alle tal er helpers (`input_number.wattlas_…` / `input_text.wattlas_…`) fra `packages/wattlas/wattlas_indstillinger.yaml`.
+De nemmeste at rette er i **Indstillinger → Enheder og tjenester → Wattlas → Konfigurer** (samme felter som opsætningen, udfyldt med de nuværende værdier).
 0 eller tom betyder "ikke sat". Så længe et påkrævet felt mangler, er `binary_sensor.wattlas_konfigureret` **off**, og
 Wattlas skriver intet til inverteren og kalder ikke EMHASS.
 

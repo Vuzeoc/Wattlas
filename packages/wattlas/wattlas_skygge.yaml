@@ -1,0 +1,87 @@
+# Wattlas – skygge-tilstand: Wattlas planlægger og regner som normalt, men skriver intet til inverteren.
+# Til nye eller uprøvede styrekanaler, og til at køre Wattlas ved siden af det system, du bruger i dag.
+# Skyggedrift = skygge til OG Wattlas har ikke overtaget (input_boolean.emhass_har_overtaget sættes ikke i skygge,
+# så styrekanalernes egne automationer heller ikke styrer). Skrivestederne i emhass_forbindelse.yaml stopper i skyggedrift
+# og melder i stedet, hvad de ville have skrevet (hændelsen wattlas_skygge → sensor.wattlas_skygge).
+input_boolean:
+  wattlas_skygge:
+    name: Wattlas skygge (vis kun, styr ikke)
+    icon: mdi:ghost-outline
+
+template:
+  - triggers:
+      - trigger: event
+        event_type: wattlas_skygge
+      - trigger: state
+        entity_id: input_boolean.wattlas_skygge
+      - trigger: homeassistant
+        event: start
+    actions:
+      - variables:
+          til: "{{ is_state('input_boolean.wattlas_skygge', 'on') }}"
+          ny: "{{ [(trigger.event.data.entitet, trigger.event.data.vaerdi)] if trigger.platform == 'event' else [] }}"
+    sensor:
+      - name: Wattlas skygge
+        unique_id: wattlas_skygge
+        default_entity_id: sensor.wattlas_skygge
+        icon: mdi:ghost-outline
+        state: >-
+          {% set ville = dict(((this.attributes.get('ville') or {}).items() | list) + ny) if til else {} %}
+          {% set n = ville.get('switch.wattlas_netladning') %}
+          {% set a = ville.get('number.wattlas_netladestroem') %}
+          {% if not til %}Slået fra
+          {% elif n == 'on' %}Ville lade fra nettet{{ ' med ca. ' ~ (a | int) ~ ' A' if a is number else '' }}
+          {% elif n == 'off' %}Ville ikke lade fra nettet
+          {% else %}Venter på første beslutning{% endif %}
+          {%- if ville.get('switch.wattlas_solsalg') == 'off' %} · ville stoppe solsalget{% endif %}
+        attributes:
+          ville: "{{ dict(((this.attributes.get('ville') or {}).items() | list) + ny) if til else {} }}"
+          tid: "{{ now().isoformat() if trigger.platform == 'event' else (this.attributes.get('tid') if this is defined and this.attributes is defined else none) }}"
+
+automation:
+  # Skift mens styringen kører: styringen slås fra og til igen, så inverteren først gives tilbage (selvforbrug), før
+  # Wattlas kun viser – og så Wattlas overtager på den normale måde, når skyggen slås fra.
+  - id: wattlas_skygge_skift
+    alias: Wattlas · skift mellem skygge og styring
+    mode: queued
+    max: 3
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.wattlas_skygge
+        from: ['on', 'off']
+        to: ['on', 'off']
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.wattlas_konfigureret
+        state: 'on'
+      - condition: state
+        entity_id: input_boolean.emhass_styring_aktiv
+        state: 'on'
+    actions:
+      - action: input_boolean.turn_off
+        target: {entity_id: input_boolean.emhass_styring_aktiv}
+      - wait_template: "{{ is_state('input_boolean.emhass_har_overtaget', 'off') }}"
+        timeout: '00:02:00'
+      - if: "{{ not wait.completed }}"
+        then:
+          - action: script.wattlas_besked
+            continue_on_error: true
+            data:
+              title: Wattlas er stoppet
+              message: >-
+                Skiftet til {{ 'skygge' if is_state('input_boolean.wattlas_skygge', 'on') else 'styring' }} kunne ikke gennemføres,
+                fordi inverteren ikke blev sat tilbage til selvforbrug. Styringen er slået fra – kontrollér inverteren, og slå den til igen.
+              data:
+                tag: wattlas_skygge
+                group: emhass
+                url: /wattlas-styring/app#styring
+          - stop: Inverteren blev ikke givet tilbage – styringen bliver slået fra.
+      - action: input_boolean.turn_on
+        target: {entity_id: input_boolean.emhass_styring_aktiv}
+      - action: logbook.log
+        data:
+          name: Wattlas
+          entity_id: input_boolean.wattlas_skygge
+          message: >-
+            {{ 'skygge: planlægger og viser, men styrer ikke inverteren' if is_state('input_boolean.wattlas_skygge', 'on')
+               else 'styrer inverteren igen' }}

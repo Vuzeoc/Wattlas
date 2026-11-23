@@ -304,6 +304,7 @@ template:
       {{ is_state('input_boolean.emhass_styring_aktiv','on') and not (is_state('script.emhass_start','on') or is_state('script.emhass_test_helios','on')) and is_state('binary_sensor.emhass_plan_brugbar','on')
        and is_state('binary_sensor.emhass_ui_data_frisk','on')
        and is_state('switch.wattlas_netladning','on') and is_state('switch.emhass_netladning_p' ~ p,'on')
+       and not is_state('input_boolean.wattlas_skygge','on')
        and states('input_number.emhass_plan_batteri_w')|float(0)<-500
        and states('sensor.emhass_m_battery_soc')|float(100)+2 < states('sensor.emhass_ui_periode_soc')|float(0)
        and states('sensor.emhass_m_battery_output_w_power')|float(-99999)>-100 }}
@@ -318,7 +319,7 @@ template:
   - name: EMHASS netdata til overvågning
     unique_id: emhass_ui_netdata_ok
     default_entity_id: binary_sensor.emhass_ui_netdata_ok
-    state: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman'',''SunMate'',''Huawei'',''Growatt'',''ESPHome''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+    state: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman'',''SunMate'',''Huawei'',''Growatt'',''ESPHome'',''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
       }}'
   - name: EMHASS målinger til beskedkontrol
     unique_id: emhass_ui_beskeddata_ok

@@ -25,6 +25,9 @@ TRIN = {
     "priser": ["nettarif_lav", "nettarif_hoej", "nettarif_spids", "elafgift", "tillaeg", "salg_nettarif", "salg_gebyr",
                "solcelle_slid", "slid", "kulde_w_pr_grad"],
 }
+# opsætningens tekstfelter → input_text.wattlas_<navn>
+TEKST = {"emhass_adresse": "emhass_adresse", "emhass_noegle": "emhass_noegle", "solprognose": "solprognose_entitet",
+         "vejr": "vejr_entitet", "udetemperatur": "udetemperatur_entitet"}
 STANDARD = {"slid": 0.25}  # forudfyldt i opsætningen: uden en slidpris regner planen batteriet som gratis at bruge
 NAVN_RE = r"[A-Za-z0-9 ._æøåÆØÅ-]*"  # navnet skrives ind i dashboardets YAML
 

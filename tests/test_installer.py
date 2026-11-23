@@ -1,6 +1,6 @@
 # Selvtjek af integrationens filhåndtering (custom_components/wattlas/installer.py).
 # Kør: python tests/test_installer.py   (kræver kun PyYAML)
-import pathlib, shutil, sys, tempfile
+import pathlib, shutil, sys, tempfile, time
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / 'custom_components' / 'wattlas'))
 import installer as I  # kun denne fil – uden at indlæse Home Assistant
 
@@ -125,6 +125,45 @@ for e_id in ('switch.sun12k_time_point_1_charge_enable', 'number.sun12k_maximum_
 alle = I.entiteter_i_kanal('deye_esphome', 'sun12k')
 assert 'sensor.sun12k_total_charge_of_the_battery' in alle and not [e for e in alle if 'microinverter' in e or 'min_' in e], alle
 shutil.rmtree(x, ignore_errors=True)
+# To Deye i parallel: masteren er hoved-prefixet, slaven en ekstra enhed – alle skrivninger går til begge
+pl = ny('default_config:\n')
+try:
+    I.installer(str(pl), 'deye_parallel', 'deye_m', None, 't'); raise SystemExit('parallel kræver en slave')
+except I.InstallFejl:
+    pass
+I.installer(str(pl), 'deye_parallel', 'deye_m', None, 't11', {'min_slave': 'deye_s'})
+pk = ''.join(f.read_text(encoding='utf-8') for f in (pl / 'packages/wattlas_kanal').glob('*.yaml'))
+assert 'min_slave' not in pk and 'min_inverter' not in pk, 'en pladsholder blev ikke erstattet'
+for e_id in ('number.deye_m_battery_grid_charging_current', 'number.deye_s_battery_grid_charging_current', 'select.deye_s_program_3_charging',
+             'switch.deye_s_export_surplus', 'sensor.deye_s_battery_power', 'sensor.deye_s_pv_power'):
+    assert e_id in pk, e_id
+alle = I.entiteter_i_kanal('deye_parallel', 'deye_m', {'min_slave': 'deye_s'})
+assert 'number.deye_s_program_6_power' in alle and 'binary_sensor.deye_s_connection' in alle and not [x for x in alle if 'min_' in x]
+shutil.rmtree(pl, ignore_errors=True)
+# Sonnen: adresse og token sættes ind i kanalfilerne; mangler de eller har farlige tegn (YAML), installeres der ikke
+pl = ny('default_config:\n')
+for sd in (None, {'host': 'http://10.0.0.5', 'token': ''}, {'host': 'http://10.0.0.5"', 'token': 'abcdefgh12'},
+          {'host': 'http://10.0.0.5', 'token': 'abc defgh"12'}):
+    try:
+        I.installer(str(pl), 'sonnen', 'min_sonnen', None, 't', None, sd); raise SystemExit(f'Sonnen uden gyldig adresse/token: {sd}')
+    except I.InstallFejl:
+        pass
+I.installer(str(pl), 'sonnen', 'min_sonnen', None, 't12', None, {'host': 'http://10.0.0.5:8080', 'token': 'Ab-12_x.y~z+/='})
+pk = ''.join(f.read_text(encoding='utf-8') for f in (pl / 'packages/wattlas_kanal').glob('*.yaml'))
+assert '__SONNEN_' not in pk and 'http://10.0.0.5:8080/api/v2/status' in pk and 'Auth-Token: "Ab-12_x.y~z+/="' in pk, 'Sonnen-pladsholder ikke erstattet'
+# tokenet må ikke blive liggende i backup-mapperne: hverken efter en opdatering (når den er godkendt) eller efter fjernelse.
+# Før godkendelsen skal det stå der endnu, så en tilbagerulning giver en virkende kanal.
+def i_backup(mappe):
+    return ''.join(f.read_text(encoding='utf-8') for f in pathlib.Path(mappe).rglob('*.yaml'))
+time.sleep(1.1)  # backup-mappens navn har sekund-opløsning
+kv = I.installer(str(pl), 'sonnen', 'min_sonnen', None, 't13', None, {'host': 'http://10.0.0.5:8080', 'token': 'Ab-12_x.y~z+/='})
+assert 'Ab-12_x.y~z+/=' in i_backup(kv['backup']), 'før godkendelsen skal backuppen kunne lægges tilbage uændret'
+I.skjul_token(kv['backup'])
+assert 'Ab-12_x.y~z+/=' not in i_backup(kv['backup']) and 'Auth-Token: "__SONNEN_TOKEN__"' in i_backup(kv['backup'])
+assert 'Auth-Token: "Ab-12_x.y~z+/="' in ''.join(f.read_text(encoding='utf-8') for f in (pl / 'packages/wattlas_kanal').glob('*.yaml'))
+time.sleep(1.1)
+assert 'Ab-12_x.y~z+/=' not in i_backup(I.afinstaller(str(pl))), 'tokenet blev liggende efter fjernelsen'
+shutil.rmtree(pl, ignore_errors=True)
 # afinstallation flytter til backup
 b = I.afinstaller(str(d))
 assert b and not (d / 'packages/wattlas').exists() and (pathlib.Path(b) / 'packages_wattlas').exists()

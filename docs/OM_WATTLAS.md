@@ -46,6 +46,9 @@ at ringe til. Wattlas kræver, at du selv sætter dine grænser og holder øje d
   spotpriser, nettarif, solprognose og husets forbrug. Den regnes om hvert 5. minut.
 - **Lader billigt, bruger dyrt.** Batteriet lades fra nettet i de billigste timer og dækker huset i de dyre. Overskydende
   sol gemmes, og sælges kun, når salgsprisen efter gebyrer er positiv.
+- **Deler huset mellem batteri og elnet.** Batteriet behøver ikke dække hele huset. Rækker det ikke til alle de dyre timer,
+  lader planen det dække en del af forbruget (en grænse i watt), mens nettet tager resten, når strømmen er nogenlunde
+  billig. Så er der strøm tilbage til de dyreste timer, fx kl. 17–21, i stedet for at batteriet er tomt, før de kommer.
 - **Forklarer sig selv.** Fanen *Planens logik* viser hver beslutning med priser og regnestykke, og syv automatiske tjek
   fortæller, om planen holder.
 - **Klarer udfald selv.** Mister Wattlas målinger, plan eller forbindelse, stopper den netladningen, sætter inverteren til

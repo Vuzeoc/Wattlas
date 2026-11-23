@@ -2,6 +2,26 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.4.1
+- **Konfigurer-knap:** under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* kan du rette opsætningens tal
+  (batteri, strømme i A, fasegrænse, importloft, priser) og forbindelser (EMHASS, solprognose, vejr). Felterne er udfyldt med de
+  nuværende værdier, og ændringerne bruges med det samme
+- **Ny styrekanal: to Deye i parallel** (eksperimentel) – master + slave med fælles batteri. Wattlas skriver kun til masteren (Deye kopierer selv til
+  slaven) og halverer ladestrøm og effekt, så summen højst er det, planen beder om; nettet og faserne måles på masteren.
+  Styringen stopper, hvis slaven ikke følger masteren
+- **Skygge-tilstand:** *Skygge (vis kun)* i Wattlas Styring. Wattlas planlægger og regulerer som normalt og viser, hvad den
+  ville sende til inverteren, men skriver intet – til nye anlæg, eksperimentelle styrekanaler eller ved siden af den
+  styring, du bruger i dag. Slået fra (standard) ændrer den intet
+- **Fremad** i appen: hvor længe batteriet rækker efter planen, og den billigste time fra nu af. Begge er også sensorer til
+  egne automationer (`sensor.wattlas_batteri_raekker_til`, `sensor.wattlas_billigste_time`)
+- **Ny styrekanal: SonnenBatterie** (eksperimentel, bidrag fra hornbech) – lokalt API v2 (fw 1.40+), ingen integration skal
+  installeres: adresse og token indtastes i opsætningen. Netladning i de billige timer; solsalg og *gem batteriet* kan ikke
+  styres via Sonnens API. Ladestrømmen holdes under det, husets værste fase har plads til (batteriet er enfaset)
+- **Rettet (alle invertere):** svarede inverteren ikke, da styringen blev slået fra, glemte Wattlas, at den stadig skyldte at
+  sætte den tilbage til selvforbrug. Nu prøver den igen hvert minut, til det lykkes, og fjerner du Wattlas imens, får du
+  beskeden om at tjekke inverteren
+- Ingen andre ændringer i styringen for de eksisterende kanaler
+
 ## 0.4.0
 - **Ny styrekanal: Growatt** (eksperimentel) – trefasede hybrid-invertere (MOD/MID TL3-XH) via *solax_modbus* med lokal
   forbindelse. Styrer gennem Growatts VPP-fjernstyring med 10 minutters nedtælling, så inverteren selv går tilbage til normal

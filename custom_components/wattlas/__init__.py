@@ -18,11 +18,9 @@ from homeassistant.helpers.start import async_at_started
 
 from . import installer
 from .config_flow import VERSION
-from .const import DOMAIN, GENSTART, STANDARD
+from .const import DOMAIN, GENSTART, STANDARD, TEKST
 
 _LOGGER = logging.getLogger(__name__)
-TEKST = {"emhass_adresse": "emhass_adresse", "emhass_noegle": "emhass_noegle", "solprognose": "solprognose_entitet",
-         "vejr": "vejr_entitet", "udetemperatur": "udetemperatur_entitet"}
 STYRING = "input_boolean.emhass_styring_aktiv"
 FULD = "input_boolean.emhass_fuld_opladning"
 VENT_S = 60  # så længe ventes der ved fjernelse på, at inverteren er sat til selvforbrug
@@ -67,11 +65,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if d.get("version") != VERSION:  # ny version fra markedspladsen: læg de nye filer på plads
         try:
             kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, d["kanal"], d["prefix"],
-                                                     d.get("inverter2"), VERSION, d.get("ekstra"))
+                                                     d.get("inverter2"), VERSION, d.get("ekstra"), d.get("sonnen"))
             res = await async_check_ha_config_file(hass)
             if res.errors:  # den nye version passer ikke til denne HA: læg den gamle tilbage
                 await hass.async_add_executor_job(installer.rul_tilbage, kvit)
                 raise RuntimeError("; ".join(str(e.message) for e in res.errors[:3]))
+            await hass.async_add_executor_job(installer.skjul_token, kvit["backup"])
             hass.config_entries.async_update_entry(entry, data={**d, "version": VERSION})
             ir.async_delete_issue(hass, DOMAIN, "opdatering_fejlede")
             hass.data[GENSTART] = True

@@ -16,6 +16,14 @@
           "inverter2": "Jeg har også en ekstra inverter uden batteri"
         }
       },
+      "sonnen": {
+        "title": "SonnenBatterie: lokal forbindelse",
+        "description": "Wattlas taler direkte med batteriet via dets lokale API (v2, firmware 1.40 eller nyere) – ingen integration skal installeres.\n\nI batteriets dashboard under **Software-Integration**: slå *JSON API for Reading* og *JSON API for Writing* til, og kopiér tokenet.\n\nBegrænsninger: Sonnens API kan ikke stoppe solsalg og ikke \"gemme\" batteriet til senere – Wattlas lader billigt fra nettet, ellers kører batteriet selvforbrug. Nettet måles ikke pr. fase, så ladestrømmen holdes under det, husets værste fase har plads til.",
+        "data": {
+          "sonnen_host": "Batteriets adresse (fx http://10.0.0.50)",
+          "sonnen_token": "Token (API v2)"
+        }
+      },
       "huawei": {
         "title": "Huawei: batteri og elmåler",
         "description": "Huawei Solar opretter batteriet og elmåleren som egne enheder. Vælg dem her – de er udfyldt, hvis de har standardnavnene.\n\n**Har du en EMMA?** Så sidder elmåleren på den: vælg *EMMA* og EMMA's **Feed in power**. EMMA's *ESS Control Mode* skal stå på *Maximum self consumption* eller *Third-party dispatch*.\n\n**Slå disse sensorer til først** (de er slået fra som standard i Huawei Solar): elmålerens **Phase A/B/C voltage** – og med EMMA også **Phase A/B/C active power** – under enheden *Power meter* eller *EMMA*. Næste trin viser, hvis nogen mangler.\n\nWattlas skal kunne skrive til inverteren: sæt Huawei Solar op med *elevate permissions* (installatør-adgangskoden). Uden EMMA skal batteriets *Working Mode* stå på *Maximise self consumption*. Slå gerne **BMS temperature** til under *Battery 1* (og *Battery 2*), så Wattlas kan advare om et for varmt eller koldt batteri.",
@@ -24,6 +32,13 @@
           "batteri": "Batteriernes ladeniveau (State of capacity)",
           "maaler": "Elmåler: uden EMMA → Power meter's Active power · med EMMA → EMMA's Feed in power",
           "ekstern_maaler": "Kun EMMA: der sidder en ekstra elmåler (DTSU) på EMMA'en"
+        }
+      },
+      "slave": {
+        "title": "Deye i parallel: slaven",
+        "description": "Vælg slavens solcelle-effekt (entiteten slutter på `_pv_power`). Masteren – den, du valgte før – er den, CT'erne/elmåleren sidder på. Wattlas skriver de samme indstillinger til begge og deler ladestrøm og effekt mellem dem, så summen er det, planen beder om. Batteri og sol lægges sammen; nettet og faserne måles på masteren.",
+        "data": {
+          "slave": "Slavens solcelle-effekt"
         }
       },
       "inverter2": {
@@ -124,6 +139,11 @@
     "error": {
       "forkert_entitet": "Vælg entiteten, der slutter på den viste endelse.",
       "forkert_maaler": "Vælg elmålerens \"Active power\" (enheden Power meter). Har du en EMMA, så vælg EMMA ovenfor.",
+      "samme_inverter": "Vælg slaven – ikke masteren igen.",
+      "sonnen_adresse": "Skriv adressen som http://10.0.0.50 (uden sti).",
+      "sonnen_token": "Tokenet ser forkert ud (kopiér det fra Software-Integration).",
+      "sonnen_afvist": "Batteriet afviste tokenet. Er JSON API for Reading slået til, og er tokenet kopieret helt?",
+      "sonnen_svarer_ikke": "Batteriet svarer ikke på adressen (eller firmwaren er ældre end 1.40).",
       "forkert_emma": "Vælg EMMA's \"Feed in power\" (enheden EMMA).",
       "kun_deye": "En ekstra inverter kræver Deye.",
       "mangler_effekt": "Vælg den ekstra inverters effekt-sensor.",
@@ -147,9 +167,11 @@
       "options": {
         "deye": "Deye (via Solarman)",
         "deye_esphome": "Deye (via ESPHome, klatremis) – eksperimentel",
+        "deye_parallel": "Deye – to i parallel (master + slave, fælles batteri, via Solarman) – eksperimentel",
         "sunmate": "SunMate",
         "huawei": "Huawei SUN2000 + LUNA2000 (via Huawei Solar)",
-        "growatt": "Growatt MOD/MID TL3-XH (via solax_modbus, lokalt) – eksperimentel"
+        "growatt": "Growatt MOD/MID TL3-XH (via solax_modbus, lokalt) – eksperimentel",
+        "sonnen": "SonnenBatterie (lokalt API v2) – eksperimentel"
       }
     },
     "elmaaler": {
@@ -202,6 +224,120 @@
     "opdatering_fejlede": {
       "title": "Wattlas-opdateringen til {version} blev ikke gennemført",
       "description": "Den nye version bestod ikke Home Assistants konfigurationstjek, så den gamle er lagt tilbage og kører videre. Wattlas prøver igen ved næste genstart.\n\nFejl: {fejl}"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ret Wattlas",
+        "description": "Vælg, hvad du vil rette. Ændringerne bruges med det samme – du skal ikke genstarte.\n\nVil du skifte inverter, så fjern Wattlas og tilføj den igen (dine tal bevares).",
+        "menu_options": {
+          "forbindelser": "Forbindelser og prognoser (EMHASS, solprognose, vejr)",
+          "batteri": "Batteri og inverter (kWh, effekter og strømme i A)",
+          "elnet": "Elnet og sikringer (fasegrænse, importloft, eksport)",
+          "priser": "Priser og tariffer",
+          "sonnen": "SonnenBatterie: adresse og token"
+        }
+      },
+      "forbindelser": {
+        "title": "Forbindelser og prognoser",
+        "description": "Lad API-nøglen stå tom for at beholde den nuværende.",
+        "data": {
+          "emhass_adresse": "EMHASS-adresse",
+          "emhass_noegle": "EMHASS API-nøgle",
+          "solprognose": "Solprognose (fx Helios Forecast …_power_now)",
+          "vejr": "Vejr",
+          "udetemperatur": "Udetemperatur (valgfri – ellers bruges vejrets)"
+        }
+      },
+      "batteri": {
+        "title": "Batteri og inverter",
+        "description": "Find tallene i datablade for inverter og batteri. Vælg hellere for lavt end for højt.",
+        "data": {
+          "batteri_kwh": "Batteriets kapacitet",
+          "maks_ladeeffekt_w": "Maks. ladeeffekt (batteri)",
+          "maks_afladeeffekt_w": "Maks. afladeeffekt (batteri)",
+          "maks_ladestroem_a": "Maks. ladestrøm (batteri, DC)",
+          "maks_afladestroem_a": "Maks. afladestrøm (batteri, DC)",
+          "maks_netladestroem_a": "Maks. netladestrøm (DC)",
+          "maks_netladeeffekt_w": "Effekt ved tvungen netladning"
+        },
+        "data_description": {
+          "batteri_kwh": "Brugbar kapacitet for alle batterimoduler, fx 2 × 10 kWh = 20.",
+          "maks_ladeeffekt_w": "Fra inverterens datablad (DC-ladeeffekt), højst batteriets.",
+          "maks_afladeeffekt_w": "Inverterens AC-udgangseffekt eller batteriets maks., det laveste.",
+          "maks_ladestroem_a": "Batteriets maks. ladestrøm (BMS).",
+          "maks_afladestroem_a": "Batteriets maks. afladestrøm (BMS).",
+          "maks_netladestroem_a": "Typisk lavere end ladestrømmen. Start lavt, fx 100 A.",
+          "maks_netladeeffekt_w": "Effekt ved tvungen netladning (\"Lad nu\", fuldladning), fx 2/3 af importgrænsen."
+        }
+      },
+      "elnet": {
+        "title": "Elnet og sikringer",
+        "description": "Grænserne beskytter dine sikringer, også når planen tager fejl. Spørg din elinstallatør, hvis du er i tvivl.",
+        "data": {
+          "fase_graense_a": "Maks. strøm pr. fase (under hovedsikringen)",
+          "import_graense_w": "Maks. samlet import fra nettet (netladning)",
+          "maks_netimport_w": "Plan-grænse import fra nettet",
+          "maks_eksport_w": "Plan-grænse eksport til nettet"
+        },
+        "data_description": {
+          "fase_graense_a": "Lidt under hovedsikringen. 3 × 20 A sikring → fx 16 A.",
+          "import_graense_w": "Samlet import under netladning, fx 3 × 16 A × 230 V ≈ 11 000 W.",
+          "maks_netimport_w": "Højeste import i planen – højst importgrænsen.",
+          "maks_eksport_w": "Den eksport, du har lov til."
+        }
+      },
+      "priser": {
+        "title": "Priser",
+        "description": "Tallene står på din elregning eller netselskabets hjemmeside. Sommer- og vintertarif retter du selv senere.",
+        "data": {
+          "nettarif_lav": "Nettarif lav (kl. 0–6)",
+          "nettarif_hoej": "Nettarif høj (kl. 6–17 og 21–24)",
+          "nettarif_spids": "Nettarif spids (kl. 17–21)",
+          "elafgift": "Elafgift + Energinet-tariffer",
+          "tillaeg": "Elselskabets tillæg (inkl. moms)",
+          "salg_nettarif": "Indfødningstarif ved salg",
+          "salg_gebyr": "Elselskabets gebyr ved salg",
+          "solcelle_slid": "Solcellernes slid pr. kWh",
+          "slid": "Batterislid pr. afladet kWh",
+          "kulde_w_pr_grad": "Ekstra husforbrug pr. grad koldere (valgfri)"
+        },
+        "data_description": {
+          "nettarif_lav": "Netselskabets tarif uden moms, kl. 0–6 (står på elregningen).",
+          "nettarif_hoej": "Uden moms, kl. 6–17 og 21–24.",
+          "nettarif_spids": "Uden moms, kl. 17–21.",
+          "elafgift": "Elafgift + Energinets tariffer, uden moms.",
+          "tillaeg": "Elselskabets tillæg pr. kWh inkl. moms (valgfri).",
+          "salg_nettarif": "Indfødningstarif uden moms (valgfri).",
+          "salg_gebyr": "Elselskabets gebyr pr. solgt kWh (valgfri).",
+          "solcelle_slid": "Hvad en kWh solstrøm koster i slid, fx 0,10 (valgfri).",
+          "slid": "Batteriets pris / (kapacitet × cykler), fx 40 000 kr. / (20 kWh × 6000) ≈ 0,33. Ved 0 regner planen batteriet som gratis at slide på.",
+          "kulde_w_pr_grad": "Ekstra husforbrug pr. grad koldere. Varmepumpe: 50–150. 0 = ingen justering (valgfri)."
+        }
+      },
+      "sonnen": {
+        "title": "SonnenBatterie: adresse og token",
+        "description": "Har batteriet fået en ny adresse (fx en ny IP fra routeren) eller et nyt token, så ret det her. Wattlas tjekker, at batteriet svarer, og skriver styrekanalens filer igen.\n\n**Home Assistant skal genstartes bagefter** – tryk *Genstart* under Reparationer. Lad tokenet stå tomt for at beholde det nuværende.",
+        "data": {
+          "sonnen_host": "Batteriets adresse (fx http://10.0.0.50)",
+          "sonnen_token": "Token (API v2)"
+        }
+      }
+    },
+    "error": {
+      "adresse": "Adressen skal starte med http:// eller https://",
+      "noegle": "Nøglen er for kort.",
+      "prognose_format": "Sensoren har ikke en prognose med datetime og watts.",
+      "prognose_kvarter": "Prognosen skal have en værdi pr. 15 minutter (se SOLPROGNOSE.md).",
+      "over_nul": "Skal være større end 0.",
+      "sonnen_adresse": "Skriv adressen som http://10.0.0.50 (uden sti).",
+      "sonnen_token": "Tokenet ser forkert ud (kopiér det fra Software-Integration).",
+      "sonnen_afvist": "Batteriet afviste tokenet. Er JSON API for Reading slået til, og er tokenet kopieret helt?",
+      "sonnen_svarer_ikke": "Batteriet svarer ikke på adressen (eller firmwaren er ældre end 1.40)."
+    },
+    "abort": {
+      "install_fejl": "Installationen blev ikke gennemført: {fejl}"
     }
   }
 }

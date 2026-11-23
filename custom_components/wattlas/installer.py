@@ -12,11 +12,15 @@ from pathlib import Path
 PAYLOAD = Path(__file__).parent / "payload"
 KANALER = {"deye": ("deye_solarman", "min_inverter"), "sunmate": ("sunmate", "min_sunmate"), "huawei": ("huawei", "min_huawei"),
            "huawei_emma": ("huawei_emma", "min_huawei"), "growatt": ("growatt", "min_growatt"),
-           "deye_esphome": ("deye_esphome", "min_inverter")}
+           "deye_esphome": ("deye_esphome", "min_inverter"),
+           "deye_parallel": ("deye_parallel", "min_inverter"), "sonnen": ("sonnen", "min_sonnen")}
 # Kanaler med flere enheder: pladsholdere ud over hoved-prefixet, som opsætningen skal udfylde (ekstra = {pladsholder: prefix}).
 # "prefix|_2" betyder prefix + endelse efter navnet (EMMA's eksterne måler har samme navne som den indbyggede + "_2").
-EKSTRA = {"huawei": ("min_luna", "min_hmaaler"), "huawei_emma": ("min_luna", "min_hmaaler", "min_emma")}
+EKSTRA = {"huawei": ("min_luna", "min_hmaaler"), "huawei_emma": ("min_luna", "min_hmaaler", "min_emma"), "deye_parallel": ("min_slave",)}
 EKSTRA_RE = re.compile(r"[a-z0-9_]+(\|_\d+)?")
+# Sonnen: batteriets adresse og token skrives ind i kanalfilerne (YAML) – kun sikre tegn
+SONNEN_HOST_RE = re.compile(r"https?://[A-Za-z0-9.-]+(:\d{1,5})?")
+SONNEN_TOKEN_RE = re.compile(r"[A-Za-z0-9._~+/=-]{8,200}")
 
 
 def _erstat(tekst: str, plads: str, ny: str) -> str:
@@ -113,9 +117,13 @@ def _flyt(src: Path, backup: Path, navn: str, flyttet: list) -> None:
         flyttet.append((backup / navn, src))
 
 
-def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, version: str, ekstra: dict | None = None) -> dict:
+def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, version: str, ekstra: dict | None = None,
+              sonnen: dict | None = None) -> dict:
     """Kopierer alt på plads. Returnerer en kvittering, som rul_tilbage() kan bruge."""
     ekstra = ekstra or {}
+    if kanal == "sonnen" and not (SONNEN_HOST_RE.fullmatch((sonnen or {}).get("host") or "")
+                                  and SONNEN_TOKEN_RE.fullmatch((sonnen or {}).get("token") or "")):
+        raise InstallFejl("Sonnen-batteriets adresse eller token mangler – fjern Wattlas og sæt det op igen")
     if set(ekstra) != set(EKSTRA.get(kanal, ())) or not all(EKSTRA_RE.fullmatch(v or "") for v in ekstra.values()):
         raise InstallFejl("styrekanalens enheder (batteri og elmåler) mangler – fjern Wattlas og sæt det op igen")
     cfg = Path(config_dir)
@@ -153,10 +161,14 @@ def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, versi
                 for plads, ny in erstat.items():
                     t = _erstat(t, plads, ny)
                 f.write_text(t, encoding="utf-8")
+        if kanal == "sonnen":
+            for f in (pkg / "wattlas_kanal").glob("*.yaml"):
+                t = f.read_text(encoding="utf-8").replace("__SONNEN_HOST__", sonnen["host"]).replace("__SONNEN_TOKEN__", sonnen["token"])
+                f.write_text(t, encoding="utf-8")
         ds = cfg / "wattlas" / "dashboards"
         styr = (ds / "wattlas_styring.yaml").read_text(encoding="utf-8")
         energi = (ds / "wattlas.yaml").read_text(encoding="utf-8")
-        if kanal == "deye" and prefix != std:
+        if kanal in ("deye", "deye_parallel") and prefix != std:
             styr = re.sub(r"(?m)^        # inverter_prefix: .*$", f"        inverter_prefix: {prefix}_", styr)
         if inv2:
             effekt = inv2.get("effekt") or f"sensor.{prefix}_microinverter_power"
@@ -212,6 +224,16 @@ def rul_tilbage(kvit: dict) -> None:
         b.rmdir()
 
 
+def skjul_token(backup: str) -> None:
+    """Sonnen: tokenet (skriveadgang til batteriet) må ikke blive liggende i backup-mappen. Kaldes først, når det gamle ikke skal
+    lægges tilbage igen (efter et bestået konfigurationstjek eller en fjernelse) – rul_tilbage() skal bruge filerne, som de var."""
+    for f in (Path(backup) / "packages_wattlas_kanal").glob("*.yaml"):
+        t = f.read_text(encoding="utf-8")
+        ny = re.sub(r'(Auth-Token: )"[^"\n]*"', r'\1"__SONNEN_TOKEN__"', t)
+        if ny != t:
+            f.write_text(ny, encoding="utf-8")
+
+
 def afinstaller(config_dir: str) -> str | None:
     """Flytter Wattlas' filer til en backup-mappe (sletter intet). packages-linjen bliver stående."""
     cfg = Path(config_dir)
@@ -221,4 +243,5 @@ def afinstaller(config_dir: str) -> str | None:
     for p, navn in [(cfg / pkg_rel / "wattlas", "packages_wattlas"), (cfg / pkg_rel / "wattlas_kanal", "packages_wattlas_kanal"),
                     (cfg / "www" / "wattlas", "www_wattlas"), (cfg / "wattlas", "wattlas")]:
         _flyt(p, backup, navn, flyttet)
+    skjul_token(str(backup))
     return str(backup) if flyttet else None

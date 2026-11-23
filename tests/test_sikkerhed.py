@@ -234,6 +234,71 @@ async def main():
         assert Template(hvis, hass).async_render() is ok, felt
     print('Beskedmodtager fra indstillingen: OK')
 
+    # To Deye i parallel: strøm og effekt deles, så summen er det bedte (også ulige tal); batteri summeres; husforbrug fra balancen
+    pk = yaml.safe_load((REPO / 'styrekanaler/deye_parallel/wattlas_kanal_deye.yaml').read_text(encoding='utf-8'))
+    netstr = next(x for blok in pk['template'] for x in blok.get('number', []) if x['unique_id'] == 'wattlas_netladestroem')
+    assert len(netstr['set_value']) == 1 and 'min_inverter' in str(netstr['set_value'][0]['target']), 'der skrives kun til masteren'
+    # det skrevne vises som 2 × masteren med trin 2 × masterens, så kernens skrivning kan ramme tallet (ulige tal findes ikke)
+    sæt('number.min_inverter_battery_grid_charging_current', '5', {'step': 1}); sæt('number.min_slave_battery_grid_charging_current', '0')
+    assert float(Template(netstr['state'], hass).async_render()) == 10 and float(Template(netstr['step'], hass).async_render()) == 2, netstr
+    for bedt in (100, 101, 7, 0):  # Deye giver slaven samme værdi: 2 × masterens må aldrig overstige det bedte
+        m = float(Template(str(netstr['set_value'][0]['data']['value']), hass).async_render({'value': bedt}))
+        assert 2 * m <= bedt and bedt - 2 * m <= 1, (bedt, m)
+    for e, v in {'grid_power': 1500, 'battery_power': 2000, 'pv_power': 0, 'device_state': 'Normal', 'temperature': 40, 'load_power': 900,
+                 'battery_state_of_charge': 60, 'battery': 60, 'battery_voltage': 52, 'battery_temperature': 20,
+                 'external_ct1_power': 500, 'external_ct2_power': 500, 'external_ct3_power': 500,
+                 'grid_l1_voltage': 230, 'grid_l2_voltage': 230, 'grid_l3_voltage': 230}.items():
+        sæt(f'sensor.min_inverter_{e}', str(v))
+    for e, v in {'battery_power': 1000, 'device_state': 'Normal', 'temperature': 45}.items():
+        sæt(f'sensor.min_slave_{e}', str(v))
+    sæt('sensor.emhass_solproduktion_samlet', '0')
+    s = sample('deye_parallel')
+    v = s['values']
+    assert s['source'] == 'Solarman' and v['battery_output_w_power'] == 3000 and v['load_w_totalpower'] == 4500, s
+    assert v['inverter_temperature'] == 45 and v['inverter_status'] == 'Normal', v
+    sæt('sensor.min_slave_device_state', 'Fault')
+    assert sample('deye_parallel')['values']['inverter_status'] == 'Slave: Fault', 'en slave i fejl må ikke se normal ud'
+    # vagten: følger slaven ikke masteren i over 3 min, er styrekanalen ikke klar
+    pm = yaml.safe_load((REPO / 'styrekanaler/deye_parallel/emhass_maalinger.yaml').read_text(encoding='utf-8'))
+    ok_tpl = next(b for blok in pm['template'] for b in blok.get('binary_sensor', []) if b['unique_id'] == 'emhass_styrekanal_ok')['state']
+    vagt = ok_tpl[:ok_tpl.index('{% set ns=namespace(ok=true) %}')] + '{{ par.ok }}'
+    sæt('switch.min_inverter_battery_grid_charging', 'on'); sæt('switch.min_slave_battery_grid_charging', 'on')
+    assert Template(vagt, hass).async_render() is True
+    sæt('switch.min_slave_battery_grid_charging', 'off')
+    assert Template(vagt, hass).async_render() is True, 'lige efter en ændring får slaven 3 min'
+    hass.states.async_set('switch.min_inverter_battery_grid_charging', 'on', force_update=True)
+    hass.states.get('switch.min_inverter_battery_grid_charging').last_changed = __import__('datetime').datetime.now(__import__('datetime').timezone.utc) - __import__('datetime').timedelta(minutes=5)
+    assert Template(vagt, hass).async_render() is False, 'slaven følger ikke masteren – styringen skal stoppe'
+    print('Deye i parallel: deling, summer og status: OK')
+
+    # Sonnen: kun husets forbrug pr. fase kendes, og batteriet er enfaset. Kernens fasebudget regner med 3 faser, så kanalen
+    # holder selv grænsen: netladestrømmens maks. = den værste fases plads. Hver runde af kernen skal holde sig under den.
+    sk = yaml.safe_load((REPO / 'styrekanaler/sonnen/wattlas_kanal_sonnen.yaml').read_text(encoding='utf-8'))
+    maks_tpl = next(x for blok in sk['template'] for x in blok.get('number', []) if x['unique_id'] == 'wattlas_netladestroem')['max']
+    def sonnen(lader_w, huset=(3000, 500, 500)):
+        sæt('sensor.min_sonnen_status', str(sum(huset)), {'Production_W': 0, 'Consumption_W': sum(huset), 'Pac_total_W': -lader_w,
+            'GridFeedIn_W': -(sum(huset) + lader_w), 'USOC': 50, 'Ubat': 52, 'OperatingMode': 1, 'SystemStatus': 'OnGrid'})
+        for i in range(3):
+            sæt(f'sensor.min_sonnen_maaler_w_l{i + 1}', str(huset[i])); sæt(f'sensor.min_sonnen_maaler_v_l{i + 1}', '230')
+        return sample('sonnen')
+    s = sonnen(2000)
+    v = s['values']
+    assert s['source'] == 'Sonnen' and v['inverter_status'] == 'Normal' and v['grid_out_total_power'] == 6000 and v['battery_output_w_power'] == -2000, s
+    for huset in ((3000, 500, 500), (500, 3500, 200), (3700, 0, 0)):
+        lad_a = 0
+        for runde in range(8):
+            v = sonnen(lad_a * 52, huset)['values']
+            anlaeg(lader_a=lad_a, faser=(int(v['external_ct_w_l1']), int(v['external_ct_w_l2']), int(v['external_ct_w_l3'])), net=v['grid_out_total_power'])
+            maks = float(Template(maks_tpl, hass).async_render())
+            sæt('number.wattlas_netladestroem', str(lad_a), {'min': 0, 'max': maks, 'step': 1})
+            lad_a = ladeamp(-9000)
+            plads = 16 * 230 - max(huset)
+            assert lad_a * 52 / 0.95 <= max(plads, 0) + 1, f'Sonnen runde {runde}, hus {huset}: {lad_a} A = {lad_a * 52 / 0.95:.0f} W fra nettet, plads {plads} W'
+        assert lad_a >= 5 or plads < 300, f'Sonnen lader slet ikke ({huset})'
+    sæt('sensor.min_sonnen_status', '4000', {**hass.states.get('sensor.min_sonnen_status').attributes, 'SystemStatus': 'OffGrid'})
+    assert sample('sonnen')['values']['inverter_status'] == 'OffGrid'
+    print('Sonnen: fasegrænse (enfaset), fortegn og status: OK')
+
     await hass.async_stop(force=True)
 
 asyncio.run(main())

@@ -7,9 +7,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import selector as sel
@@ -17,12 +19,12 @@ from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.loader import async_get_integration
 
 from . import installer
-from .const import DOMAIN, EMHASS_SLUG, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TRIN
+from .const import DOMAIN, EMHASS_SLUG, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TEKST, TRIN
 
 VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
 SUFFIX = {"deye": ("sensor", "_pv_power"), "sunmate": ("number", "_timepoint_1_power"), "huawei": ("sensor", "_input_power"),
           "growatt": ("sensor", "_battery_soc"),
-          "deye_esphome": ("sensor", "_pv1_power")}
+          "deye_esphome": ("sensor", "_pv1_power"), "deye_parallel": ("sensor", "_pv_power")}
 # Huawei (LUNA2000) og Growatt (ARK/APX) er højvoltbatterier; kernen regner i A ved et lavvoltbatteri. Kanalerne bruger derfor
 # en fast beregningsspænding, og A-indstillingerne udregnes fra W. Samme tal står i styrekanalerne (styrekanaler/huawei, growatt).
 HUAWEI_V = 50
@@ -75,6 +77,88 @@ def _prognose_fejl(hass, entity_id: str) -> str | None:
     return None if (t[1] - t[0]).total_seconds() == 900 else "prognose_kvarter"
 
 
+def _forbindelse_fejl(hass, ui: dict, kraev_noegle: bool) -> dict[str, str]:
+    fejl = {}
+    if not re.match(r"https?://", ui.get("emhass_adresse") or ""):
+        fejl["emhass_adresse"] = "adresse"
+    if (kraev_noegle or ui.get("emhass_noegle")) and len(ui.get("emhass_noegle") or "") < 8:
+        fejl["emhass_noegle"] = "noegle"
+    if (f := _prognose_fejl(hass, ui.get("solprognose") or "")):
+        fejl["solprognose"] = f
+    return fejl
+
+
+def _tal_felter(kanal, trin: str) -> list[str]:
+    """Indstillingerne i trinnet. Højvolt: A-grænserne udregnes fra W (se HUAWEI_V) og spørges ikke om."""
+    return [k for k in TRIN[trin] if not (kanal in HOEJVOLT and k in A_FRA_W)]
+
+
+def _tal_skema(felter: list[str], std: dict) -> vol.Schema:
+    skema = {}
+    for k in felter:
+        h = TAL[k]
+        trin_ = h.get("step", 1)
+        s = sel.NumberSelector(sel.NumberSelectorConfig(min=h.get("min", 0), max=h.get("max", 100000), step="any" if trin_ < 0.001 else trin_,
+                                                        unit_of_measurement=h.get("unit_of_measurement"), mode=sel.NumberSelectorMode.BOX))
+        d = {"default": std[k]} if std.get(k) is not None else {}
+        skema[vol.Required(k, **d) if k in PAAKRAEVET else vol.Optional(k, **d)] = s
+    return vol.Schema(skema)
+
+
+def _tal_fejl(felter: list[str], ui: dict) -> dict[str, str]:
+    return {k: "over_nul" for k in felter if k in PAAKRAEVET and not (ui.get(k) or 0) > 0}
+
+
+def _med_a(kanal, tal: dict) -> dict:
+    """Højvolt: A-grænserne følger W-indstillingerne (W ÷ HUAWEI_V)."""
+    if kanal in HOEJVOLT:
+        tal = {**tal, **{a: round(tal[w] / HUAWEI_V) for a, w in A_FRA_W.items() if (tal.get(w) or 0) > 0}}
+    return tal
+
+
+async def _sonnen_svarer(hass, host: str, token: str) -> str | None:
+    """Læser batteriets status med tokenet. None = svarer; ellers en fejlkode."""
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+    try:
+        async with async_get_clientsession(hass).get(f"{host}/api/v2/status", headers={"Auth-Token": token},
+                                                     timeout=aiohttp.ClientTimeout(total=10)) as r:
+            if r.status in (401, 403):
+                return "sonnen_afvist"
+            data = await r.json(content_type=None) if r.status == 200 else None
+    except (aiohttp.ClientError, TimeoutError, ValueError):
+        return "sonnen_svarer_ikke"
+    return None if isinstance(data, dict) and "USOC" in data else "sonnen_svarer_ikke"
+
+
+async def _sonnen_fejl(hass, host: str, token: str) -> dict[str, str]:
+    """Fejl ved Sonnen-batteriets adresse og token (tegn, der må stå i YAML, og at batteriet svarer)."""
+    if not installer.SONNEN_HOST_RE.fullmatch(host):
+        return {"sonnen_host": "sonnen_adresse"}
+    if not installer.SONNEN_TOKEN_RE.fullmatch(token):
+        return {"sonnen_token": "sonnen_token"}
+    f = await _sonnen_svarer(hass, host, token)
+    return {"base": f} if f else {}
+
+
+async def _laeg_filer(hass, d: dict) -> str | None:
+    """Lægger Wattlas' filer på plads for opsætningen d og tjekker konfigurationen (rulles tilbage ved fejl).
+    Returnerer en fejltekst – eller None: filerne ligger der, og Home Assistant skal genstartes (reparationen oprettes)."""
+    try:
+        kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, d["kanal"], d["prefix"],
+                                                 d.get("inverter2"), VERSION, d.get("ekstra"), d.get("sonnen"))
+    except installer.InstallFejl as e:
+        return str(e)
+    res = await async_check_ha_config_file(hass)
+    if res.errors:
+        await hass.async_add_executor_job(installer.rul_tilbage, kvit)
+        return "Home Assistants konfigurationstjek fejlede, alt er rullet tilbage: " + "; ".join(str(e.message) for e in res.errors[:3])
+    await hass.async_add_executor_job(installer.skjul_token, kvit["backup"])
+    hass.data[GENSTART] = True
+    ir.async_create_issue(hass, DOMAIN, "genstart", is_fixable=True, is_persistent=True,
+                          severity=ir.IssueSeverity.WARNING, translation_key="genstart")
+    return None
+
+
 class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
     """Forløbet i Indstillinger → Enheder og tjenester → Tilføj integration → Wattlas."""
 
@@ -82,6 +166,11 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self.d: dict[str, Any] = {}
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(entry: ConfigEntry) -> OptionsFlow:
+        return WattlasOptionsFlow()
 
     # 1 – styrekanal
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
@@ -96,10 +185,12 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
                 "fejl": f"Wattlas er lige blevet opdateret til {VERSION}. Genstart Home Assistant, og sæt Wattlas op bagefter."})
         if user_input is not None:
             self.d["kanal"] = user_input["kanal"]
+            if self.d["kanal"] == "sonnen":
+                return await self.async_step_sonnen()
             return await self.async_step_inverter()
         return self.async_show_form(step_id="user", data_schema=vol.Schema({
             vol.Required("kanal", default="deye"): sel.SelectSelector(sel.SelectSelectorConfig(
-                options=["deye", "deye_esphome", "sunmate", "huawei", "growatt"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
+                options=["deye", "deye_parallel", "deye_esphome", "sunmate", "huawei", "growatt", "sonnen"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
 
     # 2 – vælg inverteren (de fleste har kun én)
     async def async_step_inverter(self, user_input=None) -> ConfigFlowResult:
@@ -116,11 +207,43 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.d["inverter2"] = None
                 if self.d["kanal"] == "huawei":
                     return await self.async_step_huawei()
+                if self.d["kanal"] == "deye_parallel":
+                    return await self.async_step_slave()
                 return await (self.async_step_inverter2() if user_input.get("inverter2") else self.async_step_tjek())
         return self.async_show_form(step_id="inverter", errors=fejl, data_schema=vol.Schema({
             vol.Required("inverter"): sel.EntitySelector(sel.EntitySelectorConfig(domain=dom)),
             vol.Optional("inverter2", default=False): sel.BooleanSelector(),
         }), description_placeholders={"suffix": suf})
+
+    # 2 (Sonnen) – batteriet har ingen HA-integration: kanalen læser og styrer det selv via det lokale API v2 (fw 1.40+)
+    async def async_step_sonnen(self, user_input=None) -> ConfigFlowResult:
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            host = user_input["sonnen_host"].strip().rstrip("/")
+            token = user_input["sonnen_token"].strip()
+            fejl = await _sonnen_fejl(self.hass, host, token)
+            if not fejl:
+                self.d.update(prefix="min_sonnen", inverter2=None, sonnen={"host": host, "token": token})
+                return await self.async_step_tjek()
+        return self.async_show_form(step_id="sonnen", errors=fejl, data_schema=vol.Schema({
+            vol.Required("sonnen_host", default=(user_input or {}).get("sonnen_host", "http://")): sel.TextSelector(),
+            vol.Required("sonnen_token"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD))}))
+
+    # 2a – kun Deye i parallel: slaven er sin egen enhed i ha-solarman (sin egen logger); masteren er den, CT'erne sidder på
+    async def async_step_slave(self, user_input=None) -> ConfigFlowResult:
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            e = user_input["slave"]
+            prefix = e.split(".", 1)[1][: -len("_pv_power")] if e.endswith("_pv_power") else ""
+            if not prefix:
+                fejl["slave"] = "forkert_entitet"
+            elif prefix == self.d["prefix"]:
+                fejl["slave"] = "samme_inverter"
+            else:
+                self.d["ekstra"] = {"min_slave": prefix}
+                return await self.async_step_tjek()
+        return self.async_show_form(step_id="slave", errors=fejl, data_schema=vol.Schema({
+            vol.Required("slave"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor"))}))
 
     # 2a – kun Huawei: batteriet og elmåleren er egne enheder i Huawei Solar-integrationen. Elmåleren sidder enten på
     # inverteren ("Power meter", vælg dens Active power) eller på en EMMA (vælg EMMA's Feed in power – den er slået til som
@@ -206,7 +329,8 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 blok.append(f"❌ **{navn}** mangler – " + (f"[tilføj den]({link}), {hjælp}" if link else hjælp))
         alle = await hass.async_add_executor_job(installer.entiteter_i_kanal, self.d["kanal"], self.d["prefix"], self.d.get("ekstra"))
-        mangler = [e for e in alle if hass.states.get(e) is None and not e.endswith("_microinverter_power")]
+        # Sonnen-kanalen laver selv batteriets entiteter (REST), så de findes først efter installationen
+        mangler = [e for e in alle if hass.states.get(e) is None and not e.endswith("_microinverter_power")] if self.d["kanal"] != "sonnen" else []
         if mangler:
             vis = ", ".join(f"`{e}`" for e in mangler[:8]) + (f" og {len(mangler) - 8} til" if len(mangler) > 8 else "")
             adv.append(f"⚠️ Inverteren mangler {len(mangler)} entiteter, som Wattlas bruger: {vis}. "
@@ -245,12 +369,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_forbindelser(self, user_input=None) -> ConfigFlowResult:
         fejl: dict[str, str] = {}
         if user_input is not None:
-            if not re.match(r"https?://", user_input["emhass_adresse"]):
-                fejl["emhass_adresse"] = "adresse"
-            if len(user_input["emhass_noegle"]) < 8:
-                fejl["emhass_noegle"] = "noegle"
-            if (f := _prognose_fejl(self.hass, user_input["solprognose"])):
-                fejl["solprognose"] = f
+            fejl = _forbindelse_fejl(self.hass, user_input, kraev_noegle=True)
             if not fejl:
                 self.d.update(user_input)
                 return await self.async_step_batteri()
@@ -262,31 +381,15 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Optional("udetemperatur"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="temperature")),
         }))
 
-    def _felter(self, trin: str) -> list[str]:
-        """Indstillingerne i trinnet. Huawei: A-grænserne udregnes fra W (se HUAWEI_V) og spørges ikke om."""
-        return [k for k in TRIN[trin] if not (self.d.get("kanal") in HOEJVOLT and k in A_FRA_W)]
-
-    def _tal_skema(self, trin: str) -> vol.Schema:
-        felter = {}
-        for k in self._felter(trin):
-            h = TAL[k]
-            trin_ = h.get("step", 1)
-            s = sel.NumberSelector(sel.NumberSelectorConfig(min=h.get("min", 0), max=h.get("max", 100000), step="any" if trin_ < 0.001 else trin_,
-                                                            unit_of_measurement=h.get("unit_of_measurement"), mode=sel.NumberSelectorMode.BOX))
-            felter[vol.Required(k) if k in PAAKRAEVET else vol.Optional(k, **({"default": STANDARD[k]} if k in STANDARD else {}))] = s
-        return vol.Schema(felter)
-
     async def _tal_trin(self, trin: str, user_input, naeste) -> ConfigFlowResult:
+        felter = _tal_felter(self.d.get("kanal"), trin)
         fejl = {}
         if user_input is not None:
-            fejl = {k: "over_nul" for k in self._felter(trin) if k in PAAKRAEVET and not (user_input.get(k) or 0) > 0}
+            fejl = _tal_fejl(felter, user_input)
             if not fejl:
-                tal = self.d.setdefault("tal", {})
-                tal.update({k: v for k, v in user_input.items() if v is not None})
-                if self.d.get("kanal") in HOEJVOLT:
-                    tal.update({a: round(tal[w] / HUAWEI_V) for a, w in A_FRA_W.items() if (tal.get(w) or 0) > 0})
+                self.d["tal"] = _med_a(self.d.get("kanal"), {**self.d.get("tal", {}), **{k: v for k, v in user_input.items() if v is not None}})
                 return await naeste()
-        return self.async_show_form(step_id=trin, data_schema=self._tal_skema(trin), errors=fejl)
+        return self.async_show_form(step_id=trin, data_schema=_tal_skema(felter, STANDARD), errors=fejl)
 
     async def async_step_batteri(self, user_input=None) -> ConfigFlowResult:
         return await self._tal_trin("batteri", user_input, self.async_step_elnet)
@@ -301,23 +404,100 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_installer(self, user_input=None) -> ConfigFlowResult:
         hass = self.hass
         omdoeb = self.d.pop("omdoeb", None) or {}
-        try:
-            kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, self.d["kanal"],
-                                                     self.d["prefix"], self.d.get("inverter2"), VERSION, self.d.get("ekstra"))
-        except installer.InstallFejl as e:
-            return self.async_abort(reason="install_fejl", description_placeholders={"fejl": str(e)})
-        res = await async_check_ha_config_file(hass)
-        if res.errors:
-            await hass.async_add_executor_job(installer.rul_tilbage, kvit)
-            return self.async_abort(reason="install_fejl", description_placeholders={
-                "fejl": "Home Assistants konfigurationstjek fejlede, alt er rullet tilbage: " + "; ".join(str(e.message) for e in res.errors[:3])})
+        if fejl := await _laeg_filer(hass, self.d):
+            return self.async_abort(reason="install_fejl", description_placeholders={"fejl": fejl})
         reg = er.async_get(hass)
         for gammel, ny in omdoeb.items():
             if reg.async_get(gammel) and not reg.async_get(ny):
                 reg.async_update_entity(gammel, new_entity_id=ny)
-        hass.data[GENSTART] = True
-        ir.async_create_issue(hass, DOMAIN, "genstart", is_fixable=True, is_persistent=True,
-                              severity=ir.IssueSeverity.WARNING, translation_key="genstart")
         data = {k: v for k, v in self.d.items() if k != "emhass_adresse_fundet"}
         data["version"] = VERSION
         return self.async_create_entry(title="Wattlas", data=data)
+
+
+class WattlasOptionsFlow(OptionsFlow):
+    """Konfigurer: ret opsætningens tal og forbindelser – udfyldt med de nuværende værdier, gemt med det samme.
+    Inverteren (styrekanalen) skiftes ved at fjerne Wattlas og tilføje den igen."""
+
+    async def async_step_init(self, user_input=None) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="init", menu_options=["forbindelser", "batteri", "elnet", "priser"]
+                                    + (["sonnen"] if self.config_entry.data.get("kanal") == "sonnen" else []))
+
+    async def async_step_sonnen(self, user_input=None) -> ConfigFlowResult:
+        """Sonnen: ny adresse (fx ny IP fra routeren) eller nyt token. Kanalens filer skrives igen, og HA skal genstartes."""
+        d = self.config_entry.data
+        gammel = d.get("sonnen") or {}
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            host = user_input["sonnen_host"].strip().rstrip("/")
+            token = (user_input.get("sonnen_token") or "").strip() or gammel.get("token", "")  # tom = behold det nuværende
+            fejl = await _sonnen_fejl(self.hass, host, token)
+            if not fejl:
+                ny = {**d, "sonnen": {"host": host, "token": token}}
+                if tekst := await _laeg_filer(self.hass, ny):
+                    return self.async_abort(reason="install_fejl", description_placeholders={"fejl": tekst})
+                self.hass.config_entries.async_update_entry(self.config_entry, data=ny)
+                return self.async_create_entry(data={})
+        return self.async_show_form(step_id="sonnen", errors=fejl, data_schema=vol.Schema({
+            vol.Required("sonnen_host", default=(user_input or {}).get("sonnen_host") or gammel.get("host", "http://")): sel.TextSelector(),
+            vol.Optional("sonnen_token"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD))}))
+
+    def _hjaelper(self, dom: str, navn: str):
+        s = self.hass.states.get(f"{dom}.wattlas_{navn}")
+        if s is None or s.state in ("unknown", "unavailable", ""):
+            return None
+        if dom == "input_text":
+            return s.state
+        try:
+            return float(s.state)
+        except ValueError:
+            return None
+
+    async def async_step_forbindelser(self, user_input=None) -> ConfigFlowResult:
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            fejl = _forbindelse_fejl(self.hass, user_input, kraev_noegle=False)
+            if not fejl:
+                for k, h in TEKST.items():
+                    v = user_input.get(k)
+                    if k == "emhass_noegle" and not v:
+                        continue  # tom = behold den nuværende nøgle
+                    await self.hass.services.async_call("input_text", "set_value",
+                                                        {"entity_id": f"input_text.wattlas_{h}", "value": v or ""}, blocking=True)
+                return self.async_create_entry(data={})
+        nu = {k: self._hjaelper("input_text", h) for k, h in TEKST.items()}
+        d = lambda k: {"default": nu[k]} if nu.get(k) else {}  # noqa: E731
+        return self.async_show_form(step_id="forbindelser", errors=fejl, data_schema=vol.Schema({
+            vol.Required("emhass_adresse", **d("emhass_adresse")): sel.TextSelector(),
+            vol.Optional("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)),
+            vol.Required("solprognose", **d("solprognose")): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
+            vol.Required("vejr", **d("vejr")): sel.EntitySelector(sel.EntitySelectorConfig(domain="weather")),
+            vol.Optional("udetemperatur", **d("udetemperatur")): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="temperature")),
+        }))
+
+    async def _tal(self, trin: str, user_input) -> ConfigFlowResult:
+        kanal = self.config_entry.data.get("kanal")
+        felter = _tal_felter(kanal, trin)
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            fejl = _tal_fejl(felter, user_input)
+            if not fejl:
+                tal = _med_a(kanal, {**(self.config_entry.data.get("tal") or {}), **{k: v for k, v in user_input.items() if v is not None}})
+                for k in set(felter) | (set(A_FRA_W) if kanal in HOEJVOLT else set()):
+                    if tal.get(k) is not None:
+                        await self.hass.services.async_call("input_number", "set_value",
+                                                            {"entity_id": f"input_number.wattlas_{k}", "value": tal[k]}, blocking=True)
+                # gemmes også i opsætningen, så en geninstallation (fjern + tilføj) husker dem
+                self.hass.config_entries.async_update_entry(self.config_entry, data={**self.config_entry.data, "tal": tal})
+                return self.async_create_entry(data={})
+        nu = {k: self._hjaelper("input_number", k) for k in felter}
+        return self.async_show_form(step_id=trin, data_schema=_tal_skema(felter, nu), errors=fejl)
+
+    async def async_step_batteri(self, user_input=None) -> ConfigFlowResult:
+        return await self._tal("batteri", user_input)
+
+    async def async_step_elnet(self, user_input=None) -> ConfigFlowResult:
+        return await self._tal("elnet", user_input)
+
+    async def async_step_priser(self, user_input=None) -> ConfigFlowResult:
+        return await self._tal("priser", user_input)

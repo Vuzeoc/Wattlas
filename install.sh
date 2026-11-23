@@ -13,7 +13,7 @@
 set -eu
 
 VERSION="${WATTLAS_VERSION:-}"
-REPO="Vuzeoc/wattlas"
+REPO="Vuzeoc/Wattlas"
 CONFIG="/config"
 KILDE=""
 
@@ -24,7 +24,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --kilde) [ $# -ge 2 ] || brug; KILDE="$2"; shift ;;
     --config) [ $# -ge 2 ] || brug; CONFIG="$2"; shift ;;
-    deye|sunmate|huawei|--prefix|--inverter2*)
+    deye|sunmate|huawei|growatt|sonnen|--prefix|--inverter2*)
       fejl "Inverter, prefix og ekstra inverter vælges nu i opsætningen (Tilføj integration → Wattlas). Kør scriptet uden de valg." ;;
     -h|--help) brug ;;
     *) echo "Ukendt valg: $1" >&2; brug ;;

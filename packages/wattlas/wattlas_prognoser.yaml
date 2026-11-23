@@ -1,0 +1,94 @@
+# Wattlas – to sensorer til overblik og egne automationer (læser kun; styrer intet).
+template:
+  # Hvor længe rækker batteriet? Læst ud af den godkendte plan med samme gyldighedskrav som reguleringen (schema 1,
+  # højst 2 timer gammel). Planens SOC gælder ved slutningen af hver halve time; bunden er reserven (mindst 15 %).
+  - triggers:
+      - trigger: time_pattern
+        minutes: /1
+      - trigger: state
+        entity_id: [sensor.emhass_gemt_plan, input_number.wattlas_reserve]
+      - trigger: homeassistant
+        event: start
+    actions:
+      - variables:
+          t: "{{ as_timestamp(now()) }}"
+          gyldig: >-
+            {{ state_attr('sensor.emhass_gemt_plan', 'schema') == 1
+               and 0 <= t - as_timestamp(states('sensor.emhass_gemt_plan'), 0) < 7200 }}
+          bund: "{{ [15, states('input_number.wattlas_reserve') | float(15)] | max }}"
+          plan: >-
+            {% set ns = namespace(tom=none, soc=101, kl=none, fuld=none, slut=none) %}
+            {% for r in (state_attr('sensor.emhass_gemt_plan', 'rows') or []) if gyldig
+                 and r | count == 4 and is_number(r[0]) and is_number(r[3]) and r[0] | float + 1800 > t %}
+              {% set slut = r[0] | float + 1800 %}{% set soc = r[3] | float %}
+              {% if ns.tom is none and soc <= bund + 1 %}{% set ns.tom = slut %}{% endif %}
+              {% if soc < ns.soc %}{% set ns.soc = soc %}{% set ns.kl = slut %}{% endif %}
+              {% if ns.fuld is none and soc >= 99 %}{% set ns.fuld = slut %}{% endif %}
+              {% set ns.slut = slut %}
+            {% endfor %}
+            {{ dict(tom=ns.tom, soc=ns.soc if ns.kl is not none else none, kl=ns.kl, fuld=ns.fuld, slut=ns.slut) }}
+    sensor:
+      - name: Wattlas batteriet rækker til
+        unique_id: wattlas_batteri_raekker_til
+        default_entity_id: sensor.wattlas_batteri_raekker_til
+        device_class: timestamp
+        icon: mdi:battery-clock
+        availability: "{{ plan.slut is not none }}"
+        state: "{{ (plan.tom if plan.tom is not none else plan.slut) | as_datetime | as_local }}"
+        attributes:
+          hele_planen: "{{ plan.tom is none }}"
+          laveste_soc: "{{ plan.soc | round(0) | int if plan.soc is not none else none }}"
+          laveste_kl: "{{ plan.kl | timestamp_custom('%H:%M') if plan.kl is not none else none }}"
+          fuldt_kl: "{{ plan.fuld | timestamp_custom('%H:%M') if plan.fuld is not none else none }}"
+          tekst: >-
+            {% if plan.slut is none %}Ingen gyldig plan
+            {% elif plan.tom is not none %}Rækker til kl. {{ plan.tom | timestamp_custom('%H:%M') }} – derefter bruger huset nettet
+            {% else %}Rækker hele planen (til kl. {{ plan.slut | timestamp_custom('%H:%M') }}) – laveste {{ plan.soc | round(0) | int }} % kl. {{ plan.kl | timestamp_custom('%H:%M') }}{% endif %}
+
+  # Billigste hele time fra næste hele time og frem (købspris med tariffer for netop den time), til egne automationer –
+  # fx opvasker eller vaskemaskine. Kvarterpriser: timens gennemsnit, og kun timer med alle fire kvarterer.
+  - triggers:
+      - trigger: time_pattern
+        minutes: /1
+      - trigger: state
+        entity_id: sensor.energi_data_service
+        attribute: raw_tomorrow
+      - trigger: state
+        entity_id: [input_number.wattlas_nettarif_lav, input_number.wattlas_nettarif_hoej, input_number.wattlas_nettarif_spids,
+                    input_number.wattlas_elafgift, input_number.wattlas_tillaeg]
+      - trigger: homeassistant
+        event: start
+    actions:
+      - variables:
+          billigst: >-
+            {# fra næste hele time – men timen, der lige er startet, holdes 1 min, så en tidspunkt-udløser på sensoren når at køre #}
+            {% set fra = ((as_timestamp(now()) - 60) // 3600 + 1) * 3600 %}
+            {% set ns = namespace(t={}, n={}) %}
+            {% for p in (state_attr('sensor.energi_data_service', 'raw_today') or []) + (state_attr('sensor.energi_data_service', 'raw_tomorrow') or [])
+                 if is_number(p.price) and as_timestamp(p.hour, 0) >= fra %}
+              {% set h = ((as_timestamp(p.hour) // 3600) * 3600) | int | string %}
+              {% set ns.t = dict(ns.t, **{h: ns.t.get(h, 0) + p.price | float}) %}
+              {% set ns.n = dict(ns.n, **{h: ns.n.get(h, 0) + 1}) %}
+            {% endfor %}
+            {% set fuld = 4 if ns.n and ns.n.values() | max == 4 else 1 %}
+            {% set b = namespace(start=none, pris=none) %}
+            {% for h, sum in ns.t.items() if ns.n[h] == fuld %}
+              {% set time = h | int | timestamp_custom('%H') | int %}
+              {% set net = states('input_number.wattlas_nettarif_lav') | float(0) if time < 6
+                 else states('input_number.wattlas_nettarif_spids') | float(0) if 17 <= time < 21
+                 else states('input_number.wattlas_nettarif_hoej') | float(0) %}
+              {% set pris = sum / fuld + (net + states('input_number.wattlas_elafgift') | float(0)) * 1.25 + states('input_number.wattlas_tillaeg') | float(0) %}
+              {% if b.pris is none or pris < b.pris %}{% set b.start = h | int %}{% set b.pris = pris %}{% endif %}
+            {% endfor %}
+            {{ dict(start=b.start, pris=b.pris) }}
+    sensor:
+      - name: Wattlas billigste time
+        unique_id: wattlas_billigste_time
+        default_entity_id: sensor.wattlas_billigste_time
+        device_class: timestamp
+        icon: mdi:clock-check-outline
+        availability: "{{ billigst.start is not none }}"
+        state: "{{ billigst.start | as_datetime | as_local }}"
+        attributes:
+          pris: "{{ billigst.pris | round(2) if billigst.pris is not none else none }}"
+          slut: "{{ (billigst.start + 3600) | as_datetime | as_local if billigst.start is not none else none }}"

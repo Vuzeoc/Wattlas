@@ -16,6 +16,7 @@ faser, spænding, batteriets strømme og reserve) gælder altid, uanset hvad du 
 1. **Se planen an, før den styrer.** Når indstillingerne er sat, laver EMHASS planer, og appen virker, men inverteren
    røres først, når du slår **Wattlas styrer batteriet** til. Kig på *Planens logik* et døgn eller to: giver
    beslutningerne mening, og består de 7 tjek?
+   Vil du se, præcis hvad Wattlas ville sende til inverteren, så slå **Skygge (vis kun)** til sammen med styringen (se nedenfor).
    De første 3 dage kender Wattlas ikke husets forbrugsmønster endnu og regner med forbruget lige nu (eller de dage,
    der er gået). Derefter bruger den gennemsnittet af den sidste uge, justeret efter udetemperaturen.
 2. **Slå styringen til, mens du er hjemme.** Hold øje med *Overvågning* og med inverterens egen app den første dag.
@@ -33,7 +34,8 @@ Normalt skal du ingenting. Det, folk typisk bruger:
 | Gæster, ferie eller et dyrt apparat skal køre i aften | **Gem batteriet** nogle timer i forvejen, eller en regel |
 | Strømmen er dyr nu, men planen venter | **Brug batteriet** |
 | Vinter (lidt sol, kolde nætter) | hæv **Reserve** til 20–30 % |
-| Netselskabet skifter tarif (sommer/vinter) | ret de tre nettarif-helpers (se [KONFIGURATION.md](KONFIGURATION.md)) |
+| Netselskabet skifter tarif (sommer/vinter) | Indstillinger → Enheder og tjenester → Wattlas → **Konfigurer** → *Priser* |
+| Forkert tal i opsætningen (fx fasegrænse, strømme i A) | samme sted: **Konfigurer** → *Batteri* eller *Elnet* – ændringen bruges med det samme |
 | Arbejde på inverter eller batteri | slå **Wattlas styrer batteriet** fra først |
 | Ny version af Wattlas | opdatér *Wattlas* i Markedspladsen, og tryk *Genstart* under Reparationer; dine indstillinger bevares |
 
@@ -42,6 +44,11 @@ Normalt skal du ingenting. Det, folk typisk bruger:
 ### Øverst: hvad sker der nu
 Den store linje fortæller, hvad batteriet gør lige nu (lader fra sol eller net, forsyner huset eller hviler), og om planen
 er frisk. *Planens logik ›* forklarer hvorfor.
+
+**Hvorfor køber huset strøm, når batteriet ikke er tomt?** Det er bevidst. Rækker batteriet ikke til alle de dyre timer,
+lader planen det kun dække en del af huset (afladningen holdes under en grænse i watt), og resten købes fra nettet, mens
+prisen er lavere. Batteriet gemmes så til de dyreste timer. Det ses i *Planens logik* som en halv time, hvor både batteri
+og net forsyner huset.
 
 ### Manuel tilsidesættelse
 Til de gange, hvor du ved noget, planen ikke ved. Vælg først **varighed** (30 min, 1, 2 eller 4 timer eller til midnat),
@@ -68,6 +75,14 @@ Disse tal sendes med til EMHASS ved hver beregning. Planen tager altså højde f
 | **Batterislid** | hvad en afladet kWh koster i slid | batteriets pris / (kapacitet × cykler). Højere = færre små runder |
 | **Ugentlig fuldladning** | lader til 100 % mindst én gang om ugen | lad den være slået til; LiFePO4-celler skal balanceres |
 | **Wattlas styrer batteriet** | hovedafbryderen | slå fra = inverteren kører selvforbrug med 15 % reserve |
+| **Skygge (vis kun)** | Wattlas planlægger og regulerer som normalt, men skriver intet til inverteren | til et nyt anlæg, en eksperimentel styrekanal eller ved siden af den styring, du bruger i dag. Slå både styringen og skyggen til |
+
+**Skygge:** øverst på siden står så *Wattlas i skygge* og fx *Ville lade fra nettet med ca. 40 A*. Den fulde liste over,
+hvad Wattlas ville have skrevet (ladestrøm, mål-SOC og effekt pr. tidsprogram, netladning og solsalg), står i
+`sensor.wattlas_skygge` (egenskaben `ville`). Slår du skyggen til, mens Wattlas styrer, sættes inverteren først tilbage til
+selvforbrug; slår du den fra, overtager Wattlas på den normale måde. Skyggen gælder inverteren – en *fleksibel forbruger*,
+du selv har slået til, følger stadig planen. Økonomien måler, hvad batteriet faktisk har sparet, også i skygge (altså med
+den anden styring).
 
 Er du i tvivl om en ændring, så prøv den i **Hvad-hvis** først.
 
@@ -141,13 +156,21 @@ Kun til aflæsning. Inverterens indstillinger ændres i inverteren eller Solarma
 ## Wattlas (appen)
 | Fane | Indhold |
 |---|---|
-| **Live** | energiflowet lige nu, hvad strømmen koster, sparet i dag og dagen time for time |
+| **Live** | energiflowet lige nu, hvad strømmen koster, sparet i dag, *Fremad* (hvor længe batteriet rækker og den billigste time) og dagen time for time |
 | **Økonomi** | sparet pr. dag, uge, måned og år, mål, tilbagebetalingstid og resultater pr. dag |
 | **Historik** | produktion, forbrug, salg, køb og batteri pr. måned, 30 dage eller år |
 | **Elpris** | købs- og salgspris time for time i dag og i morgen, inkl. tariffer |
 | **Solprognose** | prognose mod målt produktion i dag og de næste dage |
 
 Søndag aften kommer der en ugerapport som besked.
+
+**Til egne automationer:**
+
+| Sensor | Hvad |
+|---|---|
+| `sensor.wattlas_batteri_raekker_til` | tidspunktet, hvor planen når reserven (derefter bruger huset nettet). Når den ikke reserven, er det planens slutning, og egenskaben `hele_planen` er `true`. Også `laveste_soc`, `laveste_kl`, `fuldt_kl` og `tekst` |
+| `sensor.wattlas_billigste_time` | starten på den billigste hele time fra næste time og frem (købspris med tariffer), egenskaben `pris` i kr./kWh. Fx: start opvaskeren med en *tidspunkt*-udløser på sensoren |
+| `sensor.wattlas_skygge` | i skygge: hvad Wattlas ville have gjort |
 
 ## Når noget går galt
 

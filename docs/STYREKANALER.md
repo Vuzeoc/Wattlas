@@ -3,6 +3,9 @@
 Kernen (`packages/wattlas/`) kender ikke din inverter. Den læser og skriver kun **Wattlas-entiteter**. En styrekanal er en
 pakke, der oversætter dem til inverterens rigtige entiteter. Installér præcis én.
 
+**Eksperimentel kanal eller nyt anlæg?** Kør først med **Skygge (vis kun)** slået til (Wattlas Styring → Styring): Wattlas
+viser så, hvad den ville skrive til inverteren, uden at skrive det. Ser det rigtigt ud et døgn, så slå skyggen fra.
+
 ## Kontrakten
 
 En styrekanal skal definere:
@@ -48,6 +51,23 @@ med Solarman som reserve. Uden den bruges Solarman.
 
 **Sunsynk / Sol-Ark og andre Deye-kloner** bruger typisk samme Modbus-registre. Hedder dine Solarman-entiteter det samme
 (efter prefix), virker Deye-kanalen direkte. Ellers kopiér den og ret navnene.
+
+## To Deye i parallel (`styrekanaler/deye_parallel`) – eksperimentel
+
+Til to ens Deye-hybrid-invertere i master/slave med fælles batteri, hver med sin egen Solarman-logger i ha-solarman.
+Opsætningen spørger først efter masterens *PV power* (den, CT'erne/elmåleren sidder på) og derefter slavens.
+
+- **Styring:** der skrives kun til masteren. Deye kopierer selv indstillingerne til slaven over parallelkablet (brugere
+  fraråder at skrive til begge – det kan bringe dem ud af takt). Ladestrøm (A) og programmernes effekt (W) gælder pr. inverter,
+  så masteren får halvdelen (rundet ned): summen bliver højst det, planen beder om.
+- **Vagt:** følger slaven ikke masteren (tidsprogrammer, netladning, strøm) inden for 3 minutter, er styrekanalen ikke klar,
+  og Wattlas holder op med at styre – så kan slaven ikke lade fra nettet på egen hånd uden fasegrænsen.
+- **Målinger:** batteri og sol lægges sammen; SOC og spænding fra masteren (fælles batteri); nettet og de tre faser fra
+  masterens CT'er (hele huset); husforbrug = net + sol + batteri. Køb/salg-tællere fra masteren.
+- **Status:** kun *Normal*, når begge er det – en slave i fejl stopper styringen. Forbindelsen kræver begge.
+- Grænserne (maks. ladestrøm, netladestrøm) er summen af begge inverteres – sæt opsætningens tal for hele anlægget.
+- Ikke kørt på et rigtigt parallelanlæg endnu – kør et døgn i skygge først, og hold øje med den første nat med styring: at begge invertere får de samme programmer, og at
+  købet holder sig under fasegrænsen.
 
 ## Deye via ESPHome (`styrekanaler/deye_esphome`) – eksperimentel
 
@@ -174,6 +194,29 @@ Sådan styres:
 Kanalen er bygget ud fra Growatts VPP-protokol (V2.05) og solax_modbus' kildekode og afprøvet med HA's
 konfigurationstjek og regnestykke-tests – **ikke** på en rigtig Growatt. Hold øje med den første nat: at batteriet lader
 ved netladning, at *VPP Remote Control* slås fra igen bagefter, og at købet ikke overstiger din fasegrænse.
+
+## SonnenBatterie (`styrekanaler/sonnen`) – eksperimentel, ikke kørt i drift
+
+Bidrag fra [hornbech](https://github.com/hornbech). Til SonnenBatterie med det lokale API v2 (firmware 1.40 eller nyere) –
+ingen HA-integration: kanalen læser batteriet med REST-sensorer og styrer det med `rest_command`. Kræver, at
+**JSON API for Reading** og **JSON API for Writing** er slået til i batteriets dashboard under *Software-Integration*.
+Adresse og token indtastes i opsætningen (den tjekker, at batteriet svarer) og sættes ind i kanalens filer – også ved
+hver opdatering. Får batteriet en ny adresse eller et nyt token, rettes det under *Konfigurer → SonnenBatterie* (kræver genstart).
+
+- **Netladning:** manual mode (`EM_OperatingMode=1`) med et ladnings-setpoint i W: Wattlas skriver strøm i A, kanalen ganger
+  med batterispændingen (Ubat) og sender W til `POST /api/v2/setpoint/charge/{W}`. Når netladningen slås fra, ryddes
+  setpointene, og batteriet går i selvforbrug (`EM_OperatingMode=2`).
+- **Tidsprogrammer** p1–p6 findes ikke i Sonnens API: kontakterne og program-SOC/-effekt huskes kun i Home Assistant,
+  og Wattlas stopper selv ladningen ved programmets mål-SOC. Derfor virker *gem batteriet* ikke – uden netladning kører
+  batteriet altid selvforbrug.
+- **Solsalg kan ikke styres** (fw 1.40.5 har ingen feed-in-nøgle). Kontakten skifter, men batteriet påvirkes ikke.
+- **Fasegrænse:** batteriet måler kun husets forbrug pr. fase, ikke nettet, og Sonnen eco er enfaset (kernens fasebudget regner
+  med en trefaset inverter). Kanalen sætter derfor netladestrømmens maks. til det, den værste fase har plads til:
+  (fasegrænse × V − husets forbrug på fasen) × 0,95 / batterispændingen – uden fradrag for sol. Forsigtigt, men aldrig for meget.
+- **Går Home Assistant ned under netladning,** bliver batteriet i manual mode og lader videre med det sidste setpoint,
+  til det er fuldt. Sonnen har ingen nedtælling som Huawei og Growatt. Sæt batteriet i selvforbrug i dets app, hvis HA er nede længe.
+- **Dagstællere og totaler** findes ikke i API'et og laves af kanalen med HA's `integration` og `utility_meter`.
+- Læsningen er bygget mod en rigtig SonnenBatterie (fw 1.40.5); styringen er ikke kørt i drift. Kør et døgn i skygge først.
 
 ## Lav din egen
 
