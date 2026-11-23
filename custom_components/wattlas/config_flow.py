@@ -20,10 +20,13 @@ from . import installer
 from .const import DOMAIN, EMHASS_SLUG, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TRIN
 
 VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
-SUFFIX = {"deye": ("sensor", "_pv_power"), "sunmate": ("number", "_timepoint_1_power"), "huawei": ("sensor", "_input_power")}
-# Huawei (LUNA2000) er et højvoltbatteri; kernen regner i A ved et lavvoltbatteri. Kanalen bruger derfor en fast
-# beregningsspænding, og A-indstillingerne udregnes fra W. Samme tal står i styrekanalen (styrekanaler/huawei).
+SUFFIX = {"deye": ("sensor", "_pv_power"), "sunmate": ("number", "_timepoint_1_power"), "huawei": ("sensor", "_input_power"),
+          "growatt": ("sensor", "_battery_soc"),
+          "deye_esphome": ("sensor", "_pv1_power")}
+# Huawei (LUNA2000) og Growatt (ARK/APX) er højvoltbatterier; kernen regner i A ved et lavvoltbatteri. Kanalerne bruger derfor
+# en fast beregningsspænding, og A-indstillingerne udregnes fra W. Samme tal står i styrekanalerne (styrekanaler/huawei, growatt).
 HUAWEI_V = 50
+HOEJVOLT = ("huawei", "huawei_emma", "growatt")
 A_FRA_W = {"maks_ladestroem_a": "maks_ladeeffekt_w", "maks_afladestroem_a": "maks_afladeeffekt_w",
            "maks_netladestroem_a": "maks_netladeeffekt_w"}
 
@@ -39,6 +42,15 @@ def _emhass(hass) -> tuple[str | None, str | None]:
         if a.get("slug") == EMHASS_SLUG or str(a.get("slug", "")).endswith("_emhass"):
             return a.get("state") or "installed", f"http://{a['slug'].replace('_', '-')}:5000"
     return "mangler", None
+
+
+def _database(hass) -> str | None:
+    """Recorderens databasetype ("sqlite", "mysql", "postgresql"), eller None hvis den ikke kendes."""
+    try:
+        from homeassistant.components.recorder import get_instance
+        return str(get_instance(hass).dialect_name or "") or None
+    except Exception:  # recorderen er ikke sat op (endnu) eller slået fra
+        return None
 
 
 def _platform_entitet(hass, domæne: str, platform: str) -> str | None:
@@ -87,7 +99,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_inverter()
         return self.async_show_form(step_id="user", data_schema=vol.Schema({
             vol.Required("kanal", default="deye"): sel.SelectSelector(sel.SelectSelectorConfig(
-                options=["deye", "sunmate", "huawei"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
+                options=["deye", "deye_esphome", "sunmate", "huawei", "growatt"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
 
     # 2 – vælg inverteren (de fleste har kun én)
     async def async_step_inverter(self, user_input=None) -> ConfigFlowResult:
@@ -204,6 +216,9 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             adv.append("⚠️ Ingen solprognose fundet – *Helios Forecast* fra Markedspladsen anbefales (se SOLPROGNOSE.md).")
         if not hass.states.async_all("weather"):
             adv.append("⚠️ Ingen vejr-entitet fundet – tilføj fx Met.no.")
+        if _database(hass) not in (None, "sqlite"):
+            adv.append("⚠️ Home Assistant bruger ikke standarddatabasen (SQLite). Husprognosen og appens daghistorik henter data med "
+                       "SQL, der kun virker med SQLite – de dele mangler. Resten af Wattlas virker.")
         pkg = await hass.async_add_executor_job(installer.packages_mappe, hass.config.config_dir)
         if not pkg:
             tekst = await hass.async_add_executor_job((Path(hass.config.config_dir) / "configuration.yaml").read_text, "utf-8")
@@ -249,7 +264,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def _felter(self, trin: str) -> list[str]:
         """Indstillingerne i trinnet. Huawei: A-grænserne udregnes fra W (se HUAWEI_V) og spørges ikke om."""
-        return [k for k in TRIN[trin] if not (str(self.d.get("kanal")).startswith("huawei") and k in A_FRA_W)]
+        return [k for k in TRIN[trin] if not (self.d.get("kanal") in HOEJVOLT and k in A_FRA_W)]
 
     def _tal_skema(self, trin: str) -> vol.Schema:
         felter = {}
@@ -268,7 +283,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             if not fejl:
                 tal = self.d.setdefault("tal", {})
                 tal.update({k: v for k, v in user_input.items() if v is not None})
-                if str(self.d.get("kanal")).startswith("huawei"):
+                if self.d.get("kanal") in HOEJVOLT:
                     tal.update({a: round(tal[w] / HUAWEI_V) for a, w in A_FRA_W.items() if (tal.get(w) or 0) > 0})
                 return await naeste()
         return self.async_show_form(step_id=trin, data_schema=self._tal_skema(trin), errors=fejl)

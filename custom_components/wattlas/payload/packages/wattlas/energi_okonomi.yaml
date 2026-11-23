@@ -125,7 +125,7 @@ template:
         unit_of_measurement: "%"
         availability: "{{ states('sensor.wattlas_total_forbrug') | float(0) > 0 and is_number(states('sensor.wattlas_total_koebt')) }}"
         state: >-
-          {{ (100 * (1 - states('sensor.wattlas_total_koebt') | float / states('sensor.wattlas_total_forbrug') | float)) | round(0) }}
+          {{ ([0, 100 * (1 - states('sensor.wattlas_total_koebt') | float / states('sensor.wattlas_total_forbrug') | float)] | max) | round(0) }}
       - name: Egetforbrug af solstrøm i dag
         unique_id: egetforbrug_i_dag
         default_entity_id: sensor.egetforbrug_i_dag

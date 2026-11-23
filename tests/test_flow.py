@@ -279,6 +279,90 @@ async def main():
     print('E Huawei med EMMA opdatering: OK')
     await hass.async_stop(force=True)
 
+    # G: Growatt (solax_modbus) – én enhed valgt via batteriets SOC, A-grænser fra W, og opdateringen består HA's konfigurationstjek
+    hass, cfg = await ny_hass('default_config:\n')
+    fm = hass.config_entries.flow
+    hass.states.async_set('sensor.mod_10k_battery_soc', '50')
+    r = await fm.async_init('wattlas', context={'source': 'user'})
+    r = await fm.async_configure(r['flow_id'], {'kanal': 'growatt'})
+    fejl = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.weather_temp', 'inverter2': False})
+    assert fejl['errors'] == {'inverter': 'forkert_entitet'}, fejl
+    r = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.mod_10k_battery_soc', 'inverter2': False})
+    assert r['step_id'] == 'tjek' and 'select.mod_10k_vpp_status' in r['description_placeholders']['liste'] or 'entiteter' in r['description_placeholders']['liste'], r
+    r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
+    r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
+                                               'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    assert r['step_id'] == 'batteri' and not any(str(k).endswith('_a') for k in r['data_schema'].schema), 'Growatt spørges ikke om A'
+    r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
+    for t in ('elnet', 'priser'):
+        r = await fm.async_configure(r['flow_id'], TAL[t])
+    assert r['type'] == 'create_entry', r
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    assert entry.data['kanal'] == 'growatt' and entry.data['prefix'] == 'mod_10k' and entry.data['tal']['maks_ladestroem_a'] == 200, entry.data
+    assert 'number.mod_10k_vpp_power' in (cfg / 'packages/wattlas_kanal/wattlas_kanal_growatt.yaml').read_text(encoding='utf-8')
+    print('G Growatt: OK')
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+    entry = await genindlaes(hass, genstart=True)
+    assert issue(hass, 'opdatering_fejlede') is None and entry.data['version'] != '0.0.1', 'Growatt-kanalen skal bestå konfigurationstjekket'
+    print('G Growatt opdatering: OK')
+    await hass.async_stop(force=True)
+
+    # E2: Deye via ESPHome – valgt via PV1 Power, A-grænser spørges om (lavvolt), og opdateringen består konfigurationstjekket
+    hass, cfg = await ny_hass('default_config:\n')
+    await opsaet(hass, 'deye_esphome', 'sensor.sun12k_pv1_power')
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    assert entry.data['kanal'] == 'deye_esphome' and entry.data['prefix'] == 'sun12k', entry.data
+    assert 'switch.sun12k_time_point_3_charge_enable' in (cfg / 'packages/wattlas_kanal/wattlas_kanal_deye.yaml').read_text(encoding='utf-8')
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+    entry = await genindlaes(hass, genstart=True)
+    assert issue(hass, 'opdatering_fejlede') is None and entry.data['version'] != '0.0.1', 'ESPHome-kanalen skal bestå konfigurationstjekket'
+    print('E2 Deye via ESPHome + opdatering: OK')
+    await hass.async_stop(force=True)
+
+    # R: skift af styrekanal (fx Huawei → Growatt) efterlader registreringer; de gamle fjernes, og "_2"-tvillingen får navnet tilbage
+    hass, cfg = await ny_hass('default_config:\n')
+    from homeassistant.helpers import entity_registry as er
+    reg = er.async_get(hass)
+    W = sys.modules['custom_components.wattlas']
+    gammel = reg.async_get_or_create('sensor', 'template', 'wattlas_total_koebt', suggested_object_id='wattlas_total_koebt')
+    ny = reg.async_get_or_create('sensor', 'integration', 'wattlas_total_koebt', suggested_object_id='wattlas_total_koebt')
+    assert ny.entity_id == 'sensor.wattlas_total_koebt_2', ny.entity_id  # sådan ser fejlen ud
+    hass.states.async_set(ny.entity_id, '1.2')
+    reg.async_get_or_create('automation', 'automation', 'wattlas_huawei_netladning', suggested_object_id='wattlas_huawei_netladning')
+    reg.async_get_or_create('automation', 'automation', 'wattlas_min_egen', suggested_object_id='wattlas_min_egen',
+                            disabled_by=er.RegistryEntryDisabler.USER)  # brugerens egen, slået fra: har ingen tilstand
+    reg.async_get_or_create('sensor', 'template', 'wattlas_i_dag_ladet', suggested_object_id='wattlas_i_dag_ladet')  # står i filerne
+    reg.async_get_or_create('sensor', 'template', 'helt_anden', suggested_object_id='helt_anden')  # ikke Wattlas'
+    reg.async_get_or_create('sensor', 'template', 'emhass_min_egen', suggested_object_id='emhass_min_egen')  # brugerens egen EMHASS-sensor
+    for e in ('sensor.wattlas_total_koebt', 'automation.wattlas_huawei_netladning', 'sensor.wattlas_i_dag_ladet', 'sensor.helt_anden',
+              'sensor.emhass_min_egen'):
+        hass.states.async_set(e, 'unavailable', {'restored': True})  # sådan står efterladte registreringer efter en genstart
+    kendt = sys.modules['custom_components.wattlas.installer'].kendt_tekst()
+    assert 'wattlas_huawei_netladning' in kendt and 'emhass_min_egen' not in kendt
+    ryddet = W._ryd_efterladte(hass, 'unique_id: wattlas_i_dag_ladet\nunique_id: wattlas_total_koebt\n', kendt)
+    assert sorted(ryddet) == ['automation.wattlas_huawei_netladning', 'sensor.wattlas_total_koebt'], ryddet
+    assert reg.async_get_entity_id('sensor', 'integration', 'wattlas_total_koebt') == 'sensor.wattlas_total_koebt'
+    behold = ('sensor.wattlas_i_dag_ladet', 'sensor.helt_anden', 'automation.wattlas_min_egen', 'sensor.emhass_min_egen')
+    assert all(reg.async_get(e) for e in behold), [e for e in behold if not reg.async_get(e)]
+    assert W._ryd_efterladte(hass, '', kendt) == [], 'uden filer (fx midlertidig fejl) må kun tvillinger ryddes'
+    print('R kanalskift rydder efterladte registreringer: OK')
+    await hass.async_stop(force=True)
+
+    # D2: en anden database end SQLite (fx MariaDB) giver en advarsel i tjekket – husprognosen og historikken bruger SQLite-SQL
+    hass, cfg = await ny_hass('default_config:\n')
+    CF = sys.modules['custom_components.wattlas.config_flow']
+    rigtig_db, CF._database = CF._database, (lambda _h: 'mysql')
+    hass.states.async_set('sensor.min_inverter_pv_power', '0')
+    r = await hass.config_entries.flow.async_init('wattlas', context={'source': 'user'})
+    r = await hass.config_entries.flow.async_configure(r['flow_id'], {'kanal': 'deye'})
+    r = await hass.config_entries.flow.async_configure(r['flow_id'], {'inverter': 'sensor.min_inverter_pv_power', 'inverter2': False})
+    CF._database = rigtig_db
+    assert r['step_id'] == 'tjek' and 'SQLite' in r['description_placeholders']['liste'], r
+    assert CF._database(hass) is None, 'uden recorder kendes databasen ikke – ingen advarsel'
+    print('D2 advarsel ved anden database end SQLite: OK')
+    await hass.async_stop(force=True)
+
     # F: opdateret uden genstart (koden på disken er nyere end den version, HA læste ved start) → opsætningen beder om genstart
     hass, cfg = await ny_hass('default_config:\n')
     CF = sys.modules['custom_components.wattlas.config_flow']

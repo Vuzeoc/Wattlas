@@ -175,6 +175,9 @@ template:
           - action: huawei_solar.stop_forcible_charge
             continue_on_error: true
             data: {device_id: "{{ device_id('sensor.min_luna_state_of_capacity') }}"}
+          # stoppet her – så sender automationen ikke en stop-kommando mere (hver er flere skrivninger i inverteren)
+          - action: input_boolean.turn_off
+            target: {entity_id: input_boolean.wattlas_huawei_tvangsladning}
       - name: Wattlas solsalg
         unique_id: wattlas_solsalg
         default_entity_id: switch.wattlas_solsalg

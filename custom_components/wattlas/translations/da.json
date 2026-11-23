@@ -3,16 +3,16 @@
     "step": {
       "user": {
         "title": "Wattlas – vælg inverter-type",
-        "description": "Wattlas styrer dit batteri efter elprisen med EMHASS. Vælg, hvordan Home Assistant taler med din inverter.",
+        "description": "Wattlas styrer dit batteri efter elprisen med EMHASS. Vælg, hvordan Home Assistant taler med din inverter.\n\n**Growatt** (eksperimentel): kun trefasede hybrid-invertere med Growatt-elmåler og lokal forbindelse via *solax_modbus* – ikke Growatts sky. Sæt *VPP Status* til *Enabled* i solax_modbus først.",
         "data": {
           "kanal": "Inverter"
         }
       },
       "inverter": {
         "title": "Din inverter",
-        "description": "Vælg inverterens solcelle-effekt (entiteten slutter på `{suffix}`). De fleste har kun én inverter og skal ikke andet.\n\nHar du også en inverter **uden batteri** (fx et ældre anlæg), så slå *Ekstra inverter* til.",
+        "description": "Vælg inverterens entitet, der slutter på `{suffix}` (Deye og Huawei: solcelle-effekten, Deye via ESPHome: *PV1 Power*, Growatt: batteriets SOC). De fleste har kun én inverter og skal ikke andet.\n\nHar du også en inverter **uden batteri** (fx et ældre anlæg), så slå *Ekstra inverter* til.",
         "data": {
-          "inverter": "Inverterens solcelle-effekt",
+          "inverter": "Inverterens entitet",
           "inverter2": "Jeg har også en ekstra inverter uden batteri"
         }
       },
@@ -146,8 +146,10 @@
     "kanal": {
       "options": {
         "deye": "Deye (via Solarman)",
+        "deye_esphome": "Deye (via ESPHome, klatremis) – eksperimentel",
         "sunmate": "SunMate",
-        "huawei": "Huawei SUN2000 + LUNA2000 (via Huawei Solar)"
+        "huawei": "Huawei SUN2000 + LUNA2000 (via Huawei Solar)",
+        "growatt": "Growatt MOD/MID TL3-XH (via solax_modbus, lokalt) – eksperimentel"
       }
     },
     "elmaaler": {

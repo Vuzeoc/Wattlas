@@ -25,12 +25,12 @@ template:
         {% set price=namespace(values=[]) %}
         {% for r in (state_attr('sensor.energi_data_service','raw_today') or [])+(state_attr('sensor.energi_data_service','raw_tomorrow') or []) %}
         {% set rt=as_timestamp(r.get('hour'),0) %}
-        {% if rt<=t<rt+3600 and is_number(r.get('price')) %}{% set price.values=price.values+[r.price|float] %}{% endif %}
+        {% if rt<=t<rt+3600 and is_number(r.get('price')) %}{% set price.values=price.values+[dict(t=rt,p=r.price|float)] %}{% endif %}
         {% endfor %}
-        {% if price.values|count!=1 %}{% set sample.ok=false %}{% endif %}
+        {% if price.values|count==0 %}{% set sample.ok=false %}{% endif %}
         {% set l=states(ids[0])|float(0) %}{% set g=states(ids[1])|float(0) %}{% set pv=states(ids[2])|float(0) %}{% set b=states(ids[3])|float(0) %}{% set soc=states(ids[4])|float(0) %}
         {% if l<0 or pv<0 or not 0<=soc<=100 %}{% set sample.ok=false %}{% endif %}
-        {% set spot=price.values[0] if price.values|count==1 else 0 %}
+        {% set spot=(price.values|sort(attribute='t')|last).p if price.values else 0 %}
         {% set net=(states('input_number.wattlas_nettarif_lav')|float(0)) if now().hour<6 else (states('input_number.wattlas_nettarif_spids')|float(0)) if 17<=now().hour<21 else (states('input_number.wattlas_nettarif_hoej')|float(0)) %}
         {% set buy=spot+(net+(states('input_number.wattlas_elafgift')|float(0)))*1.25+(states('input_number.wattlas_tillaeg')|float(0)) %}{% set sell=spot/1.25-(states('input_number.wattlas_salg_nettarif')|float(0))*1.25-(states('input_number.wattlas_salg_gebyr')|float(0)) %}
         {% set dt=t-old.get('t',t) %}

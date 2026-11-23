@@ -2,6 +2,24 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.4.0
+- **Ny styrekanal: Growatt** (eksperimentel) – trefasede hybrid-invertere (MOD/MID TL3-XH) via *solax_modbus* med lokal
+  forbindelse. Styrer gennem Growatts VPP-fjernstyring med 10 minutters nedtælling, så inverteren selv går tilbage til normal
+  drift, hvis Home Assistant stopper. Growatts elmåler giver ikke fasetal, så fasegrænsen regner med den værste fordeling
+  (hele huset på én fase). Ikke kørt på et rigtigt anlæg endnu
+- **Ny styrekanal: Deye via ESPHome** (eksperimentel) – til dem, der læser Deye direkte med en ESP32 + RS485
+  (klatremis/esphome-for-deye) i stedet for Solarman-loggeren. Samme styring som Deye-kanalen
+- **Skift af styrekanal** (fx fra Deye eller Huawei til Growatt) efterlod de gamle registreringer, så nogle sensorer fik "_2" i
+  navnet, og køb/salg holdt op med at tælle i appen. Wattlas rydder nu selv op efter genstart (gælder også, hvis man har
+  fjernet Wattlas og sat det op igen)
+- **Spotpriser pr. kvarter:** planen og besparelsesregnskabet kræver ikke længere præcis én pris pr. time. Med kvarterpriser
+  bruges halvtimens gennemsnit (før faldt planen ud). Med timepriser er alt som før
+- Batteriets slid i strømpris-tallene følger nu din indstilling (før altid 0,25 kr./kWh)
+- Opsætningen advarer, hvis Home Assistant ikke bruger standarddatabasen (SQLite) – husprognosen og appens historik kræver den
+- "Selvforsyning i alt" kan ikke længere blive negativ
+- Huawei: kun én stop-kommando, når netladning slås fra (før to)
+- Ingen andre ændringer i styringen for Deye, SunMate og Huawei
+
 ## 0.3.1
 - **Huawei med EMMA:** fortegnet på EMMA's målinger var vendt forkert (EMMA's *Feed in power* er positiv ved køb – nu bekræftet
   med data fra en rigtig EMMA-A02). I 0.3.0 fik det regnestykke-tjekket til at afvise målingerne, så Wattlas ikke styrede

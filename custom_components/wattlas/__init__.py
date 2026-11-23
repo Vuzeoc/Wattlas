@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.helpers.start import async_at_started
@@ -24,6 +26,40 @@ TEKST = {"emhass_adresse": "emhass_adresse", "emhass_noegle": "emhass_noegle", "
 STYRING = "input_boolean.emhass_styring_aktiv"
 FULD = "input_boolean.emhass_fuld_opladning"
 VENT_S = 60  # så længe ventes der ved fjernelse på, at inverteren er sat til selvforbrug
+# platforme, Wattlas' YAML-pakker opretter entiteter med (deres registreringer bliver liggende, når filerne skifter)
+YAML_PLATFORME = {"template", "integration", "utility_meter", "automation", "script", "input_boolean", "input_number",
+                  "input_datetime", "input_text", "input_select"}
+
+
+def _ryd_efterladte(hass: HomeAssistant, tekst: str, kendt: str) -> list[str]:
+    """Rydder Wattlas-registreringer, som en tidligere styrekanal har efterladt (fx efter skift fra Huawei til Growatt).
+
+    Kanalerne laver de samme entiteter på forskellige platforme (sensor.wattlas_total_koebt er en template-sensor hos
+    Huawei og en integration-sensor hos Growatt). Den gamle registrering beholder navnet, og den nye får "_2" – så tæller
+    kort og økonomi ikke længere. En registrering fjernes kun, hvis den ikke har en levende entitet, OG enten en levende
+    "tvilling" med samme unique_id på en anden platform findes, eller dens unique_id ikke står i de installerede filer
+    (så en midlertidig YAML-fejl aldrig fjerner noget). Tvillingen får derefter det oprindelige navn tilbage.
+    Kun unique_id'er fra Wattlas' egne filer (`kendt`) røres – brugerens egne "emhass_…"-entiteter aldrig."""
+    reg = er.async_get(hass)
+    lever = lambda e: (s := hass.states.get(e.entity_id)) is not None and not s.attributes.get("restored")  # noqa: E731
+    wattlas = [e for e in reg.entities.values()
+               if e.platform in YAML_PLATFORME and str(e.unique_id).startswith(("wattlas_", "emhass_"))]
+    står_i = lambda t, uid: re.search(rf"\b{re.escape(uid)}\b", t) is not None  # noqa: E731
+    ryddet = []
+    for e in wattlas:
+        s = hass.states.get(e.entity_id)
+        if s is None or not s.attributes.get("restored"):  # lever, eller er slået fra (så har den ingen tilstand) – rør den ikke
+            continue
+        if not står_i(kendt, str(e.unique_id)):  # ikke Wattlas' egen
+            continue
+        tvilling = next((t for t in wattlas if t.unique_id == e.unique_id and t.platform != e.platform and lever(t)), None)
+        if tvilling is None and (not tekst or står_i(tekst, str(e.unique_id))):
+            continue
+        reg.async_remove(e.entity_id)
+        ryddet.append(e.entity_id)
+        if tvilling is not None and tvilling.entity_id == f"{e.entity_id}_2":
+            reg.async_update_entity(tvilling.entity_id, new_entity_id=e.entity_id)
+    return ryddet
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -56,6 +92,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if hass.data.get(GENSTART):
             return  # sensoren kommer fra de gamle pakker i hukommelsen (opdatering, eller fjernet og tilføjet uden genstart)
         ir.async_delete_issue(hass, DOMAIN, "genstart")
+        tekst = await hass.async_add_executor_job(installer.installeret_tekst, hass.config.config_dir)
+        kendt = await hass.async_add_executor_job(installer.kendt_tekst)
+        if ryddet := _ryd_efterladte(hass, tekst, kendt):
+            _LOGGER.info("Wattlas: fjernede %d efterladte registreringer fra en tidligere styrekanal: %s", len(ryddet), ", ".join(ryddet))
         d = entry.data  # frisk: opdateringen ovenfor kan have skrevet en ny version
         foer = d.get("overfoert")
         sat = set(foer) if isinstance(foer, list) else set()  # navne, der er overført – så et 0, brugeren selv sætter, får lov at stå

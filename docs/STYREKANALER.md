@@ -35,7 +35,7 @@ Tidsprogrammerne skifter kl. 01, 05, 09, 13, 17 og 21 (program 1 = 01–05 … p
 
 **Målinger** (`emhass_maalinger.yaml`): `sensor.emhass_m_*` for last, net, batteri (W, SOC, V, °C), inverter-status og
 temperatur, eksterne CT pr. fase (W) og netspænding pr. fase (V), plus `sensor.emhass_maalekilde` (`Deye`, `Solarman`,
-`SunMate` eller `Huawei`). Hvert sæt kontrolleres for alder (højst 90 s), før det bruges.
+`SunMate`, `Huawei`, `Growatt` eller `ESPHome`). Hvert sæt kontrolleres for alder (højst 90 s), før det bruges.
 
 ## Deye via Solarman (`styrekanaler/deye_solarman`)
 
@@ -48,6 +48,22 @@ med Solarman som reserve. Uden den bruges Solarman.
 
 **Sunsynk / Sol-Ark og andre Deye-kloner** bruger typisk samme Modbus-registre. Hedder dine Solarman-entiteter det samme
 (efter prefix), virker Deye-kanalen direkte. Ellers kopiér den og ret navnene.
+
+## Deye via ESPHome (`styrekanaler/deye_esphome`) – eksperimentel
+
+Til Deye 3-fasede lavvolt-invertere med en ESP32 + RS485-modul direkte på inverterens Modbus-port, sat op med
+[klatremis/esphome-for-deye](https://github.com/klatremis/esphome-for-deye) (bekræftet af forfatteren på SUN-12K-SG04LP3; 5–12 kW
+SG04LP3 nævnes). Samme registre og samme styring som Deye-kanalen – bare uden Solarman-loggeren. Opsætningen spørger efter
+*PV1 Power*; ESPHome-konfigurationens `device_type` (fx `sun12k`) er prefixet.
+
+- Navnene skal være dem fra klatremis' konfiguration. Har du omdøbt sensorer, viser opsætningens tjek, hvilke der mangler.
+- Tidsprogrammernes *charge enable* og *Time of Use* er kontakter i ESPHome (i Solarman valgmenuer) – kanalen bruger kontakterne.
+- Ingen mikroinverter/GEN-port og ingen ekstra inverter. PV = summen af de *PVn Power*-sensorer, der findes (klatremis har
+  PV1–PV2; har din inverter 3–4 MPPT'er, så tilføj PV3/PV4 i ESPHome med samme navnemønster).
+- Husforbrug = *Load totalpower* + *Out-of-grid–total power* (belastningsudgangen + forbruget på nettets side – som Solarmans *Load Power*).
+- Dagstællere for forbrug og batteri findes ikke i konfigurationen – Wattlas laver dem ud fra totalerne.
+- Inverterforbindelsen vurderes ud fra, hvornår *Running Status* sidst blev læst.
+- Kræver hardware (ESP32 + RS485-modul). Testet med HA's konfigurationstjek – **ikke** på en rigtig inverter.
 
 ## SunMate (`styrekanaler/sunmate`) – ikke testet
 
@@ -118,6 +134,46 @@ husforbrug, og de tre faser ≈ købet (EMMA's *Feed in power* er positiv ved k�
 skævt øjeblik er normalt), bruges målingerne ikke, og Wattlas styrer ikke. Det fanger et forkert
 fortegn på batteriet (og med EMMA også på salg og faser) inden for et par minutter – men det erstatter ikke, at du selv
 ser efter den første dag. Se `balance_ok` på `sensor.emhass_maalekilde`.
+
+## Growatt (`styrekanaler/growatt`) – eksperimentel, ikke kørt i drift
+
+Til trefasede Growatt-hybrid-invertere af typen GEN4 (fx MOD 5–10K TL3-XH, MID 15–30K TL3-XH) med Growatt-elmåler og
+højvoltbatteri (ARK/APX), tilsluttet **lokalt** via [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus)
+(Modbus TCP eller RS485-adapter). Opsætningen spørger efter batteriets SOC (`sensor.<navn>_battery_soc`); navnet på
+solax_modbus-forbindelsen er prefixet for alle entiteter.
+
+Forudsætninger:
+- Lokal forbindelse. **Growatts sky virker ikke:** den opdaterer hvert 5. minut, og fasegrænsen kræver målinger, der
+  højst er 90 sekunder gamle.
+- *VPP Status* = *Enabled* i solax_modbus (Growatts tilladelse til fjernstyring, register 30100).
+- Trefaset inverter (X3). Enfasede MIN TL-XH og ældre Growatt (GEN3/SPH, SPF) understøttes ikke.
+
+Sådan styres:
+- **Netladning** = Growatts VPP-fjernstyring (*VPP Remote Control*, *VPP Power* i %, *VPP Time*). Wattlas skriver en
+  nedtælling på 10 minutter og fornyer den hvert minut – går Home Assistant ned, går inverteren selv tilbage til normal drift.
+  *VPP AC Charge Max Power 2* sættes til den ønskede netladeeffekt som loft, og *VPP Power* rundes **ned** i trin på 5 %
+  af din maks. ladeeffekt. Ingen af disse registre gemmes i inverterens hukommelse, så hyppige skrivninger slider ikke.
+  *VPP Allow AC charging* slås til første gang (den gemmes i inverteren og bliver stående).
+- **Gem batteriet** = *VPP Power* 0 % (batteriet hverken lader eller aflader). Det stopper også solladning, så med
+  soloverskud (over 200 W) får inverteren lov at køre selv i stedet – overskuddet lades, intet aflades.
+  Growatt kan ikke begrænse afladningen til et bestemt antal W: et program med effekt over 0 W betyder fri afladning.
+- **Tidsprogrammer** findes ikke hos Growatt. Kanalen husker kernens seks programmer selv (som Huawei-kanalen).
+- **Solsalg fra** = *Grid Export Limit* sættes til 0 %, din egen grænse huskes og sættes tilbage. Virker kun, hvis
+  eksportbegrænsning (*Limit Grid Export*) allerede er slået til med måleren – ellers rører Wattlas den ikke.
+- **Højvoltbatteri:** fast beregningsspænding 50 V som Huawei-kanalen. Growatt melder ikke batteriets maks. effekt, så
+  kanalen bruger dine indstillinger for maks. lade- og afladeeffekt.
+- **Fasegrænse uden fasetal:** Growatts elmåler giver kun summen. Kanalen melder den værste fase, der kan opstå – hele
+  huset på én fase og inverteren fordelt ligeligt på tre: `(2 × husforbrug + net) / 3`. Netladningen holdes derved under
+  `3 × (fasegrænse × V − husforbrug)`. Det er forsigtigt (der lades mindre, end der måske er plads til), men aldrig for
+  meget, så længe inverteren er symmetrisk trefaset.
+- **Kommando-tjek:** beder Wattlas om ladning, men batteriet aflader, lades der tydeligt fra nettet, uden at elmåleren
+  viser køb (måler mangler eller sidder forkert), eller lades der mere fra nettet end bedt om (+25 % + 300 W – fx hvis
+  loftet *VPP AC Charge Max Power 2* ikke virker på din model), bruges målingerne ikke efter 2 minutter i træk, og
+  Wattlas styrer ikke.
+
+Kanalen er bygget ud fra Growatts VPP-protokol (V2.05) og solax_modbus' kildekode og afprøvet med HA's
+konfigurationstjek og regnestykke-tests – **ikke** på en rigtig Growatt. Hold øje med den første nat: at batteriet lader
+ved netladning, at *VPP Remote Control* slås fra igen bagefter, og at købet ikke overstiger din fasegrænse.
 
 ## Lav din egen
 

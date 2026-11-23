@@ -99,6 +99,32 @@ for forkert in ({'min_luna': 'b', 'min_hmaaler': 'emma|2', 'min_emma': 'emma'}, 
         I.installer(str(h), 'huawei_emma', 'inverter', None, 't', forkert); raise SystemExit(f'burde afvises: {forkert}')
     except I.InstallFejl:
         pass
+# Growatt (solax_modbus): én enhed – forbindelsens navn er prefixet; ingen ekstra enheder
+g = ny('default_config:\n')
+try:
+    I.installer(str(g), 'growatt', 'growatt', None, 't', {'min_luna': 'x'}); raise SystemExit('Growatt må ikke tage ekstra prefixer')
+except I.InstallFejl:
+    pass
+I.installer(str(g), 'growatt', 'mod_10k', None, 't8')
+gk = ''.join(f.read_text(encoding='utf-8') for f in (g / 'packages/wattlas_kanal').glob('*.yaml'))
+assert 'min_growatt' not in gk, 'en pladsholder blev ikke erstattet'
+for e_id in ('sensor.mod_10k_battery_soc', 'sensor.mod_10k_total_import_power', 'number.mod_10k_vpp_power', 'number.mod_10k_vpp_time',
+             'select.mod_10k_vpp_remote_control', 'number.mod_10k_vpp_ac_charge_max_power_2', 'sensor.mod_10k_today_s_battery_input_energy'):
+    assert e_id in gk, e_id
+alle = I.entiteter_i_kanal('growatt', 'mod_10k')
+assert 'select.mod_10k_vpp_status' in alle and 'sensor.mod_10k_grid_voltage_l3' in alle and not [x for x in alle if 'min_' in x]
+shutil.rmtree(g, ignore_errors=True)
+# Deye via ESPHome (klatremis): prefix = ESPHome-konfigurationens device_type
+x = ny('default_config:\n')
+I.installer(str(x), 'deye_esphome', 'sun12k', None, 't10')
+xk = ''.join(f.read_text(encoding='utf-8') for f in (x / 'packages/wattlas_kanal').glob('*.yaml'))
+assert 'min_inverter' not in xk and 'select.' not in xk.replace('select.select_option', ''), 'pladsholder eller valgmenu tilbage'
+for e_id in ('switch.sun12k_time_point_1_charge_enable', 'number.sun12k_maximum_battery_grid_charge_current', 'switch.sun12k_time_of_use',
+             'sensor.sun12k_battery_capacity', 'sensor.sun12k_external_ct_l3_power', 'sensor.sun12k_pv2_power', 'switch.sun12k_solar_sell'):
+    assert e_id in xk, e_id
+alle = I.entiteter_i_kanal('deye_esphome', 'sun12k')
+assert 'sensor.sun12k_total_charge_of_the_battery' in alle and not [e for e in alle if 'microinverter' in e or 'min_' in e], alle
+shutil.rmtree(x, ignore_errors=True)
 # afinstallation flytter til backup
 b = I.afinstaller(str(d))
 assert b and not (d / 'packages/wattlas').exists() and (pathlib.Path(b) / 'packages_wattlas').exists()

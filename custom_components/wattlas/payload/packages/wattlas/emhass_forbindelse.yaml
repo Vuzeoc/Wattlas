@@ -128,12 +128,18 @@ script:
                 {%- set slot.watts = slot.watts + [p.watts | float] -%}
               {%- endif -%}
             {%- endfor -%}
+            {%- set time = namespace(pt=0, pris=none) -%}
             {%- for p in priser -%}
               {%- set pt = as_timestamp(p.hour, 0) -%}
-              {%- if pt <= ts < pt + 3600 and is_number(p.price) -%}
+              {%- if ts <= pt < ts + 1800 and is_number(p.price) -%}
                 {%- set slot.priser = slot.priser + [p.price | float] -%}
+              {%- elif pt <= ts < pt + 3600 and pt > time.pt and is_number(p.price) -%}
+                {%- set time.pt, time.pris = pt, p.price | float -%}
               {%- endif -%}
             {%- endfor -%}
+            {%- if slot.priser | count == 0 and time.pris is not none -%}
+              {%- set slot.priser = [time.pris] -%}
+            {%- endif -%}
             {# Helios kan udelade den gentagne nattetime ved vintertid.
                Udfyld kun tomme intervaller i anden kl. 02-time, med
                entydig nulprognose umiddelbart før og efter hele hullet. #}
@@ -155,10 +161,10 @@ script:
                 {%- set slot.watts = [0.0, 0.0] -%}
               {%- endif -%}
             {%- endif -%}
-            {%- if slot.watts | count == 2 and slot.priser | count == 1 -%}
+            {%- if slot.watts | count == 2 and slot.priser | count >= 1 -%}
               {%- set h = ts | timestamp_custom('%H', true) | int -%}
               {%- set net = (states('input_number.wattlas_nettarif_lav')|float(0)) if h < 6 else (states('input_number.wattlas_nettarif_spids')|float(0)) if 17 <= h < 21 else (states('input_number.wattlas_nettarif_hoej')|float(0)) -%}
-              {%- set spot = slot.priser[0] -%}
+              {%- set spot = (slot.priser | sum) / (slot.priser | count) -%}
               {%- set ns.pv = ns.pv + [((slot.watts | sum) / 2) | round(2)] -%}
               {%- set ns.koeb = ns.koeb + [(spot + (net + (states('input_number.wattlas_elafgift')|float(0))) * 1.25 + (states('input_number.wattlas_tillaeg')|float(0))) | round(6)] -%}
               {%- set ns.salg = ns.salg + [(spot / 1.25 - (states('input_number.wattlas_salg_nettarif')|float(0)) * 1.25 - (states('input_number.wattlas_salg_gebyr')|float(0))) | round(6)] -%}

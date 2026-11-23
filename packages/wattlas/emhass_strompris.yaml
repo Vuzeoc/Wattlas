@@ -1,7 +1,7 @@
 # Hvad strømmen reelt koster lige nu.
 # Batteri: det, der bruges nu, skal fyldes op igen ved næste planlagte opladning i EMHASS-planen.
 #   Netladning koster købsprisen, solladning koster solcellernes slid (input_number.wattlas_solcelle_slid).
-#   Pris pr. kWh til huset = genopfyldningspris / (0,95 × 0,95) + slid 0,25 kr. (samme slidpris som EMHASS).
+#   Pris pr. kWh til huset = genopfyldningspris / (0,95 × 0,95) + slid (input_number.wattlas_slid – samme som EMHASS).
 # Hus: blandingspris af net, batteri og sol efter hvor husets forbrug kommer fra lige nu.
 template:
   - sensor:
@@ -32,7 +32,7 @@ template:
               {% endif %}
             {% endif %}
           {% endfor %}
-          {{ (ns.cost / ns.e / 0.9025 + 0.25) | round(2) if ns.e > 0.2 else none }}
+          {{ (ns.cost / ns.e / 0.9025 + (states('input_number.wattlas_slid') | float(0.25))) | round(2) if ns.e > 0.2 else none }}
         availability: >-
           {{ (state_attr('sensor.p_batt_forecast', 'battery_scheduled_power') or []) | count > 0
              and is_state('binary_sensor.emhass_ui_plan_frisk', 'on') }}
@@ -57,7 +57,7 @@ template:
             {% endfor %}
             {{ dict(kwh=ns.e | round(1), net_andel=((ns.net / ns.e * 100) | round(0)) if ns.e > 0 else 0,
                     start=ns.start, slut=ns.slut) }}
-          slid_kr_pr_kwh: 0.25
+          slid_kr_pr_kwh: "{{ (states('input_number.wattlas_slid') | float(0.25)) }}"
 
       - name: Husets strømpris med slid
         unique_id: hus_strompris_nu
@@ -103,7 +103,7 @@ template:
           {% set tot = (r.grid_kwh | float(0) + r.other_kwh | float(0)) if r is mapping else 0 %}
           {# er puljen tom (batteriet brugt), vises genopfyldningsprisen uden slid i stedet for 0 kr #}
           {% set bp = states('sensor.batteri_brugspris') %}
-          {{ (r.grid_cost | float(0) / (tot * 0.95)) | round(2) if tot > 0.05 else (((bp | float - 0.25) * 0.9025 / 0.95) | round(2) if is_number(bp) else 0) }}
+          {{ (r.grid_cost | float(0) / (tot * 0.95)) | round(2) if tot > 0.05 else (((bp | float - (states('input_number.wattlas_slid') | float(0.25))) * 0.9025 / 0.95) | round(2) if is_number(bp) else 0) }}
         availability: "{{ state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') is mapping }}"
         attributes:
           fra_net_procent: >-
@@ -122,7 +122,7 @@ template:
           {% set tot = (r.grid_kwh | float(0) + r.other_kwh | float(0)) if r is mapping else 0 %}
           {# er puljen tom, bruges genopfyldningsprisen (sensor.batteri_brugspris) i stedet for ren solpris #}
           {% set bp = states('sensor.batteri_brugspris') %}
-          {{ ((r.grid_cost | float(0) + r.other_kwh | float(0) * sol) / (tot * 0.95) + 0.25) | round(2) if tot > 0.05 else (bp | float | round(2) if is_number(bp) else (sol / 0.95 + 0.25) | round(2)) }}
+          {{ ((r.grid_cost | float(0) + r.other_kwh | float(0) * sol) / (tot * 0.95) + (states('input_number.wattlas_slid') | float(0.25))) | round(2) if tot > 0.05 else (bp | float | round(2) if is_number(bp) else (sol / 0.95 + (states('input_number.wattlas_slid') | float(0.25))) | round(2)) }}
         availability: "{{ state_attr('sensor.emhass_besparelse_regnskab', 'regnskab') is mapping }}"
 
       - name: Husets strømpris kontant

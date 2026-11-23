@@ -11,7 +11,8 @@ from pathlib import Path
 
 PAYLOAD = Path(__file__).parent / "payload"
 KANALER = {"deye": ("deye_solarman", "min_inverter"), "sunmate": ("sunmate", "min_sunmate"), "huawei": ("huawei", "min_huawei"),
-           "huawei_emma": ("huawei_emma", "min_huawei")}
+           "huawei_emma": ("huawei_emma", "min_huawei"), "growatt": ("growatt", "min_growatt"),
+           "deye_esphome": ("deye_esphome", "min_inverter")}
 # Kanaler med flere enheder: pladsholdere ud over hoved-prefixet, som opsætningen skal udfylde (ekstra = {pladsholder: prefix}).
 # "prefix|_2" betyder prefix + endelse efter navnet (EMMA's eksterne måler har samme navne som den indbyggede + "_2").
 EKSTRA = {"huawei": ("min_luna", "min_hmaaler"), "huawei_emma": ("min_luna", "min_hmaaler", "min_emma")}
@@ -37,6 +38,18 @@ def packages_mappe(config_dir: str) -> str | None:
     tekst = (Path(config_dir) / "configuration.yaml").read_text(encoding="utf-8")
     m = PKG_RE.search(tekst)
     return m.group(1).strip("/") if m else None
+
+
+def installeret_tekst(config_dir: str) -> str:
+    """Teksten i de installerede Wattlas-pakker (tom, hvis de ikke findes)."""
+    pkg = packages_mappe(config_dir)
+    mapper = [Path(config_dir) / pkg / d for d in ("wattlas", "wattlas_kanal")] if pkg else []
+    return "".join(f.read_text(encoding="utf-8") for m in mapper for f in sorted(m.glob("*.yaml")))
+
+
+def kendt_tekst() -> str:
+    """Teksten i alle Wattlas' egne pakker og styrekanaler – alt, hvad Wattlas selv kan have oprettet."""
+    return "".join(f.read_text(encoding="utf-8") for d in ("packages", "styrekanaler") for f in sorted((PAYLOAD / d).rglob("*.yaml")))
 
 
 def tilfoej_packages(tekst: str) -> str | None:
@@ -79,13 +92,17 @@ def anden_styring(config_dir: str, pkg_rel: str | None) -> str | None:
 def entiteter_i_kanal(kanal: str, prefix: str, ekstra: dict | None = None) -> list[str]:
     """Alle inverter-entiteter, som styrekanalen (efter prefix og evt. ekstra prefixer) læser eller skriver."""
     mappe, std = KANALER[kanal]
+    erstat = {std: prefix, **(ekstra or {})}
     ids: set[str] = set()
     for f in (PAYLOAD / "styrekanaler" / mappe).glob("*.yaml"):
         tekst = f.read_text(encoding="utf-8")
-        for plads, ny in {std: prefix, **(ekstra or {})}.items():
+        for plads in erstat:
             for m in re.finditer(rf"\b(sensor|binary_sensor|switch|number|select|button)\.{plads}_([a-z0-9_]+)", tekst):
                 if not m.group(2).endswith("_"):  # "program_' ~ p ~ '_power" er et navn, der bygges i skabelonen
-                    ids.add(m.group(1) + "." + _erstat(f"{plads}_{m.group(2)}", plads, ny))
+                    e = m.group(0)
+                    for p, ny in erstat.items():  # samme erstatninger i samme rækkefølge som installer() i filerne
+                        e = _erstat(e, p, ny)
+                    ids.add(e)
     return sorted(ids)
 
 
