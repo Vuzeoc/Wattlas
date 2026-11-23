@@ -2,7 +2,8 @@
   "domain": "wattlas",
   "name": "Wattlas",
   "after_dependencies": [
-    "hassio"
+    "hassio",
+    "recorder"
   ],
   "codeowners": [
     "@Vuzeoc"
