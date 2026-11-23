@@ -171,6 +171,9 @@ input_text:
   wattlas_udetemperatur_entitet:
     name: Wattlas · udetemperatur-sensor (valgfri – ellers vejr-entitetens temperatur)
     max: 255
+  wattlas_besked_handling:
+    name: Wattlas · send også beskeder til (notify.mobile_app_… eller script.…)
+    max: 255
 
 template:
   - sensor:
@@ -225,8 +228,9 @@ template:
             {{ ns.m }}
 
 script:
-  # Alle Wattlas-beskeder går herigennem. Ret handlingen til din egen telefon (notify.mobile_app_…),
-  # og tilføj gerne flere modtagere eller højttaler-oplæsning.
+  # Alle Wattlas-beskeder går herigennem: altid som besked i Home Assistant, og desuden til den handling, du har sat i
+  # input_text.wattlas_besked_handling (Wattlas Styring → Overvågning) – fx notify.mobile_app_din_telefon, eller dit eget
+  # script.…, der sender til flere eller læser op. Ret ikke i denne fil: den overskrives ved hver opdatering.
   wattlas_besked:
     alias: Wattlas – send besked
     mode: queued
@@ -242,3 +246,12 @@ script:
         data:
           title: "{{ title | default('Wattlas') }}"
           message: "{{ message | default('') }}"
+      # kun notify.… og script.… – en anden handling i feltet udføres ikke
+      - if: "{{ states('input_text.wattlas_besked_handling') is match('(notify|script)[.][a-z0-9_]+$') }}"
+        then:
+          - action: "{{ states('input_text.wattlas_besked_handling') }}"
+            continue_on_error: true
+            data:
+              title: "{{ title | default('Wattlas') }}"
+              message: "{{ message | default('') }}"
+              data: "{{ data | default({}) }}"

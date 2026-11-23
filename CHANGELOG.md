@@ -18,6 +18,8 @@ Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet
 - Opsætningen advarer, hvis Home Assistant ikke bruger standarddatabasen (SQLite) – husprognosen og appens historik kræver den
 - "Selvforsyning i alt" kan ikke længere blive negativ
 - Huawei: kun én stop-kommando, når netladning slås fra (før to)
+- **Beskeder til telefonen:** sæt modtageren i Wattlas Styring → Overvågning (*Send også til*: `notify.mobile_app_…` eller dit eget
+  `script.…`). Før skulle man rette i en fil, som hver opdatering overskrev
 - Ingen andre ændringer i styringen for Deye, SunMate og Huawei
 
 ## 0.3.1

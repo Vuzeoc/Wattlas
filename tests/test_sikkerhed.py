@@ -225,6 +225,15 @@ async def main():
     assert koeb([(q * 900, float(q)) for q in range(16)]) == [0.5, 2.5, 4.5, 6.5, 8.5, 10.5, 12.5, 14.5]
     print('EMHASS-prisprognose med time- og kvarterpriser: OK')
 
+    # Beskeder: kun notify.… og script.… fra indstillingen udføres – alt andet i feltet ignoreres
+    ind = yaml.safe_load((REPO / 'packages/wattlas/wattlas_indstillinger.yaml').read_text(encoding='utf-8'))
+    hvis = next(s for s in ind['script']['wattlas_besked']['sequence'] if 'if' in s)['if']
+    for felt, ok in [('notify.mobile_app_min_telefon', True), ('script.mine_beskeder', True), ('light.turn_on', False),
+                     ('notify.x y', False), ('', False), ('unknown', False)]:
+        sæt('input_text.wattlas_besked_handling', felt)
+        assert Template(hvis, hass).async_render() is ok, felt
+    print('Beskedmodtager fra indstillingen: OK')
+
     await hass.async_stop(force=True)
 
 asyncio.run(main())

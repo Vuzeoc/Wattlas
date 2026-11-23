@@ -505,6 +505,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       return `<div class="grid g2">${this.card(`Advarsler · ${nAl ? nAl + ' aktive' : 'alt OK'}`, `<ul class="alarm">${al}</ul>`, {icon: 'mdi:shield-alert-outline'})}
         <div class="stack">${this.card('Forbindelser og plan', forb, {icon: 'mdi:lan-connect'})}
         ${this.card('Beskeder til telefonen', tog('input_boolean.emhass_ui_push', 'Push til mobilen', 'Advarsler sendes som push-besked til mobilen') + tog('input_boolean.emhass_ui_recovery', 'Besked når det er normalt igen', '') +
+          `<div class="set"><div><b>Send også til</b><span>notify.mobile_app_… eller dit eget script.…</span></div><input class="inp" data-set="text|input_text.wattlas_besked_handling" value="${esc((s('input_text.wattlas_besked_handling')?.state || '').replace(/^(unknown|unavailable)$/, ''))}" placeholder="notify.mobile_app_din_telefon"></div>` +
           `<p class="note">Seneste: ${esc((s('input_text.emhass_ui_seneste_besked')?.state || '').replace(/^(unknown|unavailable)$/, '') || 'ingen endnu')}</p><div class="toolbar">${knap('emhass_ui_test_besked', 'Send testbesked')}${knap('emhass_diagnose_log', 'Gem diagnose nu')}${knap('emhass_test_helios', 'Beregn ny plan nu')}</div>`, {icon: 'mdi:cellphone-message'})}
         ${this.card('Teknik i styringen', per, {icon: 'mdi:cog-outline'})}</div></div>`;
     }
