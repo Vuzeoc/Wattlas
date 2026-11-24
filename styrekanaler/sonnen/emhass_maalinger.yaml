@@ -29,6 +29,7 @@ rest:
     - USOC
     - Uac
     - Ubat
+    - Fac
     - OperatingMode
     - SystemStatus
 - resource: "__SONNEN_HOST__/api/v2/powermeter"
@@ -87,6 +88,16 @@ rest:
     unit_of_measurement: "°C"
     device_class: temperature
     state_class: measurement
+  # til Teknik-fanen: cyklusser og alarmer ligger i samme svar, så det koster ingen ekstra poling
+  - name: min_sonnen cyklusser
+    unique_id: min_sonnen_cyklusser
+    value_template: "{{ value_json.cyclecount if is_number(value_json.cyclecount) else 'unavailable' }}"
+  - name: min_sonnen batteri alarm
+    unique_id: min_sonnen_batteri_alarm
+    value_template: "{{ value_json.systemalarm | int(0) }}"
+  - name: min_sonnen batteri advarsel
+    unique_id: min_sonnen_batteri_advarsel
+    value_template: "{{ value_json.systemwarning | int(0) }}"
 - resource: "__SONNEN_HOST__/api/v2/inverter"
   scan_interval: 15
   timeout: 8

@@ -417,6 +417,90 @@ template:
         default_entity_id: binary_sensor.wattlas_pv_maaling_ok
         state: "{{ is_number(state_attr('sensor.min_sonnen_status', 'Production_W')) }}"
 
+  # Teknik-fanen i energikortet læser Deye-navne under inverter_prefix. Her mappes de til
+  # det, en Sonnen faktisk melder, så fanen viser tal i stedet for streger. Navne uden
+  # Sonnen-modstykke (mikroinverter, tabstal, energimønster) oprettes ikke med vilje.
+  - sensor:
+      - name: min_sonnen connection
+        unique_id: min_sonnen_connection
+        state: "{{ states('binary_sensor.wattlas_forbindelse') }}"
+      - name: min_sonnen device
+        unique_id: min_sonnen_device
+        state: "SonnenBatterie"
+      - name: min_sonnen device_state
+        unique_id: min_sonnen_device_state
+        state: "{{ state_attr('sensor.min_sonnen_status','SystemStatus') or 'ukendt' }}"
+      - name: min_sonnen device_alarm
+        unique_id: min_sonnen_device_alarm
+        state: "{{ states('sensor.min_sonnen_batteri_alarm') }}"
+      - name: min_sonnen device_fault
+        unique_id: min_sonnen_device_fault
+        state: "{{ states('sensor.min_sonnen_batteri_advarsel') }}"
+      - name: min_sonnen output_ac_power
+        unique_id: min_sonnen_output_ac_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ state_attr('sensor.min_sonnen_status','Pac_total_W') | float(0) | round(0) }}"
+      - name: min_sonnen pv_power
+        unique_id: min_sonnen_pv_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ state_attr('sensor.min_sonnen_status','Production_W') | float(0) | round(0) }}"
+      - name: min_sonnen output_frequency
+        unique_id: min_sonnen_output_frequency
+        unit_of_measurement: Hz
+        device_class: frequency
+        state_class: measurement
+        state: "{{ state_attr('sensor.min_sonnen_status','Fac') | float(0) }}"
+      - name: min_sonnen temperature
+        unique_id: min_sonnen_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ states('sensor.min_sonnen_inverter_temperatur') }}"
+      - name: min_sonnen dc_temperature
+        unique_id: min_sonnen_dc_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ states('sensor.min_sonnen_batteri_temperatur') }}"
+      - name: min_sonnen update_interval
+        unique_id: min_sonnen_update_interval
+        unit_of_measurement: s
+        state: "5"
+      - name: min_sonnen work_mode
+        unique_id: min_sonnen_work_mode
+        state: "{{ state_attr('sensor.min_sonnen_status','OperatingMode') or 'ukendt' }}"
+      - name: min_sonnen total_battery_life_cycles
+        unique_id: min_sonnen_total_battery_life_cycles
+        state: "{{ states('sensor.min_sonnen_cyklusser') }}"
+      - name: min_sonnen today_battery_charge
+        unique_id: min_sonnen_today_battery_charge
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ states('sensor.wattlas_batteri_ladet_i_dag') }}"
+      - name: min_sonnen today_battery_discharge
+        unique_id: min_sonnen_today_battery_discharge
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ states('sensor.wattlas_batteri_afladet_i_dag') }}"
+      - name: min_sonnen today_production
+        unique_id: min_sonnen_today_production
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ states('sensor.wattlas_produktion_i_dag') }}"
+      - name: min_sonnen total_production
+        unique_id: min_sonnen_total_production
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ states('sensor.wattlas_total_produktion') }}"
+
 # Sonnen har ingen dagstællere og ingen totaler i API'et – de laves her med HA's egne værktøjer.
 sensor:
   - platform: integration
