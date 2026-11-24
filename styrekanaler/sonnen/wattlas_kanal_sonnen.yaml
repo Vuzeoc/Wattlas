@@ -351,14 +351,14 @@ template:
         unique_id: wattlas_maks_ladestroem
         default_entity_id: sensor.wattlas_maks_ladestroem
         unit_of_measurement: A
-        availability: "{{ state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) > 0 and is_number(state_attr('sensor.min_sonnen_konfiguration', 'IC_InverterMaxPower_w')) }}"
-        state: "{{ (state_attr('sensor.min_sonnen_konfiguration', 'IC_InverterMaxPower_w') | float(0) / state_attr('sensor.min_sonnen_status', 'Ubat') | float(1)) | round(0) }}"
+        availability: "{{ state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) > 0 and is_number(states('sensor.min_sonnen_konfiguration')) }}"
+        state: "{{ (states('sensor.min_sonnen_konfiguration') | float(0) / state_attr('sensor.min_sonnen_status', 'Ubat') | float(1)) | round(0) }}"
       - name: Wattlas maks. afladestrøm
         unique_id: wattlas_maks_afladestroem
         default_entity_id: sensor.wattlas_maks_afladestroem
         unit_of_measurement: A
-        availability: "{{ state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) > 0 and is_number(state_attr('sensor.min_sonnen_konfiguration', 'IC_InverterMaxPower_w')) }}"
-        state: "{{ (state_attr('sensor.min_sonnen_konfiguration', 'IC_InverterMaxPower_w') | float(0) / state_attr('sensor.min_sonnen_status', 'Ubat') | float(1)) | round(0) }}"
+        availability: "{{ state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) > 0 and is_number(states('sensor.min_sonnen_konfiguration')) }}"
+        state: "{{ (states('sensor.min_sonnen_konfiguration') | float(0) / state_attr('sensor.min_sonnen_status', 'Ubat') | float(1)) | round(0) }}"
       - name: EMHASS Solproduktion samlet
         unique_id: emhass_solproduktion_samlet
         default_entity_id: sensor.emhass_solproduktion_samlet
