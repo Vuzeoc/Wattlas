@@ -11,9 +11,9 @@ from pathlib import Path
 
 PAYLOAD = Path(__file__).parent / "payload"
 KANALER = {"deye": ("deye_solarman", "min_inverter"), "sunmate": ("sunmate", "min_sunmate"), "huawei": ("huawei", "min_huawei"),
-           "huawei_emma": ("huawei_emma", "min_huawei"), "growatt": ("growatt", "min_growatt"),
+           "huawei_emma": ("huawei_emma", "min_huawei"), "growatt": ("growatt", "min_growatt"), "solax": ("solax", "min_solax"), "sofar": ("sofar", "min_sofar"), "solis": ("solis", "min_solis"),
            "deye_esphome": ("deye_esphome", "min_inverter"),
-           "deye_parallel": ("deye_parallel", "min_inverter"), "sonnen": ("sonnen", "min_sonnen")}
+           "deye_parallel": ("deye_parallel", "min_inverter"), "sonnen": ("sonnen", "min_sonnen"), "spf": ("growatt_spf", "min_spf")}
 # Kanaler med flere enheder: pladsholdere ud over hoved-prefixet, som opsætningen skal udfylde (ekstra = {pladsholder: prefix}).
 # "prefix|_2" betyder prefix + endelse efter navnet (EMMA's eksterne måler har samme navne som den indbyggede + "_2").
 EKSTRA = {"huawei": ("min_luna", "min_hmaaler"), "huawei_emma": ("min_luna", "min_hmaaler", "min_emma"), "deye_parallel": ("min_slave",)}
@@ -110,6 +110,16 @@ def entiteter_i_kanal(kanal: str, prefix: str, ekstra: dict | None = None) -> li
     return sorted(ids)
 
 
+def _ny_backup(cfg: Path) -> Path:
+    """En ny, tom backup-mappe. Navnet har sekund-opløsning; to installationer i samme sekund (fx en opdatering, der rulles
+    tilbage, og et nyt forsøg) må ikke dele mappe – så ville tilbagerulningen lægge de forkerte filer tilbage."""
+    navn = f"wattlas_backup_{time.strftime('%Y%m%d-%H%M%S')}"
+    backup, i = cfg / navn, 1
+    while backup.exists():
+        backup, i = cfg / f"{navn}-{i}", i + 1
+    return backup
+
+
 def _flyt(src: Path, backup: Path, navn: str, flyttet: list) -> None:
     if src.exists():
         backup.mkdir(parents=True, exist_ok=True)
@@ -142,7 +152,7 @@ def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, versi
 
     mappe, std = KANALER[kanal]
     pkg = cfg / pkg_rel
-    backup = cfg / f"wattlas_backup_{time.strftime('%Y%m%d-%H%M%S')}"
+    backup = _ny_backup(cfg)
     flyttet: list = []
     nye = [pkg / "wattlas", pkg / "wattlas_kanal", cfg / "www" / "wattlas", cfg / "wattlas"]
     kvit = {"conf": str(conf), "gammel_conf": gammel_conf, "nye": [str(p) for p in nye], "flyttet": flyttet, "backup": str(backup)}
@@ -205,10 +215,16 @@ def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, versi
         rul_tilbage(kvit)
         raise
     # behold de 3 nyeste backups (inkl. den netop lavede); kun mapper med Wattlas' eget navnemønster røres
-    gamle = sorted(p for p in cfg.glob("wattlas_backup_*") if p.is_dir() and re.fullmatch(r"wattlas_backup_\d{8}-\d{6}", p.name))
+    gamle = sorted(p for p in cfg.glob("wattlas_backup_*") if p.is_dir() and re.fullmatch(r"wattlas_backup_\d{8}-\d{6}(-\d+)?", p.name))
     for p in gamle[:-3]:
         shutil.rmtree(p, ignore_errors=True)
     return kvit
+
+
+def opdater(config_dir: str, data: dict, version: str) -> dict:
+    """Fast indgang til opdateringer. Tager hele opsætningen (config entry-data), så en ældre, kørende version kan kalde en
+    nyere versions installer fra disken uden at kende dens parametre. Skift ikke navn eller parametre på denne funktion."""
+    return installer(config_dir, data["kanal"], data["prefix"], data.get("inverter2"), version, data.get("ekstra"), data.get("sonnen"))
 
 
 def rul_tilbage(kvit: dict) -> None:
@@ -238,7 +254,7 @@ def afinstaller(config_dir: str) -> str | None:
     """Flytter Wattlas' filer til en backup-mappe (sletter intet). packages-linjen bliver stående."""
     cfg = Path(config_dir)
     pkg_rel = packages_mappe(config_dir) or "packages"
-    backup = cfg / f"wattlas_backup_{time.strftime('%Y%m%d-%H%M%S')}"
+    backup = _ny_backup(cfg)
     flyttet: list = []
     for p, navn in [(cfg / pkg_rel / "wattlas", "packages_wattlas"), (cfg / pkg_rel / "wattlas_kanal", "packages_wattlas_kanal"),
                     (cfg / "www" / "wattlas", "www_wattlas"), (cfg / "wattlas", "wattlas")]:

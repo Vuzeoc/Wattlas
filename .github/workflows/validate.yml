@@ -40,3 +40,4 @@ jobs:
       - run: python tests/test_flow.py
       - run: python tests/test_sikkerhed.py
       - run: python tests/test_skygge.py
+      - run: python tests/test_kanalstyring.py

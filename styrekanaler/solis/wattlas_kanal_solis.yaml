@@ -1,0 +1,581 @@
+# Wattlas styrekanal – Solis hybrid (trefaset, fx S6-EH3P) via solax_modbus (wills106/homeassistant-solax-modbus), plugin
+# "Solis FB00". EKSPERIMENTEL: skrevet ud fra solax_modbus' egen dokumentation og kode (Apache-2.0) og prøvet i en test-
+# Home Assistant med den rigtige solax_modbus mod en falsk Solis – ikke kørt på et rigtigt anlæg. solax_modbus har kun prøvet Remote Dispatch på en enfaset Solis; om din inverter og firmware kan, ses først i drift.
+# Kernen taler KUN med Wattlas-entiteterne herunder.
+#
+# Enheden hedder min_solis_* (navnet på solax_modbus-forbindelsen vælges i opsætningen). Kun trefasede Solis-hybrider med
+# Solis-elmåler og lokal forbindelse (Modbus TCP/RTU), hvor "Remote Dispatch Function Version" er 1 eller mere.
+#
+# Styring sker med Solis' "Remote Dispatch": registrene ligger kun i inverterens arbejdshukommelse, og hver kommando gælder
+# i "Dispatch Failsafe Interval" (kanalen sætter 5 min). Kanalen fornyer hvert minut; går Home Assistant ned, udløber den,
+# og inverteren går tilbage til sin egen tilstand (fx Self-Use).
+#   netladning = "Battery Charge" med positiv effekt (og "Allow" netladning): batteriet lades med netop den effekt
+#   gem        = "Battery Hold" – batteriet hverken lader eller aflader. Kun uden soloverskud: ellers ville overskuddet
+#                sælges, mens batteriet stod stille; med overskud kører inverteren egen drift (overskuddet lades, intet aflades).
+#   fri        = "Disable Remote Dispatch" – inverteren kører sin egen drift.
+# Start: "Prepare" (slår Remote Dispatch til), 2 sekunder, så "Apply". Fornyelse: "Apply" hvert minut, "Prepare" igen hvert
+# 10. minut og ved Home Assistant-start (fx efter en genstart af inverteren). En ny ordre afbryder den gamle.
+# Højvoltbatteri: kernen regner i A ved et lavvoltbatteri. Kanalen bruger en fast beregningsspænding på 50 V
+# (A × 50 = W) – samme tal som i opsætningen.
+#
+# Solis' egne tidsprogrammer bruges ikke. Kanalen husker sine egne og bruger det aktive programs værdier i samme perioder
+# som kernen (1: 01–05, 2: 05–09, 3: 09–13, 4: 13–17, 5: 17–21, 6: 21–01):
+#   SOC    = bundgrænse (ved eller under den gemmes batteriet) og mål ved netladning
+#   effekt = 0 W gemmer batteriet; over 0 W må det aflade frit
+# Solsalg fra = "Backflow Power" sættes til 0 W; din egen grænse huskes og sættes tilbage. Kræver, at "Backflow Power Switch"
+#   allerede står på "On …" – ellers rører Wattlas den ikke. (Den gemmes i inverterens hukommelse og skrives kun ved skift.)
+input_boolean:
+  wattlas_solis_netladning:
+    name: Wattlas Solis netladning (husket)
+  wattlas_solis_fjern_styret:
+    name: Wattlas Solis har slået Remote Dispatch til
+  wattlas_solis_salg_stoppet:
+    name: Wattlas Solis har stoppet solsalget
+  wattlas_solis_p1:
+    name: Wattlas Solis netladning program 1 (husket)
+  wattlas_solis_p2:
+    name: Wattlas Solis netladning program 2 (husket)
+  wattlas_solis_p3:
+    name: Wattlas Solis netladning program 3 (husket)
+  wattlas_solis_p4:
+    name: Wattlas Solis netladning program 4 (husket)
+  wattlas_solis_p5:
+    name: Wattlas Solis netladning program 5 (husket)
+  wattlas_solis_p6:
+    name: Wattlas Solis netladning program 6 (husket)
+input_number:
+  wattlas_solis_netladestroem:
+    name: Wattlas Solis netladestrøm (husket)
+    min: 0
+    max: 1000
+    step: 1
+    unit_of_measurement: A
+  wattlas_solis_egen_eksportgraense:
+    name: Wattlas Solis – din egen eksportgrænse (husket)
+    min: 0
+    max: 9900
+    step: 100
+    unit_of_measurement: W
+  wattlas_solis_p1_soc:
+    name: Wattlas Solis program 1 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_solis_p1_power:
+    name: Wattlas Solis program 1 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_solis_p2_soc:
+    name: Wattlas Solis program 2 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_solis_p2_power:
+    name: Wattlas Solis program 2 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_solis_p3_soc:
+    name: Wattlas Solis program 3 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_solis_p3_power:
+    name: Wattlas Solis program 3 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_solis_p4_soc:
+    name: Wattlas Solis program 4 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_solis_p4_power:
+    name: Wattlas Solis program 4 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_solis_p5_soc:
+    name: Wattlas Solis program 5 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_solis_p5_power:
+    name: Wattlas Solis program 5 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_solis_p6_soc:
+    name: Wattlas Solis program 6 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_solis_p6_power:
+    name: Wattlas Solis program 6 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+template:
+  - switch:
+      - name: EMHASS netladning program 1
+        unique_id: emhass_netladning_p1
+        default_entity_id: switch.emhass_netladning_p1
+        state: "{{ is_state('input_boolean.wattlas_solis_p1', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_solis_p1}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_solis_p1}}]
+      - name: EMHASS netladning program 2
+        unique_id: emhass_netladning_p2
+        default_entity_id: switch.emhass_netladning_p2
+        state: "{{ is_state('input_boolean.wattlas_solis_p2', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_solis_p2}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_solis_p2}}]
+      - name: EMHASS netladning program 3
+        unique_id: emhass_netladning_p3
+        default_entity_id: switch.emhass_netladning_p3
+        state: "{{ is_state('input_boolean.wattlas_solis_p3', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_solis_p3}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_solis_p3}}]
+      - name: EMHASS netladning program 4
+        unique_id: emhass_netladning_p4
+        default_entity_id: switch.emhass_netladning_p4
+        state: "{{ is_state('input_boolean.wattlas_solis_p4', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_solis_p4}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_solis_p4}}]
+      - name: EMHASS netladning program 5
+        unique_id: emhass_netladning_p5
+        default_entity_id: switch.emhass_netladning_p5
+        state: "{{ is_state('input_boolean.wattlas_solis_p5', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_solis_p5}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_solis_p5}}]
+      - name: EMHASS netladning program 6
+        unique_id: emhass_netladning_p6
+        default_entity_id: switch.emhass_netladning_p6
+        state: "{{ is_state('input_boolean.wattlas_solis_p6', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_solis_p6}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_solis_p6}}]
+      - name: Wattlas netladning
+        unique_id: wattlas_netladning
+        default_entity_id: switch.wattlas_netladning
+        availability: "{{ states.button.min_solis_apply_remote_dispatch is not none }}"
+        state: "{{ is_state('input_boolean.wattlas_solis_netladning', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_solis_netladning}}]
+        turn_off:
+          - action: input_boolean.turn_off
+            target: {entity_id: input_boolean.wattlas_solis_netladning}
+          # stoppes med det samme her (automationen nedenfor gør det også), så "fra" er fra, når kernen går videre
+          - if: "{{ is_state('input_boolean.wattlas_solis_fjern_styret', 'on') and is_state('select.min_solis_dispatch_control_mode', 'Battery Charge') }}"
+            then:
+              - action: button.press
+                continue_on_error: true
+                target: {entity_id: button.min_solis_disable_remote_dispatch}
+              - action: input_boolean.turn_off
+                target: {entity_id: input_boolean.wattlas_solis_fjern_styret}
+      - name: Wattlas solsalg
+        unique_id: wattlas_solsalg
+        default_entity_id: switch.wattlas_solsalg
+        availability: >-
+          {{ is_number(states('number.min_solis_backflow_power')) and states('select.min_solis_backflow_power_switch').startswith('On') }}
+        # "til", indtil Wattlas selv har stoppet salget – en ny installation skriver derfor intet til inverteren
+        state: "{{ not is_state('input_boolean.wattlas_solis_salg_stoppet', 'on') }}"
+        turn_on:
+          - if: "{{ is_state('input_boolean.wattlas_solis_salg_stoppet', 'on') }}"
+            then:
+              - action: number.set_value
+                target: {entity_id: number.min_solis_backflow_power}
+                data: {value: "{{ states('input_number.wattlas_solis_egen_eksportgraense') | float(0) }}"}
+              - action: input_boolean.turn_off
+                target: {entity_id: input_boolean.wattlas_solis_salg_stoppet}
+        turn_off:
+          # eksportgrænsen gemmes i inverterens hukommelse – skrives kun, når den skifter
+          - if: "{{ not is_state('input_boolean.wattlas_solis_salg_stoppet', 'on') }}"
+            then:
+              - action: input_number.set_value
+                target: {entity_id: input_number.wattlas_solis_egen_eksportgraense}
+                data: {value: "{{ states('number.min_solis_backflow_power') | float(0) }}"}
+              - action: number.set_value
+                target: {entity_id: number.min_solis_backflow_power}
+                data: {value: 0}
+              - action: input_boolean.turn_on
+                target: {entity_id: input_boolean.wattlas_solis_salg_stoppet}
+  - number:
+      - name: Wattlas netladestrøm
+        unique_id: wattlas_netladestroem
+        default_entity_id: number.wattlas_netladestroem
+        availability: "{{ states('input_number.wattlas_maks_ladeeffekt_w') | float(0) > 0 }}"
+        state: "{{ states('input_number.wattlas_solis_netladestroem') | float(0) }}"
+        min: 0
+        max: "{{ (states('input_number.wattlas_maks_ladeeffekt_w') | float(0) / 50) | round(0, 'floor') }}"
+        step: 1
+        unit_of_measurement: A
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_netladestroem}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 1 SOC
+        unique_id: wattlas_program_1_soc
+        default_entity_id: number.wattlas_program_1_soc
+        state: "{{ states('input_number.wattlas_solis_p1_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p1_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 1 effekt
+        unique_id: wattlas_program_1_power
+        default_entity_id: number.wattlas_program_1_power
+        state: "{{ states('input_number.wattlas_solis_p1_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p1_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 2 SOC
+        unique_id: wattlas_program_2_soc
+        default_entity_id: number.wattlas_program_2_soc
+        state: "{{ states('input_number.wattlas_solis_p2_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p2_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 2 effekt
+        unique_id: wattlas_program_2_power
+        default_entity_id: number.wattlas_program_2_power
+        state: "{{ states('input_number.wattlas_solis_p2_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p2_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 3 SOC
+        unique_id: wattlas_program_3_soc
+        default_entity_id: number.wattlas_program_3_soc
+        state: "{{ states('input_number.wattlas_solis_p3_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p3_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 3 effekt
+        unique_id: wattlas_program_3_power
+        default_entity_id: number.wattlas_program_3_power
+        state: "{{ states('input_number.wattlas_solis_p3_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p3_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 4 SOC
+        unique_id: wattlas_program_4_soc
+        default_entity_id: number.wattlas_program_4_soc
+        state: "{{ states('input_number.wattlas_solis_p4_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p4_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 4 effekt
+        unique_id: wattlas_program_4_power
+        default_entity_id: number.wattlas_program_4_power
+        state: "{{ states('input_number.wattlas_solis_p4_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p4_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 5 SOC
+        unique_id: wattlas_program_5_soc
+        default_entity_id: number.wattlas_program_5_soc
+        state: "{{ states('input_number.wattlas_solis_p5_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p5_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 5 effekt
+        unique_id: wattlas_program_5_power
+        default_entity_id: number.wattlas_program_5_power
+        state: "{{ states('input_number.wattlas_solis_p5_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p5_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 6 SOC
+        unique_id: wattlas_program_6_soc
+        default_entity_id: number.wattlas_program_6_soc
+        state: "{{ states('input_number.wattlas_solis_p6_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p6_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 6 effekt
+        unique_id: wattlas_program_6_power
+        default_entity_id: number.wattlas_program_6_power
+        state: "{{ states('input_number.wattlas_solis_p6_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_solis_p6_power}, data: {value: "{{ value }}"}}]
+  - sensor:
+      # Remote Dispatch bruger effekt (W), ikke batteristrøm – kanalen bruger din indstilling "maks. ladeeffekt" (W ÷ 50)
+      - name: Wattlas maks. ladestrøm
+        unique_id: wattlas_maks_ladestroem
+        default_entity_id: sensor.wattlas_maks_ladestroem
+        unit_of_measurement: A
+        availability: "{{ states('input_number.wattlas_maks_ladeeffekt_w') | float(0) > 0 }}"
+        state: "{{ (states('input_number.wattlas_maks_ladeeffekt_w') | float(0) / 50) | round(0, 'floor') }}"
+      - name: Wattlas maks. afladestrøm
+        unique_id: wattlas_maks_afladestroem
+        default_entity_id: sensor.wattlas_maks_afladestroem
+        unit_of_measurement: A
+        availability: "{{ states('input_number.wattlas_maks_afladeeffekt_w') | float(0) > 0 }}"
+        state: "{{ (states('input_number.wattlas_maks_afladeeffekt_w') | float(0) / 50) | round(0, 'floor') }}"
+      - name: EMHASS Solproduktion samlet
+        unique_id: emhass_solproduktion_samlet
+        default_entity_id: sensor.emhass_solproduktion_samlet
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_solis_pv_total_power')) }}"
+        state: "{{ [0, states('sensor.min_solis_pv_total_power') | float(0)] | max | round(0) }}"
+      # effekter til dagstællerne (W): elmålerens tal (kW) antages positivt ved salg – se regnestykke-tjekket
+      - name: Wattlas Solis netkøb
+        unique_id: wattlas_solis_netkoeb
+        default_entity_id: sensor.wattlas_solis_netkoeb
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_solis_meter_active_power_total')) }}"
+        state: "{{ [0, -(states('sensor.min_solis_meter_active_power_total') | float(0)) * 1000] | max | round(0) }}"
+      - name: Wattlas Solis solgt
+        unique_id: wattlas_solis_solgt
+        default_entity_id: sensor.wattlas_solis_solgt
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_solis_meter_active_power_total')) }}"
+        state: "{{ [0, states('sensor.min_solis_meter_active_power_total') | float(0) * 1000] | max | round(0) }}"
+      - name: Wattlas Solis husforbrug
+        unique_id: wattlas_solis_husforbrug
+        default_entity_id: sensor.wattlas_solis_husforbrug
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_solis_house_load')) }}"
+        state: "{{ [0, states('sensor.min_solis_house_load') | float(0) + states('sensor.min_solis_bypass_load') | float(0)] | max | round(0) }}"
+      - name: Wattlas batteri ladet i dag
+        unique_id: wattlas_i_dag_ladet
+        default_entity_id: sensor.wattlas_i_dag_ladet
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ is_number(states('sensor.min_solis_battery_charge_today')) }}"
+        state: "{{ states('sensor.min_solis_battery_charge_today') | float(0) }}"
+      - name: Wattlas batteri afladet i dag
+        unique_id: wattlas_i_dag_afladet
+        default_entity_id: sensor.wattlas_i_dag_afladet
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        availability: "{{ is_number(states('sensor.min_solis_battery_discharge_today')) }}"
+        state: "{{ states('sensor.min_solis_battery_discharge_today') | float(0) }}"
+  - binary_sensor:
+      - name: Wattlas tidsprogrammer aktive
+        unique_id: wattlas_tidsprogram_aktiv
+        default_entity_id: binary_sensor.wattlas_tidsprogram_aktiv
+        # kanalens egne tidsprogrammer virker, når Remote Dispatch findes i solax_modbus og inverteren kan det
+        state: "{{ states.button.min_solis_apply_remote_dispatch is not none and states('sensor.min_solis_remote_dispatch_function_version') | float(0) >= 1 }}"
+      - name: Wattlas inverter forbundet
+        unique_id: wattlas_forbindelse
+        default_entity_id: binary_sensor.wattlas_forbindelse
+        device_class: connectivity
+        state: >-
+          {% set s = states.sensor.min_solis_inverter_status %}
+          {{ s is not none and s.state not in ['unknown', 'unavailable'] and (now() - s.last_reported).total_seconds() < 300 }}
+      - name: Wattlas PV-måling OK
+        unique_id: wattlas_pv_maaling_ok
+        default_entity_id: binary_sensor.wattlas_pv_maaling_ok
+        state: "{{ is_number(states('sensor.min_solis_pv_total_power')) }}"
+
+# Produktion, forbrug og købt/solgt laves her med HA's egne værktøjer ud fra effekterne (samme tal for alle Solis-udgaver).
+sensor:
+  - platform: integration
+    source: sensor.emhass_solproduktion_samlet
+    name: wattlas_total_produktion  # navnet bliver entity_id
+    unique_id: wattlas_total_produktion
+    unit_prefix: k
+    round: 2
+    method: left
+    max_sub_interval: {minutes: 1}
+  - platform: integration
+    source: sensor.wattlas_solis_husforbrug
+    name: wattlas_total_forbrug  # navnet bliver entity_id
+    unique_id: wattlas_total_forbrug
+    unit_prefix: k
+    round: 2
+    method: left
+    max_sub_interval: {minutes: 1}
+  - platform: integration
+    source: sensor.wattlas_solis_netkoeb
+    name: wattlas_total_koebt  # navnet bliver entity_id
+    unique_id: wattlas_total_koebt
+    unit_prefix: k
+    round: 2
+    method: left
+    max_sub_interval: {minutes: 1}
+  - platform: integration
+    source: sensor.wattlas_solis_solgt
+    name: wattlas_total_solgt  # navnet bliver entity_id
+    unique_id: wattlas_total_solgt
+    unit_prefix: k
+    round: 2
+    method: left
+    max_sub_interval: {minutes: 1}
+utility_meter:
+  wattlas_i_dag_produktion:
+    unique_id: wattlas_i_dag_produktion
+    source: sensor.wattlas_total_produktion
+    cycle: daily
+  wattlas_i_dag_forbrug:
+    unique_id: wattlas_i_dag_forbrug
+    source: sensor.wattlas_total_forbrug
+    cycle: daily
+  wattlas_i_dag_koebt:
+    unique_id: wattlas_i_dag_koebt
+    source: sensor.wattlas_total_koebt
+    cycle: daily
+  wattlas_i_dag_solgt:
+    unique_id: wattlas_i_dag_solgt
+    source: sensor.wattlas_total_solgt
+    cycle: daily
+
+automation:
+  - id: wattlas_solis_styring
+    alias: Wattlas Solis – styring
+    description: >-
+      Det eneste sted, Wattlas styrer Solis (Remote Dispatch). Lader fra nettet (fornyes hvert minut, kun op til det aktive
+      programs SOC), holder batteriet (hverken ladning eller afladning) eller giver inverteren sin egen drift tilbage. Uden for
+      styringen slås kun Wattlas' egen Remote Dispatch fra, og et stoppet solsalg gives tilbage.
+    # en ny ordre afbryder den gamle: en kø ville kunne sende en forældet ladeordre, efter at ladningen er stoppet
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: [input_boolean.wattlas_solis_netladning, input_number.wattlas_solis_netladestroem,
+                    input_boolean.emhass_styring_aktiv, input_boolean.emhass_har_overtaget]
+      - trigger: state
+        entity_id: [input_boolean.wattlas_solis_p1, input_boolean.wattlas_solis_p2, input_boolean.wattlas_solis_p3,
+                    input_boolean.wattlas_solis_p4, input_boolean.wattlas_solis_p5, input_boolean.wattlas_solis_p6]
+      - trigger: time_pattern
+        minutes: /1
+      - trigger: homeassistant
+        event: start
+    variables:
+      periode: "{{ 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 }}"
+      soc: "{{ states('sensor.min_solis_battery_soc') | float(-1) }}"
+      maal: "{{ states('input_number.wattlas_solis_p' ~ periode ~ '_soc') | float(0) }}"
+      effekt: "{{ states('input_number.wattlas_solis_p' ~ periode ~ '_power') | float(0) }}"
+      # solax_modbus tager højst 24000 W
+      loft: "{{ [states('input_number.wattlas_maks_ladeeffekt_w') | float(0), 24000] | min }}"
+      # effekten fra nettet i hele 100 W, aldrig over loftet
+      watt: "{{ ([states('input_number.wattlas_solis_netladestroem') | float(0) * 50, loft] | min / 100) | round(0, 'floor') * 100 }}"
+      styrer: "{{ is_state('input_boolean.emhass_styring_aktiv', 'on') and is_state('input_boolean.emhass_har_overtaget', 'on') }}"
+      overskud: "{{ states('sensor.min_solis_pv_total_power') | float(0) - states('sensor.wattlas_solis_husforbrug') | float(0) }}"
+      tilstand: >-
+        {% if styrer and is_state('input_boolean.wattlas_solis_netladning', 'on')
+              and is_state('input_boolean.wattlas_solis_p' ~ periode, 'on') and watt >= 100 and 0 <= soc < maal %}lad
+        {% elif styrer and (soc <= maal or effekt < 50) and overskud < 200 %}gem
+        {% else %}fri{% endif %}
+      valg: "{{ 'Battery Charge' if tilstand == 'lad' else 'Battery Hold' }}"
+    conditions:
+      # solax_modbus skal være klar (ved opstart kan Wattlas komme før inverteren), og inverteren skal kunne Remote Dispatch
+      - condition: template
+        value_template: >-
+          {{ states.button.min_solis_apply_remote_dispatch is not none and states.button.min_solis_prepare_remote_dispatch is not none
+             and states.select.min_solis_dispatch_control_mode is not none and soc >= 0
+             and states('sensor.min_solis_remote_dispatch_function_version') | float(0) >= 1 }}
+    actions:
+      - choose:
+          - conditions: "{{ tilstand in ['lad', 'gem'] }}"
+            sequence:
+              # tallene ligger kun i Home Assistant, til "Apply" sender dem (de står som "unknown", til de er skrevet første gang)
+              - if: "{{ states('number.min_solis_dispatch_failsafe_interval') | float(0) != 5 }}"
+                then: [{action: number.set_value, target: {entity_id: number.min_solis_dispatch_failsafe_interval}, data: {value: 5}}]
+              - if: "{{ not is_state('select.min_solis_dispatch_control_mode', valg) }}"
+                then: [{action: select.select_option, target: {entity_id: select.min_solis_dispatch_control_mode}, data: {option: "{{ valg }}"}}]
+              - if: "{{ (states('number.min_solis_dispatch_power') | float(-1) - (watt if tilstand == 'lad' else 0)) | abs >= 1 }}"
+                then: [{action: number.set_value, target: {entity_id: number.min_solis_dispatch_power}, data: {value: "{{ watt if tilstand == 'lad' else 0 }}"}}]
+              - if: "{{ not is_state('select.min_solis_dispatch_grid_charging', 'Allow') }}"
+                then: [{action: select.select_option, target: {entity_id: select.min_solis_dispatch_grid_charging}, data: {option: Allow}}]
+              - if: "{{ states('number.min_solis_dispatch_soc_minimum') | float(-1) != 0 }}"
+                then: [{action: number.set_value, target: {entity_id: number.min_solis_dispatch_soc_minimum}, data: {value: 0}}]
+              - if: "{{ states('number.min_solis_dispatch_soc_maximum') | float(-1) != 100 }}"
+                then: [{action: number.set_value, target: {entity_id: number.min_solis_dispatch_soc_maximum}, data: {value: 100}}]
+              - action: input_boolean.turn_on
+                target: {entity_id: input_boolean.wattlas_solis_fjern_styret}
+              # Prepare (slår Remote Dispatch til), medmindre den allerede er trykket efter sidste Disable og fulgt af en Apply (en
+              # knaps tilstand er tidspunktet for sidste tryk) – og hvert 10. minut, ved HA-start, og når målingerne modsiger ordren
+              # (inverteren er genstartet og har glemt den: så er den i gang igen, før kommando-tjekket spærrer efter 2 min)
+              - if: >-
+                  {% set d = as_timestamp(states('button.min_solis_disable_remote_dispatch'), 0) %}
+                  {% set p = as_timestamp(states('button.min_solis_prepare_remote_dispatch'), 0) %}
+                  {% set a = as_timestamp(states('button.min_solis_apply_remote_dispatch'), 0) %}
+                  {{ not d < p < a or now().minute % 10 == 0 or trigger.platform == 'homeassistant'
+                     or is_state_attr('sensor.emhass_maalekilde', 'balance_ok', false) }}
+                then:
+                  - action: button.press
+                    target: {entity_id: button.min_solis_prepare_remote_dispatch}
+                  # Solis skal have tid til at slå Remote Dispatch til, før kommandoen sendes (målt i solax_modbus: 2 s)
+                  - delay: {seconds: 2}
+              - action: button.press
+                target: {entity_id: button.min_solis_apply_remote_dispatch}
+        default:
+          # kun Wattlas' egen Remote Dispatch slås fra – har du selv slået den til, røres den ikke
+          - if: "{{ is_state('input_boolean.wattlas_solis_fjern_styret', 'on') }}"
+            then:
+              - action: button.press
+                target: {entity_id: button.min_solis_disable_remote_dispatch}
+              - action: input_boolean.turn_off
+                target: {entity_id: input_boolean.wattlas_solis_fjern_styret}
+          # stoppede Wattlas solsalget (negativ pris), må det ikke blive stående: din egen eksportgrænse tilbage
+          - if: "{{ not styrer and is_state('input_boolean.wattlas_solis_salg_stoppet', 'on') }}"
+            then: [{action: switch.turn_on, continue_on_error: true, target: {entity_id: switch.wattlas_solsalg}}]
+
+  - id: wattlas_solis_stroemgraenser
+    alias: Wattlas Solis – strømgrænser fra effekt
+    description: >-
+      Kanalen regner Solis-batteriet med 50 V, så Wattlas' strømgrænser (A) følger effekt-indstillingerne (W ÷ 50).
+      Ændrer du fx maks. netladeeffekt, følger maks. netladestrøm med.
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: state
+        entity_id: [input_number.wattlas_maks_ladeeffekt_w, input_number.wattlas_maks_afladeeffekt_w, input_number.wattlas_maks_netladeeffekt_w]
+      - trigger: homeassistant
+        event: start
+    actions:
+      - repeat:
+          for_each:
+            - {a: input_number.wattlas_maks_ladestroem_a, w: input_number.wattlas_maks_ladeeffekt_w}
+            - {a: input_number.wattlas_maks_afladestroem_a, w: input_number.wattlas_maks_afladeeffekt_w}
+            - {a: input_number.wattlas_maks_netladestroem_a, w: input_number.wattlas_maks_netladeeffekt_w}
+          sequence:
+            - if: >-
+                {{ states(repeat.item.w) | float(0) > 0
+                   and (states(repeat.item.a) | float(0) - (states(repeat.item.w) | float(0) / 50) | round(0)) | abs >= 1 }}
+              then:
+                - action: input_number.set_value
+                  target: {entity_id: "{{ repeat.item.a }}"}
+                  data: {value: "{{ (states(repeat.item.w) | float(0) / 50) | round(0) }}"}

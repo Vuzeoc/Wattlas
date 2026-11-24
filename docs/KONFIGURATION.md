@@ -55,13 +55,13 @@ alpha-begrænsning.
 | Helper | Eksempel |
 |---|---|
 | `wattlas_emhass_adresse` | `http://homeassistant.local:5000` (din HA-adresse + EMHASS-port) |
-| `wattlas_emhass_noegle` | API-nøglen fra EMHASS-app'en (vises skjult) |
 | `wattlas_solprognose_entitet` | `sensor.…_power_now` fra Helios Forecast, eller en anden sensor i samme format ([SOLPROGNOSE.md](SOLPROGNOSE.md)) |
 | `wattlas_vejr_entitet` | `weather.forecast_hjem` |
 | `wattlas_udetemperatur_entitet` | `sensor.udetemperatur` – **valgfri**. Tom = vejr-entitetens aktuelle temperatur bruges. En egen sensor er lidt mere præcis, men det er ikke nødvendigt |
 
-> API-nøglen ligger i HA's database som en helper-værdi. Alle med adgang til din HA kan læse den. Det er samme niveau som
-> resten af HA. Del aldrig skærmbilleder af Indstillinger → Hjælpere.
+**API-nøglen til EMHASS** skrives i opsætningen og rettes under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* →
+Forbindelser og prognoser. Den gemmes i integrationens opsætning og findes ikke som tilstand, så den kan ikke læses af skabeloner eller
+almindelige brugere. Den ligger stadig i Home Assistants egne filer og backupper, som alle andre integrationers nøgler.
 
 ## Husprognose (valgfri)
 

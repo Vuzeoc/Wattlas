@@ -38,7 +38,7 @@ Tidsprogrammerne skifter kl. 01, 05, 09, 13, 17 og 21 (program 1 = 01–05 … p
 
 **Målinger** (`emhass_maalinger.yaml`): `sensor.emhass_m_*` for last, net, batteri (W, SOC, V, °C), inverter-status og
 temperatur, eksterne CT pr. fase (W) og netspænding pr. fase (V), plus `sensor.emhass_maalekilde` (`Deye`, `Solarman`,
-`SunMate`, `Huawei`, `Growatt` eller `ESPHome`). Hvert sæt kontrolleres for alder (højst 90 s), før det bruges.
+`SunMate`, `Huawei`, `Growatt`, `ESPHome`, `Sonnen`, `SolaX`, `Sofar`, `Solis` eller `SPF`). Hvert sæt kontrolleres for alder (højst 90 s), før det bruges.
 
 ## Deye via Solarman (`styrekanaler/deye_solarman`)
 
@@ -166,7 +166,7 @@ Forudsætninger:
 - Lokal forbindelse. **Growatts sky virker ikke:** den opdaterer hvert 5. minut, og fasegrænsen kræver målinger, der
   højst er 90 sekunder gamle.
 - *VPP Status* = *Enabled* i solax_modbus (Growatts tilladelse til fjernstyring, register 30100).
-- Trefaset inverter (X3). Enfasede MIN TL-XH og ældre Growatt (GEN3/SPH, SPF) understøttes ikke.
+- Trefaset inverter (X3). Enfasede MIN TL-XH og ældre Growatt (GEN3/SPH) understøttes ikke; SPF har sin egen kanal (nedenfor).
 
 Sådan styres:
 - **Netladning** = Growatts VPP-fjernstyring (*VPP Remote Control*, *VPP Power* i %, *VPP Time*). Wattlas skriver en
@@ -194,6 +194,114 @@ Sådan styres:
 Kanalen er bygget ud fra Growatts VPP-protokol (V2.05) og solax_modbus' kildekode og afprøvet med HA's
 konfigurationstjek og regnestykke-tests – **ikke** på en rigtig Growatt. Hold øje med den første nat: at batteriet lader
 ved netladning, at *VPP Remote Control* slås fra igen bagefter, og at købet ikke overstiger din fasegrænse.
+
+## SolaX (`styrekanaler/solax`) – eksperimentel, ikke kørt i drift
+
+Til trefasede SolaX-hybrider af generation 4 (X3-Hybrid G4) med SolaX-elmåler, tilsluttet **lokalt** via [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus)
+(Modbus TCP eller RS485). Opsætningen spørger efter batteriets SOC (`sensor.<navn>_battery_capacity`); navnet på
+solax_modbus-forbindelsen er prefixet for alle entiteter.
+
+Forudsætninger:
+- *Grid Voltage L1–L3* skal slås til i solax_modbus (de er slået fra som standard). Uden dem mangler fasespændingerne.
+- Fjernstyringen *Remotecontrol (mode 1)* skal findes i solax_modbus (G4 eller nyere).
+
+Sådan styres:
+- **Netladning** = *Remotecontrol Power Control (mode 1)* = *Enabled Power Control* med den ønskede effekt fra nettet
+  (*Remotecontrol Active Power*, hele 100 W, aldrig over din maks. ladeeffekt). Kommandoen gentages af solax_modbus selv
+  (*Autorepeat Duration* 10 min) og fornyes hvert minut – går Home Assistant ned, går SolaX tilbage til egen drift.
+  Registrene gemmes ikke i inverterens hukommelse, så hyppige skrivninger slider ikke.
+- **Gem batteriet** = *Enabled No Discharge*. solax_modbus lader med vilje batteriet aflade ca. 150 W i den tilstand. Bruges
+  kun uden soloverskud (under 200 W) – med overskud kører inverteren selv, så solen kan lade.
+- **Fri** = fjernstyringen *Disabled* (kun Wattlas' egen – har du selv slået den til, røres den ikke).
+- **Solsalg fra** = *Export Control User Limit* 0 W; din egen grænse huskes og sættes tilbage.
+- **Højvoltbatteri:** fast beregningsspænding 50 V som Huawei-kanalen.
+- **Fortegn:** solax_modbus melder elmåleren positiv ved salg og *Battery Power Charge* positiv ved ladning; kanalen
+  vender dem til kernens retning. Elmåleren giver hver fase, så fasegrænsen får rigtige tal.
+- **Kommando-tjek:** som Growatt – aflader batteriet, mens der bedes om ladning, eller lades der mere fra nettet end bedt,
+  bruges målingerne ikke efter 2 minutter, og kanalen spærres i 1 time.
+
+Afprøvet i en test-Home Assistant med den rigtige solax_modbus (2026.11.04) mod en falsk inverter (hele kæden: priser, plan,
+netladning, fasegrænse, genstart) – **ikke** på en rigtig SolaX.
+
+## Sofar (`styrekanaler/sofar`) – eksperimentel, ikke kørt i drift
+
+Til trefasede Sofar HYD-hybrider (fx HYD 5–20KTL-3PH) via [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus). Opsætningen spørger efter
+`sensor.<navn>_battery_capacity_total`.
+
+Overtager Wattlas, sender den en timeout på 10 minutter (*Return to Previous Mode*) til inverteren, vælger *Passive Mode* og
+fornyer sine tal hvert minut. Slippes styringen – eller går Home Assistant ned – løber timeouten ud, og Sofar går selv tilbage
+til den tilstand, den stod i før (fx Self Use). Uden for styringen og i skygge skriver Wattlas intet. Har du din egen
+Passive-timeout i inverteren, erstattes den.
+
+Sådan styres (tre tal med *Passive: Update Battery Charge/Discharge*):
+- **Netladning** = mindst den bedte effekt ind i batteriet (solen tæller med), højst din maks. ladeeffekt; net-mål 0 W.
+- **Gem batteriet** = batteriet må lade, ikke aflade.
+- **Fri** = som Self Use: lade og aflade frit inden for dine maks.-effekter.
+- **Solsalg fra** = *FeedIn: Maximum Power* 0 W (med *FeedIn: Update*). Kræver, at du har valgt *FeedIn: Limitation Mode*
+  og *FeedIn: Maximum Power* i solax_modbus (de er tomme i en ny installation) – ellers rører Wattlas den ikke.
+- **Fortegn er antaget:** solax_modbus dokumenterer ikke retningen på *Active Power PCC* og *Battery Power Total* (kW).
+  Kanalen antager salg og ladning positive og tjekker det: sol + afladning + køb skal give husets forbrug, og faserne skal
+  summe til totalen. Passer det ikke i 2 minutter, bruges målingerne ikke, og Wattlas styrer ikke.
+
+Afprøvet i en test-Home Assistant med den rigtige solax_modbus (2026.11.04) mod en falsk inverter (hele kæden,
+forkerte fortegn, timeout, genstart) – **ikke** på en rigtig Sofar.
+
+## Solis (`styrekanaler/solis`) – eksperimentel, ikke kørt i drift
+
+Til trefasede Solis-hybrider med Solis-elmåler via [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus), plugin *Solis FB00*, hvor inverteren kan
+*Remote Dispatch* (*Remote Dispatch Function Version* 1 eller mere – den bruger opsætningen også til at finde prefixet).
+
+Sådan styres (*Remote Dispatch*: registrene ligger kun i inverterens arbejdshukommelse, og hver kommando udløber efter
+*Dispatch Failsafe Interval*, som kanalen sætter til 5 minutter):
+- **Netladning** = *Battery Charge* med positiv effekt og netladning *Allow*.
+- **Gem batteriet** = *Battery Hold* (hverken ladning eller afladning). Kun uden soloverskud – ellers egen drift.
+- **Fri** = *Disable Remote Dispatch* (kun Wattlas' egen).
+- Start: *Prepare Remote Dispatch*, 2 sekunder, så *Apply Remote Dispatch*. *Apply* fornyes hvert minut, *Prepare*
+  hvert 10. minut, ved Home Assistant-start og når målingerne modsiger ordren (inverteren er genstartet). Går Home Assistant ned, udløber kommandoen, og Solis kører sin egen tilstand.
+- Kun de tilstande, solax_modbus selv har set virke på en rigtig Solis (*Battery Charge*, *Battery Hold*, *Disable*).
+  solax_modbus har kun prøvet Remote Dispatch på én enfaset Solis – om din model og firmware gør det samme, ses først i drift.
+- **Solsalg fra** = *Backflow Power* 0 W (højst 9900 W); din egen grænse huskes. Kræver, at *Backflow Power Switch* står
+  på *On …*. Grænsen gemmes i inverterens hukommelse og skrives kun ved skift.
+- **Fortegn:** batteriet læses som to positive tal (*Battery Input/Output Energy*), så dets retning er sikker. Elmålerens
+  retning (*Meter Active Power Total*, kW) er antaget og tjekkes med samme regnestykke som Sofar; husforbruget er *House
+  Load* + *Bypass Load* (nødstrømsudgangen). Kommando-tjekket fra SolaX gælder også.
+
+Afprøvet i en test-Home Assistant med den rigtige solax_modbus (2026.11.04) mod en falsk inverter (hele kæden,
+forkerte fortegn, failsafe, genstart af inverter og Home Assistant) – **ikke** på en rigtig Solis.
+
+## Growatt SPF (`styrekanaler/growatt_spf`) – eksperimentel, ikke kørt i drift
+
+Til Growatts off-grid-invertere (enfaset, 48 V, fx SPF 5000 ES), der er koblet til **Solar Assistant**. Wattlas bruger Solar
+Assistants MQTT-emner direkte (`solar_assistant/…`), så det er ligegyldigt, hvad entiteterne hedder i Home Assistant.
+
+Forudsætninger:
+- *MQTT*-integrationen i Home Assistant får Solar Assistants emner (forbundet til Solar Assistants MQTT eller til en broker, den
+  sender til). Opsætningen lytter efter dem.
+- I Solar Assistant: *Configuration → MQTT Broker → Allow setting changes* slået til. Ellers afvises alt, hvad Wattlas sender.
+- Kun én inverter (`inverter_1`).
+
+Sådan styres:
+- **Netladning** = output *Utility first*, lader *Solar and utility simultaneously* og *Max grid charge current* i hele 10 A,
+  aldrig over det, inverterens net-indgang har plads til (fasegrænse × V − forbruget).
+- **Gem batteriet** = output *Utility first*, lader *Solar only*. Kun uden soloverskud (under 200 W).
+- **Fri** = output *Solar/Battery/Utility*, lader *Solar only*.
+- **Slippes styringen**, sættes dine egne tre værdier fra før tilbage.
+- **Sjældne skrivninger:** SPF gemmer indstillingerne i hukommelsen, som slides. Strømmen hæves højst hvert 3. minut, gem og
+  fri skifter højst hvert 10. minut, og efter 40 skrivninger på et døgn startes ingen ny netladning før midnat. Stop, lavere strøm og
+  tilbagelevering er altid tilladt.
+
+Begrænsninger – læs dem, før du slår styringen til:
+- **Ingen nedtælling.** Går Home Assistant eller Solar Assistant ned under netladning, lader inverteren videre med den sidste strøm,
+  til batteriet er fuldt.
+- **Fasegrænsen gælder kun inverterens egen net-indgang.** Wattlas kan ikke se husets andre forbrug på samme fase. Sæt den derfor til
+  det, den gruppe kan tåle.
+- **Intet salg.** Off-grid sælger ikke, men planen regner stadig med salgspriser. Sæt *elselskabets gebyr ved salg* til fx 5 kr./kWh i
+  opsætningen, så planen ikke sparer solen op til et salg, der ikke kan ske.
+- **Valgteksterne er ikke bekræftet på en SPF.** Hedder de noget andet på din model, afviser Solar Assistant dem, og kanalen melder sig
+  ikke klar efter 3 minutter (se `sensor.min_spf_svar`).
+
+Afprøvet i en test-Home Assistant med en rigtig MQTT-broker mod en **falsk** Solar Assistant (hele kæden, fasegrænse, afviste ordrer,
+død Solar Assistant, forkert fortegn, genstart) – **ikke** på en rigtig SPF eller Solar Assistant.
 
 ## SonnenBatterie (`styrekanaler/sonnen`) – eksperimentel, ikke kørt i drift
 

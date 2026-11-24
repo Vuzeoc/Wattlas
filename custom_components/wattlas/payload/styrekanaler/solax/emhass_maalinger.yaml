@@ -1,0 +1,325 @@
+# Wattlas styrekanal – SolaX: målinger fra solax_modbus (SolaX X3-Hybrid G4, trefaset; enheden min_solax_*).
+# Fortegn i solax_modbus: "Measured Power" (elmåleren) og "Measured Power L1–L3" er POSITIVE ved salg (husforbruget regnes
+# som inverter − målt), "Battery Power Charge" er positiv ved ladning. Til kernen: net positiv = køb, batteri positiv = afladning.
+# Fasetal: elmåleren giver hver fase for sig, så kernens fasegrænse får rigtige tal (modsat Growatt).
+# Batterispændingen er kanalens faste beregningsspænding på 50 V (højvoltbatteri, se wattlas_kanal_solax.yaml).
+template:
+- triggers:
+  - trigger: time_pattern
+    seconds: /10
+  - trigger: homeassistant
+    event: start
+  actions:
+  - variables:
+      sample: |-
+        {% set t = as_timestamp(now()) %}
+        {% set status = states('sensor.min_solax_run_mode') %}
+        {% set net = -(states('sensor.min_solax_grid_feed_in_power') | float(0)) %}
+        {% set imp = [0, net] | max %}
+        {% set load = states('sensor.min_solax_house_load') | float(0) %}
+        {% set ladning = states('sensor.min_solax_battery_power_charge') | float(0) %}
+        {% set chg = [0, ladning] | max %}
+        {% set dis = [0, -ladning] | max %}
+        {% set pv = states('sensor.min_solax_pv_power_total') | float(0) %}
+        {% set m = dict(
+          load_w_totalpower = load,
+          grid_out_total_power = net,
+          battery_output_w_power = -ladning,
+          battery_soc = states('sensor.min_solax_battery_capacity'),
+          battery_voltage = 50,
+          inverter_status = 'Normal' if status in ['Normal Mode', 'Normal (R)', 'Idle Mode'] else status,
+          battery_temperature = states('sensor.min_solax_battery_temperature'),
+          inverter_temperature = states('sensor.min_solax_inverter_temperature'),
+          external_ct_w_l1 = -(states('sensor.min_solax_measured_power_l1') | float(0)),
+          external_ct_w_l2 = -(states('sensor.min_solax_measured_power_l2') | float(0)),
+          external_ct_w_l3 = -(states('sensor.min_solax_measured_power_l3') | float(0)),
+          grid_current_v_l1 = states('sensor.min_solax_grid_voltage_l1'),
+          grid_current_v_l2 = states('sensor.min_solax_grid_voltage_l2'),
+          grid_current_v_l3 = states('sensor.min_solax_grid_voltage_l3')) %}
+        {% set kilder = ['sensor.min_solax_grid_feed_in_power', 'sensor.min_solax_house_load', 'sensor.min_solax_battery_power_charge',
+                         'sensor.min_solax_battery_capacity', 'sensor.min_solax_pv_power_total',
+                         'sensor.min_solax_measured_power_l1', 'sensor.min_solax_measured_power_l2', 'sensor.min_solax_measured_power_l3',
+                         'sensor.min_solax_grid_voltage_l1', 'sensor.min_solax_grid_voltage_l2', 'sensor.min_solax_grid_voltage_l3'] %}
+        {% set ns = namespace(ok=has_value('sensor.min_solax_run_mode'), aeldst=t) %}
+        {% for e in kilder %}
+          {% set s = states[e] %}
+          {% if s is none or not is_number(s.state) %}{% set ns.ok = false %}
+          {% else %}{% set ns.aeldst = [ns.aeldst, as_timestamp(s.last_reported, 0)] | min %}{% endif %}
+        {% endfor %}
+        {# Kommando-tjek, mens Wattlas beder SolaX om at lade: aflader batteriet i stedet, lades der tydeligt fra nettet,
+           uden at elmåleren viser køb (måleren mangler eller sidder forkert), eller lades der mere fra nettet end bedt om
+           (kernens fasegrænse regner med det, den bad om), bruges målingerne ikke. #}
+        {% set lader = is_state('input_boolean.wattlas_solax_fjern_styret', 'on')
+                       and is_state('select.min_solax_remotecontrol_power_control_mode_1', 'Enabled Power Control')
+                       and states('number.min_solax_remotecontrol_active_power_mode_1') | float(0) > 0 %}
+        {% set fra_net = chg - [0, pv - load] | max %}
+        {% set bedt = states('number.min_solax_remotecontrol_active_power_mode_1') | float(0) %}
+        {% set balance_ok = not (lader and (dis > 300 or (fra_net > 1000 and imp < 200) or fra_net > bedt * 1.25 + 300)) %}
+        {# Blokér først efter 2 min i træk: batteriet skifter ikke retning på et øjeblik, og målingerne læses ikke samtidig. #}
+        {% set fejl_siden = 0 if balance_ok else (state_attr('sensor.emhass_maalekilde', 'balance_fejl_siden') | float(0) or t) %}
+        {# Kommando-fejlene ses kun, mens der lades: stopper kernen ladningen, ser alt normalt ud igen, og den ville starte
+           forfra. Derfor spærres kanalen i 1 time efter en afvisning (shortcut: fast 1 time, ingen nulstilling – ret ved behov). #}
+        {% set spaerret_til = t + 3600 if not balance_ok and t - fejl_siden >= 120
+                              else state_attr('sensor.emhass_maalekilde', 'spaerret_til') | float(0) %}
+        {% set ok = ns.ok and (balance_ok or t - fejl_siden < 120) and t >= spaerret_til and 0 <= t - ns.aeldst <= 90 %}
+        {% set tider = namespace(d={}) %}
+        {% for k in m %}{% set tider.d = dict(tider.d, **{k: ns.aeldst}) %}{% endfor %}
+        {{ dict(source=('SolaX' if ok else 'Ingen'), values=(m if ok else {}),
+                times=(tider.d if ok else {}), solax_ok=ok, balance_ok=balance_ok, balance_fejl_siden=fejl_siden, spaerret_til=spaerret_til, time=t) }}
+  sensor:
+  - name: EMHASS målekilde
+    unique_id: emhass_maalekilde
+    default_entity_id: sensor.emhass_maalekilde
+    state: '{{ sample.source }}'
+    attributes:
+      values: '{{ sample[''values''] }}'
+      raw_reported: '{{ sample[''times''] }}'
+      solax_ok: '{{ sample[''solax_ok''] }}'
+      balance_ok: '{{ sample[''balance_ok''] }}'
+      balance_fejl_siden: '{{ sample[''balance_fejl_siden''] }}'
+      spaerret_til: '{{ sample[''spaerret_til''] }}'
+      sample_time: '{{ sample[''time''] }}'
+- sensor:
+  - name: EMHASS måling load_w_totalpower
+    unique_id: emhass_m_load_w_totalpower
+    default_entity_id: sensor.emhass_m_load_w_totalpower
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''load_w_totalpower'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_out_total_power
+    unique_id: emhass_m_grid_out_total_power
+    default_entity_id: sensor.emhass_m_grid_out_total_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_out_total_power'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_output_w_power
+    unique_id: emhass_m_battery_output_w_power
+    default_entity_id: sensor.emhass_m_battery_output_w_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_output_w_power'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_soc
+    unique_id: emhass_m_battery_soc
+    default_entity_id: sensor.emhass_m_battery_soc
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_soc'',0)
+        }}'
+    unit_of_measurement: '%'
+    device_class: battery
+    state_class: measurement
+  - name: EMHASS måling battery_voltage
+    unique_id: emhass_m_battery_voltage
+    default_entity_id: sensor.emhass_m_battery_voltage
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_voltage'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling inverter_status
+    unique_id: emhass_m_inverter_status
+    default_entity_id: sensor.emhass_m_inverter_status
+    state: '{% set v=(state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'')
+      %}{{ ''Normal'' if v|lower==''normal'' else v }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'') not
+      in [''unknown'',''unavailable''] }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''inverter_status'',0)
+        }}'
+  - name: EMHASS måling battery_temperature
+    unique_id: emhass_m_battery_temperature
+    default_entity_id: sensor.emhass_m_battery_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_temperature'',0)
+        }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling inverter_temperature
+    unique_id: emhass_m_inverter_temperature
+    default_entity_id: sensor.emhass_m_inverter_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''inverter_temperature'',0)
+        }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l1
+    unique_id: emhass_m_external_ct_w_l1
+    default_entity_id: sensor.emhass_m_external_ct_w_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l1'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l1
+    unique_id: emhass_m_grid_current_v_l1
+    default_entity_id: sensor.emhass_m_grid_current_v_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l1'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l2
+    unique_id: emhass_m_external_ct_w_l2
+    default_entity_id: sensor.emhass_m_external_ct_w_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l2'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l2
+    unique_id: emhass_m_grid_current_v_l2
+    default_entity_id: sensor.emhass_m_grid_current_v_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l2'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l3
+    unique_id: emhass_m_external_ct_w_l3
+    default_entity_id: sensor.emhass_m_external_ct_w_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l3'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l3
+    unique_id: emhass_m_grid_current_v_l3
+    default_entity_id: sensor.emhass_m_grid_current_v_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SolaX''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l3'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  binary_sensor:
+  - name: EMHASS styrekanal (SolaX)
+    unique_id: emhass_styrekanal_ok
+    default_entity_id: binary_sensor.emhass_styrekanal_ok
+    state: |-
+      {% set t=as_timestamp(now()) %}
+      {% set ns=namespace(ok=true) %}
+      {% for e in ['number.min_solax_remotecontrol_active_power_mode_1','number.min_solax_remotecontrol_autorepeat_duration_mode_1_9'] %}
+       {# solax_modbus' lokale tal er "unknown", til de er skrevet første gang – de skal bare findes #}
+       {% if states[e] is none or is_state(e, 'unavailable') %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {% for i in range(1,7) %}
+       {% for suffix in ['soc','power'] %}
+       {% if not is_number(states('number.wattlas_program_'~i~'_'~suffix)) %}{% set ns.ok=false %}{% endif %}
+       {% endfor %}
+       {% if not has_value('switch.emhass_netladning_p'~i) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {{ ns.ok and is_state_attr('sensor.emhass_maalekilde','solax_ok',true)
+       and 0<=t-(state_attr('sensor.emhass_maalekilde','sample_time')|float(0))<=90
+       and has_value('select.min_solax_remotecontrol_power_control_mode_1')
+       and states.button.min_solax_remotecontrol_trigger_mode_1_7 is not none
+       and states('input_number.wattlas_maks_ladeeffekt_w')|float(0) > 0 }}
+  - name: EMHASS mangler inverterstyring
+    unique_id: emhass_ui_styrekanalfejl
+    default_entity_id: binary_sensor.emhass_ui_styrekanalfejl
+    state: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') and not is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
+      }}'
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 30
+    attributes:
+      forklaring: SolaX-styrekanalen er ikke klar – målinger mangler eller er gamle, fjernstyringen (Remotecontrol, mode 1) findes
+        ikke i solax_modbus (kræver en G4 eller nyere), eller batteriet gjorde det modsatte af, hvad Wattlas bad om. Netopladning er
+        forsøgt stoppet; faktisk inverterdrift skal kontrolleres.

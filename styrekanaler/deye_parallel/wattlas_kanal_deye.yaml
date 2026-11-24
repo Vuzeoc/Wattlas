@@ -303,7 +303,7 @@ template:
         unit_of_measurement: kWh
         device_class: energy
         state_class: total_increasing
-        availability: "{{ has_value('sensor.min_inverter_today_production') and has_value('sensor.min_slave_today_production') }}"
+        availability: "{{ has_value('sensor.min_inverter_today_production') and has_value('sensor.min_slave_today_production') and (states.sensor.min_inverter_microinverter_energy_today is none or has_value('sensor.min_inverter_microinverter_energy_today')) }}"
         state: "{{ (states('sensor.min_inverter_today_production') | float(0) + states('sensor.min_slave_today_production') | float(0) + states('sensor.min_inverter_microinverter_energy_today') | float(0)) | round(2) }}"
       - name: Wattlas produktion i alt
         unique_id: wattlas_total_produktion
@@ -311,7 +311,7 @@ template:
         unit_of_measurement: kWh
         device_class: energy
         state_class: total_increasing
-        availability: "{{ has_value('sensor.min_inverter_total_production') and has_value('sensor.min_slave_total_production') }}"
+        availability: "{{ has_value('sensor.min_inverter_total_production') and has_value('sensor.min_slave_total_production') and (states.sensor.min_inverter_microinverter_energy is none or has_value('sensor.min_inverter_microinverter_energy')) }}"
         state: "{{ (states('sensor.min_inverter_total_production') | float(0) + states('sensor.min_slave_total_production') | float(0) + states('sensor.min_inverter_microinverter_energy') | float(0)) | round(2) }}"
       - name: Wattlas købt i dag
         unique_id: wattlas_i_dag_koebt

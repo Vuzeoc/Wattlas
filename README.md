@@ -111,12 +111,16 @@ Wattlas taler med inverteren gennem en **styrekanal**, en fil med adapter-entite
 | `styrekanaler/huawei` (+ `huawei_emma`) – Huawei SUN2000 + LUNA2000 med Huawei-elmåler eller EMMA via [Huawei Solar](https://github.com/wlcrs/huawei_solar) | testet mod en simuleret Huawei, **ikke kørt i drift endnu**; EMMA-udgaven er eksperimentel – se [STYREKANALER.md](docs/STYREKANALER.md) |
 | `styrekanaler/sonnen` – SonnenBatterie via det lokale API v2 (fw 1.40+), bidrag fra [hornbech](https://github.com/hornbech) | **eksperimentel**, ikke kørt i drift; kan ikke stoppe solsalg eller gemme batteriet – se [STYREKANALER.md](docs/STYREKANALER.md) |
 | `styrekanaler/growatt` – Growatt MOD/MID TL3-XH (3-faset hybrid, højvolt) lokalt via [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | **eksperimentel**, ikke kørt i drift; Growatts sky understøttes ikke – se [STYREKANALER.md](docs/STYREKANALER.md) |
+| `styrekanaler/solax` – SolaX X3-Hybrid G4 (3-faset, højvolt) lokalt via [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | **eksperimentel**, ikke kørt i drift – se [STYREKANALER.md](docs/STYREKANALER.md) |
+| `styrekanaler/sofar` – Sofar HYD 3-faset (Passive Mode) lokalt via solax_modbus | **eksperimentel**, ikke kørt i drift – se [STYREKANALER.md](docs/STYREKANALER.md) |
+| `styrekanaler/solis` – Solis hybrid 3-faset (Remote Dispatch, plugin Solis FB00) lokalt via solax_modbus | **eksperimentel**, ikke kørt i drift; kræver Remote Dispatch i firmwaren – se [STYREKANALER.md](docs/STYREKANALER.md) |
+| `styrekanaler/growatt_spf` – Growatt SPF off-grid (enfaset, 48 V, fx SPF 5000 ES) via Solar Assistants MQTT | **eksperimentel**, ikke kørt i drift; ingen nedtælling, intet salg – se [STYREKANALER.md](docs/STYREKANALER.md) |
 | Sunsynk / Sol-Ark / andre Deye-kloner | brug Deye-kanalen, hvis dine entiteter hedder det samme; ellers skriv din egen ([STYREKANALER.md](docs/STYREKANALER.md)) |
 
 Vi har kun en Deye at teste på. Har du en anden inverter, hjælper vi gerne med at bygge og teste en direkte kobling
 sammen med dig – opret et issue og fortæl, hvilken inverter du har.
 
-Begrænsninger i alpha: kun 48 V-batterier (spændingsvindue 45–58 V; Huawei- og Growatt-kanalen omregner deres højvoltbatteri), 3-faset net, dansk nettarif med tre tidsperioden
+Begrænsninger i alpha: kun 48 V-batterier (spændingsvindue 45–58 V; Huawei-, Growatt-, SolaX-, Sofar- og Solis-kanalen omregner deres højvoltbatteri), 3-faset net, dansk nettarif med tre tidsperioden
 (0–6, 6–17/21–24, 17–21), spotpris fra Energi Data Service og solprognose i kvarterstal (Helios Forecast anbefales).
 
 ## Kom i gang
@@ -141,4 +145,4 @@ egen installation. Ret ikke direkte i dem i en pull request – beskriv ændring
 
 ## Licens
 
-MIT – se [LICENSE](LICENSE). Wattlas er ikke tilknyttet Deye, Huawei, Growatt, Sonnen, SunMate, EMHASS eller Home Assistant.
+MIT – se [LICENSE](LICENSE). Wattlas er ikke tilknyttet Deye, Huawei, Growatt, SolaX, Sofar, Solis, Solar Assistant, Sonnen, SunMate, EMHASS eller Home Assistant.

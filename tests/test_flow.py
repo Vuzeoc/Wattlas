@@ -1,6 +1,6 @@
 # Wattlas' opsætning, overførsel af indstillinger, opdatering og fjernelse i en rigtig (minimal) Home Assistant.
 # Kør: python tests/test_flow.py   (kræver: pip install homeassistant)
-import asyncio, pathlib, shutil, sys, tempfile, types
+import asyncio, json, os, pathlib, shutil, sys, tempfile, time, types
 if sys.platform == 'win32':  # Home Assistant importerer to moduler, der kun findes på Linux
     for m in ('fcntl', 'resource'):
         mod = types.ModuleType(m); mod.__getattr__ = lambda n: (lambda *a, **k: (0, 0)); sys.modules[m] = mod
@@ -62,6 +62,10 @@ async def opsaet(hass, kanal, inverter, inv2=None):
     await hass.async_block_till_done()
 
 
+def alle_tilstande(hass):
+    return json.dumps([s.as_dict() for s in hass.states.async_all()], default=str)
+
+
 def issue(hass, navn):
     return ir.async_get(hass).async_get_issue('wattlas', navn)
 
@@ -110,16 +114,17 @@ async def main():
     hass.states.async_set('input_number.wattlas_batteri_kwh', '0.0')
     hass.states.async_set('input_number.wattlas_slid', '0.0')
     hass.states.async_set('input_number.wattlas_fase_graense_a', '18.0')  # allerede sat af brugeren – må ikke overskrives
-    hass.states.async_set('input_text.wattlas_emhass_noegle', '')
     hass.states.async_set('input_boolean.emhass_fuld_opladning', 'off')
     entry = await genindlaes(hass, genstart=True)
     assert ('input_number', 'set_value', 'input_number.wattlas_batteri_kwh', 20) in kald
     assert ('input_number', 'set_value', 'input_number.wattlas_slid', 0.25) in kald
     assert not any(k[2] == 'input_number.wattlas_fase_graense_a' for k in kald)
-    assert ('input_text', 'set_value', 'input_text.wattlas_emhass_noegle', 'hemmelig123') in kald
+    assert not any('noegle' in str(k[2]) or 'hemmelig123' in str(k[3]) for k in kald), 'nøglen må ikke sættes som tilstand'
     assert ('input_boolean', 'turn_on', 'input_boolean.emhass_fuld_opladning', None) in kald
     assert issue(hass, 'genstart') is None
-    assert 'emhass_noegle' not in entry.data and 'slid' in entry.data['overfoert'], 'nøglen må ikke blive liggende i integrationen'
+    assert entry.data['emhass_noegle'] == 'hemmelig123' and 'slid' in entry.data['overfoert'], 'nøglen ligger kun i integrationens opsætning'
+    assert hass.states.get('binary_sensor.wattlas_emhass_noegle_sat').state == 'on'
+    assert 'hemmelig123' not in alle_tilstande(hass)
     kald.clear()
     await genindlaes(hass, genstart=True)
     assert not kald, 'indstillingerne overføres kun én gang'
@@ -308,6 +313,121 @@ async def main():
     print('G Growatt opdatering: OK')
     await hass.async_stop(force=True)
 
+    # X: SolaX (solax_modbus, X3-Hybrid G4) – valgt via batteriets SOC ("Battery Capacity"), A-grænser fra W (højvolt),
+    #    og opdateringen består HA's konfigurationstjek
+    hass, cfg = await ny_hass('default_config:\n')
+    fm = hass.config_entries.flow
+    hass.states.async_set('sensor.x3_g4_battery_capacity', '50')
+    r = await fm.async_init('wattlas', context={'source': 'user'})
+    r = await fm.async_configure(r['flow_id'], {'kanal': 'solax'})
+    r = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.x3_g4_battery_capacity', 'inverter2': False})
+    assert r['step_id'] == 'tjek', r
+    r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
+    r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
+                                               'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    assert r['step_id'] == 'batteri' and not any(str(k).endswith('_a') for k in r['data_schema'].schema), 'SolaX spørges ikke om A'
+    r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
+    for t in ('elnet', 'priser'):
+        r = await fm.async_configure(r['flow_id'], TAL[t])
+    assert r['type'] == 'create_entry', r
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    assert entry.data['kanal'] == 'solax' and entry.data['prefix'] == 'x3_g4' and entry.data['tal']['maks_ladestroem_a'] == 200, entry.data
+    kanalfil = (cfg / 'packages/wattlas_kanal/wattlas_kanal_solax.yaml').read_text(encoding='utf-8')
+    assert 'button.x3_g4_remotecontrol_trigger_mode_1_7' in kanalfil and 'min_solax' not in kanalfil
+    print('X SolaX: OK')
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+    entry = await genindlaes(hass, genstart=True)
+    assert issue(hass, 'opdatering_fejlede') is None and entry.data['version'] != '0.0.1', 'SolaX-kanalen skal bestå konfigurationstjekket'
+    print('X SolaX opdatering: OK')
+    await hass.async_stop(force=True)
+
+    # Y: Sofar (solax_modbus, Passive Mode) – valgt via "Battery Capacity Total", A-grænser fra W, opdateringen består tjekket
+    hass, cfg = await ny_hass('default_config:\n')
+    fm = hass.config_entries.flow
+    hass.states.async_set('sensor.hyd_battery_capacity_total', '50')
+    r = await fm.async_init('wattlas', context={'source': 'user'})
+    r = await fm.async_configure(r['flow_id'], {'kanal': 'sofar'})
+    r = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.hyd_battery_capacity_total', 'inverter2': False})
+    assert r['step_id'] == 'tjek', r
+    r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
+    r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
+                                               'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
+    for t in ('elnet', 'priser'):
+        r = await fm.async_configure(r['flow_id'], TAL[t])
+    assert r['type'] == 'create_entry', r
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    kanalfil = (cfg / 'packages/wattlas_kanal/wattlas_kanal_sofar.yaml').read_text(encoding='utf-8')
+    assert entry.data['prefix'] == 'hyd' and 'button.hyd_passive_update_battery_charge_discharge' in kanalfil and 'min_sofar' not in kanalfil
+    print('Y Sofar: OK')
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+    entry = await genindlaes(hass, genstart=True)
+    assert issue(hass, 'opdatering_fejlede') is None and entry.data['version'] != '0.0.1', 'Sofar-kanalen skal bestå konfigurationstjekket'
+    print('Y Sofar opdatering: OK')
+    await hass.async_stop(force=True)
+
+    # Z: Solis (solax_modbus, plugin Solis FB00) – valgt via "Remote Dispatch Function Version", opdateringen består tjekket
+    hass, cfg = await ny_hass('default_config:\n')
+    fm = hass.config_entries.flow
+    hass.states.async_set('sensor.s6_remote_dispatch_function_version', '1')
+    r = await fm.async_init('wattlas', context={'source': 'user'})
+    r = await fm.async_configure(r['flow_id'], {'kanal': 'solis'})
+    r = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.s6_remote_dispatch_function_version', 'inverter2': False})
+    assert r['step_id'] == 'tjek', r
+    r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
+    r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
+                                               'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
+    for t in ('elnet', 'priser'):
+        r = await fm.async_configure(r['flow_id'], TAL[t])
+    assert r['type'] == 'create_entry', r
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    kanalfil = (cfg / 'packages/wattlas_kanal/wattlas_kanal_solis.yaml').read_text(encoding='utf-8')
+    assert entry.data['prefix'] == 's6' and 'button.s6_apply_remote_dispatch' in kanalfil and 'min_solis' not in kanalfil
+    print('Z Solis: OK')
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+    entry = await genindlaes(hass, genstart=True)
+    assert issue(hass, 'opdatering_fejlede') is None and entry.data['version'] != '0.0.1', 'Solis-kanalen skal bestå konfigurationstjekket'
+    print('Z Solis opdatering: OK')
+    await hass.async_stop(force=True)
+
+    # SPF: Growatt off-grid via Solar Assistants MQTT – ingen inverter-entitet at vælge, kun et tjek af, at emnerne kommer
+    hass, cfg = await ny_hass('default_config:\n')
+    fm = hass.config_entries.flow
+    CF = sys.modules['custom_components.wattlas.config_flow']
+    r = await fm.async_init('wattlas', context={'source': 'user'})
+    r = await fm.async_configure(r['flow_id'], {'kanal': 'spf'})
+    assert r['step_id'] == 'spf', r
+    r = await fm.async_configure(r['flow_id'], {})
+    assert r['errors'] == {'base': 'mqtt_mangler'}, r          # ingen MQTT-integration
+    rigtig = CF._sa_svarer
+
+    async def svarer(_hass):
+        return None
+    CF._sa_svarer = svarer
+    r = await fm.async_configure(r['flow_id'], {})
+    assert r['step_id'] == 'tjek', r
+    r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
+    r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
+                                               'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    for t in ('batteri', 'elnet', 'priser'):
+        r = await fm.async_configure(r['flow_id'], TAL[t])
+    assert r['type'] == 'create_entry', r
+    CF._sa_svarer = rigtig
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    kanalfil = (cfg / 'packages/wattlas_kanal/wattlas_kanal_spf.yaml').read_text(encoding='utf-8')
+    assert entry.data['prefix'] == 'min_spf' and 'solar_assistant/inverter_1/load_power/state' in kanalfil and entry.data['tal'].get('maks_ladestroem_a')
+    print('SPF via Solar Assistant: OK')
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+    entry = await genindlaes(hass, genstart=True)
+    assert issue(hass, 'opdatering_fejlede') is None and entry.data['version'] != '0.0.1', 'SPF-kanalen skal bestå konfigurationstjekket'
+    print('SPF opdatering: OK')
+    await hass.async_stop(force=True)
+
     # E2: Deye via ESPHome – valgt via PV1 Power, A-grænser spørges om (lavvolt), og opdateringen består konfigurationstjekket
     hass, cfg = await ny_hass('default_config:\n')
     await opsaet(hass, 'deye_esphome', 'sensor.sun12k_pv1_power')
@@ -475,8 +595,205 @@ async def main():
     r = await om.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5001', 'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
     assert r['type'] == 'create_entry', r
     assert ('input_text', 'set_value', 'input_text.wattlas_emhass_adresse', 'http://emhass:5001') in kald
-    assert not [k for k in kald if k[2] == 'input_text.wattlas_emhass_noegle'], kald
+    data = lambda: hass.config_entries.async_entries('wattlas')[0].data  # noqa: E731
+    assert data()['emhass_noegle'] == 'hemmelig123' and not [k for k in kald if 'noegle' in k[2]], kald
+    # ny nøgle: gemmes i opsætningen – og kun i den gamle hjælper, hvis pakker fra før 0.4.2 stadig kører
+    async def skift(noegle):
+        r = await om.async_init(entry.entry_id)
+        r = await om.async_configure(r['flow_id'], {'next_step_id': 'forbindelser'})
+        return await om.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5001', 'emhass_noegle': noegle,
+                                                       'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    for daarlig in ('kort', 'to linjer\nX-Andet: 1'):
+        assert (await skift(daarlig))['errors'] == {'emhass_noegle': 'noegle'}
+    assert (await skift('ny-noegle-{{ 1 }}"'))['type'] == 'create_entry'
+    assert data()['emhass_noegle'] == 'ny-noegle-{{ 1 }}"' and not [k for k in kald if 'noegle' in k[2]], kald
+    hass.states.async_set('input_text.wattlas_emhass_noegle', 'ny-noegle-{{ 1 }}"')
+    assert (await skift('nyeste-noegle'))['type'] == 'create_entry'
+    assert ('input_text', 'set_value', 'input_text.wattlas_emhass_noegle', 'nyeste-noegle') in kald
+    hass.states.async_remove('input_text.wattlas_emhass_noegle')
     print('K Konfigurer: OK')
+    await hass.async_stop(force=True)
+
+    # N: EMHASS-nøglen – migrering fra 0.4.1 (nøglen lå i en hjælper), manglende nøgle og selve kaldet til EMHASS
+    from aiohttp import ClientSession, web
+    from homeassistant.exceptions import HomeAssistantError
+    from homeassistant.helpers import entity_registry as er
+    from homeassistant.helpers.template import Template
+    import yaml
+    hass, cfg = await ny_hass('default_config:\n')
+    await opsaet(hass, 'deye', 'sensor.deye_x_pv_power')
+    W = sys.modules['custom_components.wattlas']
+    W.TJEK_S = 10 ** 6
+    GL, SAT = 'input_text.wattlas_emhass_noegle', 'binary_sensor.wattlas_emhass_noegle_sat'
+    fang_kald(hass)
+    hass.states.async_set('binary_sensor.wattlas_konfigureret', 'off')
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    reg = er.async_get(hass)
+
+    def som_041(tilstand, **attr):
+        hass.config_entries.async_update_entry(entry, data={**{k: v for k, v in entry.data.items() if k != 'emhass_noegle'}, 'overfoert': ['emhass_noegle', 'slid']})
+        hass.states.async_set(GL, tilstand, attr)
+    # 1) gyldig nøgle i den levende hjælper: flyttes (også før de nye filer lægges på plads)
+    som_041('gammel "nøgle" {{x}} 1')
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.4.1'})
+    rigtig_opdater, set_ved_install = W.installer.opdater, []
+    W.installer.opdater = lambda cfg_, data, v: (set_ved_install.append(entry.data.get('emhass_noegle')), rigtig_opdater(cfg_, data, v))[1]
+    entry = await genindlaes(hass)
+    W.installer.opdater = rigtig_opdater
+    assert set_ved_install == ['gammel "nøgle" {{x}} 1'], 'nøglen skal være gemt, før de nye filer lægges på plads'
+    assert entry.data['emhass_noegle'] == 'gammel "nøgle" {{x}} 1' and 'emhass_noegle' not in entry.data['overfoert'] and hass.states.get(SAT).state == 'on'
+    # ... og den gamle, døde registrering ryddes efter genstarten, en levende røres ikke
+    hass.states.async_remove(GL)
+    reg.async_get_or_create('input_text', 'input_text', 'wattlas_emhass_noegle', suggested_object_id='wattlas_emhass_noegle')
+    assert reg.async_get(GL) is not None
+    hass.states.async_set(GL, 'levende')
+    entry = await genindlaes(hass, genstart=True)
+    assert reg.async_get(GL) is not None, 'en levende hjælper må ikke fjernes'
+    hass.states.async_set(GL, 'unavailable', {'restored': True})
+    entry = await genindlaes(hass, genstart=True)
+    assert reg.async_get(GL) is None and issue(hass, 'noegle_mangler') is None
+    assert 'gammel "nøgle"' not in ''.join(f.read_text(encoding='utf-8') for f in cfg.rglob('*.yaml')), 'nøglen må ikke stå i filerne'
+    # 2) ingen brugbar nøgle: intet flyttes, startspærrens sensor er off, og brugeren får besked
+    for tilstand, attr in (('', {}), ('unknown', {}), ('unavailable', {'restored': True}), ('langnok-men-gendannet', {'restored': True})):
+        som_041(tilstand, **attr)
+        entry = await genindlaes(hass, genstart=True)
+        assert 'emhass_noegle' not in entry.data and hass.states.get(SAT).state == 'off', tilstand
+        assert issue(hass, 'noegle_mangler') is not None
+    hass.states.async_remove(GL)
+    # 3) kaldet: nøglen sendes i headeren, svaret er som rest_command's – også ved 401 – og fejl viser aldrig nøglen
+    set_, status = [], [200]
+
+    async def svar(req):
+        set_.append((req.path, req.headers.get('Authorization'), await req.json()))
+        return web.Response(status=status[0], text='svaret')
+    app = web.Application(); app.router.add_post('/{sti:.*}', svar)
+    runner = web.AppRunner(app); await runner.setup()
+    site = web.TCPSite(runner, '127.0.0.1', 0); await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    sess = ClientSession()  # HA's egen kræver zeroconf og netværk, som denne minimale HA ikke har
+    W.emhass.async_get_clientsession = lambda _hass: sess
+    adr = lambda p: hass.states.async_set('input_text.wattlas_emhass_adresse', f'http://127.0.0.1:{p}/')  # noqa: E731
+    kald_emhass = lambda h='publish-data', **d: hass.services.async_call('wattlas', 'emhass', {'handling': h, 'data': d}, blocking=True, return_response=True)  # noqa: E731
+
+    async def afvist(hvad):
+        try:
+            await hvad
+        except HomeAssistantError as e:
+            assert 'hemmelig-9' not in str(e) and e.__cause__ is None
+            return str(e)
+        raise AssertionError('skulle være afvist')
+    adr(port)
+    assert 'mangler' in await afvist(kald_emhass())
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'emhass_noegle': 'hemmelig-9'})
+    await hass.async_block_till_done()
+    assert hass.states.get(SAT).state == 'on'
+    assert await kald_emhass('naive-mpc-optim', a=[1.5], b=False) == {'status': 200, 'content': 'svaret'}
+    assert set_ == [('/action/naive-mpc-optim', 'Bearer hemmelig-9', {'a': [1.5], 'b': False})], set_
+    status[0] = 401
+    assert (await kald_emhass())['status'] == 401
+    await runner.cleanup()
+    assert 'svarede ikke' in await afvist(kald_emhass())
+    await sess.close()
+    try:
+        await kald_emhass('../config')
+        raise AssertionError('kun de to handlinger må kaldes')
+    except __import__('voluptuous').Invalid:
+        pass
+    assert 'hemmelig-9' not in alle_tilstande(hass)
+    # 4) scriptets skabeloner giver det samme indhold som før (dict, ikke tekst)
+    trin = []
+
+    def find(x):
+        if isinstance(x, dict):
+            if x.get('action') == 'wattlas.emhass':
+                trin.append(x['data'])
+            for v in x.values(): find(v)
+        elif isinstance(x, list):
+            for v in x: find(v)
+    find(yaml.safe_load((REPO / 'packages/wattlas/emhass_forbindelse.yaml').read_text(encoding='utf-8')))
+    assert [t['handling'] for t in trin] == ['naive-mpc-optim', 'publish-data', 'publish-data']
+    base = {'method_ts_round': 'first', 'continual_publish': False, 'set_use_battery': True, 'number_of_deferrable_loads': 0}
+    forbr = {'number_of_deferrable_loads': 1, 'custom_deferrable_forecast_id': [{'entity_id': 'sensor.p_deferrable0', 'unit_of_measurement': 'W', 'friendly_name': 'Wattlas fleksibel forbruger'}]}
+    for t, ekstra in zip(trin[1:], ({'publish_prefix': 'hh_'}, {})):
+        assert Template(t['data'], hass).async_render({'fb_ekstra': {}}) == {**base, **ekstra}
+        assert Template(t['data'], hass).async_render({'fb_ekstra': {'x': 1}}) == {**base, **ekstra, **forbr}
+    r = Template(trin[0]['data'], hass).async_render({'hus': {'ok': True, 'liste': [1, 2]}, 'beregning_basis': {'a': True}, 'fb_ekstra': {'b': 1}, 'hh_ekstra': {}})
+    assert r == {'a': True, 'load_forecast_method': 'list', 'load_power_forecast': [1, 2], 'b': 1}, r
+    # 5) fjernelse: nøglen forsvinder med opsætningen
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert not hass.services.has_service('wattlas', 'emhass') and not hass.config_entries.async_entries('wattlas')
+    print('N EMHASS-nøglen: migrering, kald og fjernelse: OK')
+    await hass.async_stop(force=True)
+
+    # U: én genstart – en nyere version på disken (hentet af Markedspladsen, endnu ikke indlæst) lægges på plads af den
+    #    kørende version med den NYE versions installer. Efter genstarten passer kode og filer, så der ikke skal genstartes igen.
+    hass, cfg = await ny_hass('default_config:\n')
+    await opsaet(hass, 'deye', 'sensor.deye_x_pv_power')
+    W = sys.modules['custom_components.wattlas']
+    W.TJEK_S = 10 ** 6  # Wattlas' eget minut-tjek må ikke køre i baggrunden samtidig med testens kald (de ville dele samme opdatering)
+    entry = await genindlaes(hass, genstart=True)
+    her = W.HER  # integrationens mappe på "disken" (den, modulet blev indlæst fra)
+    original = pathlib.Path(tempfile.mkdtemp()) / 'wattlas'
+    shutil.copytree(her, original, ignore=shutil.ignore_patterns('__pycache__'))
+    overblik, installeret = her / 'payload/packages/wattlas/emhass_overblik.yaml', cfg / 'packages/wattlas/emhass_overblik.yaml'
+
+    def hentet(version, tillaeg, alder_s):
+        """Som når Markedspladsen har lagt en ny version i mappen for alder_s sekunder siden."""
+        m = json.loads((original / 'manifest.json').read_text(encoding='utf-8'))
+        (her / 'manifest.json').write_text(json.dumps({**m, 'version': version}), encoding='utf-8')
+        overblik.write_text((original / 'payload/packages/wattlas/emhass_overblik.yaml').read_text(encoding='utf-8') + tillaeg, encoding='utf-8')
+        t = time.time() - alder_s
+        for f in her.rglob('*'):
+            if f.is_file():
+                os.utime(f, (t, t))
+
+    def backups():
+        return len(list(cfg.glob('wattlas_backup_*')))
+    try:
+        ir.async_delete_issue(hass, 'wattlas', 'genstart')
+        hass.data.pop(GENSTART, None)
+        # 1) filerne skrives stadig (lige ændret): der ventes
+        hentet('9.9.9', '\n# ny-9.9.9\n', 0)
+        await W._forbered_opdatering(hass, entry)
+        assert entry.data['version'] == W.VERSION and 'ny-9.9.9' not in installeret.read_text(encoding='utf-8'), 'en halvt hentet version må ikke lægges på plads'
+        # 2) filerne har ligget stille: den nye version lægges på plads nu, og der bedes om én genstart
+        hentet('9.9.9', '\n# ny-9.9.9\n', 100)
+        await W._forbered_opdatering(hass, entry)
+        assert entry.data['version'] == '9.9.9' and 'ny-9.9.9' in installeret.read_text(encoding='utf-8'), entry.data['version']
+        assert '?v=9.9.9' in (cfg / 'packages/wattlas/wattlas_frontend.yaml').read_text(encoding='utf-8')
+        assert issue(hass, 'genstart') is not None, 'brugeren skal bedes om (én) genstart'
+        # 3) efter genstarten kører den nye kode: filerne passer allerede, så der installeres ikke igen og bedes ikke om genstart
+        n = backups()
+        rigtig, W.VERSION = W.VERSION, '9.9.9'
+        ir.async_delete_issue(hass, 'wattlas', 'genstart')
+        entry = await genindlaes(hass, genstart=True)
+        W.VERSION = rigtig
+        assert backups() == n and issue(hass, 'genstart') is None and issue(hass, 'opdatering_fejlede') is None, 'der blev bedt om en genstart mere'
+        # 4) genindlæses Wattlas, mens den gamle kode stadig kører, må den ikke lægge sine egne (gamle) filer tilbage
+        hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
+        entry = await genindlaes(hass)
+        assert backups() == n and entry.data['version'] == '0.0.1', 'den gamle kode installerede oven i den nye version'
+        hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '9.9.9'})
+        # 5) en ny version, der ikke består konfigurationstjekket: alt rulles tilbage, og der prøves ikke igen før genstarten
+        hentet('9.9.10', '\nautomation: {{{\n', 100)
+        await W._forbered_opdatering(hass, entry)
+        tekst = installeret.read_text(encoding='utf-8')
+        assert entry.data['version'] == '9.9.9' and 'ny-9.9.9' in tekst and '{{{' not in tekst, 'den fejlende version blev ikke rullet tilbage'
+        n = backups()
+        await W._forbered_opdatering(hass, entry)
+        assert backups() == n and hass.data[W.FORSOEGT] == '9.9.10'
+        # 6) selve konfigurationstjekket går i stykker: også da rulles der tilbage
+        async def i_stykker(_hass):
+            raise OSError('tjekket kunne ikke køre')
+        rigtigt, W.async_check_ha_config_file = W.async_check_ha_config_file, i_stykker
+        hentet('9.9.11', '\n# ny-9.9.11\n', 100)
+        await W._forbered_opdatering(hass, entry)
+        W.async_check_ha_config_file = rigtigt
+        assert entry.data['version'] == '9.9.9' and 'ny-9.9.11' not in installeret.read_text(encoding='utf-8'), 'der blev ikke rullet tilbage'
+        print('U én genstart ved opdatering: OK')
+    finally:
+        shutil.copytree(original, her, dirs_exist_ok=True)
     await hass.async_stop(force=True)
 
     # F: opdateret uden genstart (koden på disken er nyere end den version, HA læste ved start) → opsætningen beder om genstart

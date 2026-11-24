@@ -1,0 +1,315 @@
+# Wattlas styrekanal – Growatt SPF: målinger fra Solar Assistants MQTT-emner (sensorerne min_spf_* i wattlas_kanal_spf.yaml).
+# Fortegn (Solar Assistant): net positiv ved køb, batteri positivt ved ladning. Til kernen: batteri positivt ved afladning.
+# Regnestykke-tjek: sol + køb − ladning skal give forbruget (rummeligt: omformeren har tab). Passer det ikke i 2 minutter (fx et
+# forkert fortegn), bruges målingerne ikke, og Wattlas styrer ikke.
+# Kommando-tjek: tager Solar Assistant ikke imod en indstilling i 3 minutter (fx "Allow setting changes" slået fra eller en anden
+# valgtekst på din model), eller aflader batteriet under netladning, bruges målingerne ikke.
+# Enfaset: net-indgangen regnes som fase 1; fase 2 og 3 er 0 W med samme spænding. Rigtig batterispænding (48 V).
+template:
+- triggers:
+  - trigger: time_pattern
+    seconds: /10
+  - trigger: homeassistant
+    event: start
+  actions:
+  - variables:
+      sample: |-
+        {% set t = as_timestamp(now()) %}
+        {% set status = states('sensor.min_spf_tilstand') %}
+        {% set net = states('sensor.min_spf_net') | float(0) %}
+        {% set load = states('sensor.min_spf_forbrug') | float(0) %}
+        {% set ladning = states('sensor.min_spf_batteri') | float(0) %}
+        {% set pv = states('sensor.min_spf_sol') | float(0) %}
+        {% set v = states('sensor.min_spf_netspaending') %}
+        {% set m = dict(
+          load_w_totalpower = load | round(0),
+          grid_out_total_power = net | round(0),
+          battery_output_w_power = -ladning | round(0),
+          battery_soc = states('sensor.min_spf_soc'),
+          battery_voltage = states('sensor.min_spf_batterispaending'),
+          inverter_status = status if 'fault' in status | lower or 'fejl' in status | lower else 'Normal',
+          battery_temperature = 'unavailable',
+          inverter_temperature = states('sensor.min_spf_temperatur'),
+          external_ct_w_l1 = net | round(0), external_ct_w_l2 = 0, external_ct_w_l3 = 0,
+          grid_current_v_l1 = v, grid_current_v_l2 = v, grid_current_v_l3 = v) %}
+        {% set kilder = ['sensor.min_spf_net', 'sensor.min_spf_forbrug', 'sensor.min_spf_batteri', 'sensor.min_spf_soc', 'sensor.min_spf_sol',
+                         'sensor.min_spf_netspaending', 'sensor.min_spf_batterispaending'] %}
+        {# Solar Assistant behøver ikke gentage uændrede tal (fx 0 W sol om natten): det nyeste af dem viser, at forbindelsen lever #}
+        {% set ns = namespace(ok=has_value('sensor.min_spf_tilstand'), nyest=0) %}
+        {% for e in kilder %}
+          {% set s = states[e] %}
+          {% if s is none or not is_number(s.state) %}{% set ns.ok = false %}
+          {% else %}{% set ns.nyest = [ns.nyest, as_timestamp(s.last_reported, 0)] | max %}{% endif %}
+        {% endfor %}
+        {% set afvig = (pv + net - ladning - load) | abs %}
+        {% set o = states.input_text.wattlas_spf_oensket %}
+        {% set styret = is_state('input_boolean.wattlas_spf_styret', 'on') %}
+        {% set taget = not styret or o is none or '|' not in o.state or t - as_timestamp(o.last_changed, 0) < 180
+                       or o.state == states('sensor.min_spf_output') ~ '|' ~ states('sensor.min_spf_lader') %}
+        {% set lader = styret and is_state('input_text.wattlas_spf_tilstand_nu', 'lad') and is_state('sensor.min_spf_lader', 'Solar and utility simultaneously') %}
+        {# en lavere strøm, inverteren ikke tager imod, ville sætte net-indgangens grænse ud af kraft #}
+        {% set sat = states.input_number.wattlas_spf_sat_stroem %}
+        {% set taget = taget and not (lader and sat is not none and t - as_timestamp(sat.last_changed, 0) > 180
+                                      and states('sensor.min_spf_netstroem') | float(0) > sat.state | float(0)) %}
+        {% set balance_ok = taget and afvig <= [600, 0.25 * [load, ladning | abs] | max] | max and not (lader and ladning < -300) %}
+        {% set fejl_siden = 0 if balance_ok else (state_attr('sensor.emhass_maalekilde', 'balance_fejl_siden') | float(0) or t) %}
+        {% set ok = ns.ok and (balance_ok or t - fejl_siden < 120) and 0 <= t - ns.nyest <= 90 %}
+        {% set tider = namespace(d={}) %}
+        {% for k in m %}{% set tider.d = dict(tider.d, **{k: ns.nyest}) %}{% endfor %}
+        {{ dict(source=('SPF' if ok else 'Ingen'), values=(m if ok else {}), times=(tider.d if ok else {}), spf_ok=ok, balance_ok=balance_ok,
+                balance_fejl_siden=fejl_siden, afvigelse_w=afvig | round(0), ordre_taget=taget, time=t) }}
+  sensor:
+  - name: EMHASS målekilde
+    unique_id: emhass_maalekilde
+    default_entity_id: sensor.emhass_maalekilde
+    state: '{{ sample.source }}'
+    attributes:
+      values: '{{ sample[''values''] }}'
+      raw_reported: '{{ sample[''times''] }}'
+      spf_ok: '{{ sample[''spf_ok''] }}'
+      balance_ok: '{{ sample[''balance_ok''] }}'
+      balance_fejl_siden: '{{ sample[''balance_fejl_siden''] }}'
+      afvigelse_w: '{{ sample[''afvigelse_w''] }}'
+      ordre_taget: '{{ sample[''ordre_taget''] }}'
+      sample_time: '{{ sample[''time''] }}'
+- sensor:
+  - name: EMHASS måling load_w_totalpower
+    unique_id: emhass_m_load_w_totalpower
+    default_entity_id: sensor.emhass_m_load_w_totalpower
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''load_w_totalpower'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''load_w_totalpower'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_out_total_power
+    unique_id: emhass_m_grid_out_total_power
+    default_entity_id: sensor.emhass_m_grid_out_total_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_out_total_power'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_out_total_power'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_output_w_power
+    unique_id: emhass_m_battery_output_w_power
+    default_entity_id: sensor.emhass_m_battery_output_w_power
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_output_w_power'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_output_w_power'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling battery_soc
+    unique_id: emhass_m_battery_soc
+    default_entity_id: sensor.emhass_m_battery_soc
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_soc'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_soc'',0)
+        }}'
+    unit_of_measurement: '%'
+    device_class: battery
+    state_class: measurement
+  - name: EMHASS måling battery_voltage
+    unique_id: emhass_m_battery_voltage
+    default_entity_id: sensor.emhass_m_battery_voltage
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_voltage'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_voltage'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling inverter_status
+    unique_id: emhass_m_inverter_status
+    default_entity_id: sensor.emhass_m_inverter_status
+    state: '{% set v=(state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'')
+      %}{{ ''Normal'' if v|lower==''normal'' else v }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_status'',''unavailable'') not
+      in [''unknown'',''unavailable''] }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''inverter_status'',0)
+        }}'
+  - name: EMHASS måling battery_temperature
+    unique_id: emhass_m_battery_temperature
+    default_entity_id: sensor.emhass_m_battery_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''battery_temperature'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''battery_temperature'',0)
+        }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling inverter_temperature
+    unique_id: emhass_m_inverter_temperature
+    default_entity_id: sensor.emhass_m_inverter_temperature
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''inverter_temperature'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''inverter_temperature'',0)
+        }}'
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l1
+    unique_id: emhass_m_external_ct_w_l1
+    default_entity_id: sensor.emhass_m_external_ct_w_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l1'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l1'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l1
+    unique_id: emhass_m_grid_current_v_l1
+    default_entity_id: sensor.emhass_m_grid_current_v_l1
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l1'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l1'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l2
+    unique_id: emhass_m_external_ct_w_l2
+    default_entity_id: sensor.emhass_m_external_ct_w_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l2'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l2'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l2
+    unique_id: emhass_m_grid_current_v_l2
+    default_entity_id: sensor.emhass_m_grid_current_v_l2
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l2'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l2'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  - name: EMHASS måling external_ct_w_l3
+    unique_id: emhass_m_external_ct_w_l3
+    default_entity_id: sensor.emhass_m_external_ct_w_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''external_ct_w_l3'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''external_ct_w_l3'',0)
+        }}'
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+  - name: EMHASS måling grid_current_v_l3
+    unique_id: emhass_m_grid_current_v_l3
+    default_entity_id: sensor.emhass_m_grid_current_v_l3
+    state: '{{ (state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable'')
+      }}'
+    availability: '{{ states(''sensor.emhass_maalekilde'') in [''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+      and is_number((state_attr(''sensor.emhass_maalekilde'',''values'') or {}).get(''grid_current_v_l3'',''unavailable''))
+      }}'
+    attributes:
+      kilde: '{{ states(''sensor.emhass_maalekilde'') }}'
+      raw_reported: '{{ (state_attr(''sensor.emhass_maalekilde'',''raw_reported'') or {}).get(''grid_current_v_l3'',0)
+        }}'
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+  binary_sensor:
+  - name: EMHASS styrekanal (SPF)
+    unique_id: emhass_styrekanal_ok
+    default_entity_id: binary_sensor.emhass_styrekanal_ok
+    state: |-
+      {% set t=as_timestamp(now()) %}
+      {% set ns=namespace(ok=true) %}
+      {% for e in ['sensor.min_spf_output','sensor.min_spf_lader','sensor.min_spf_netstroem'] %}
+       {% if not has_value(e) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {% for i in range(1,7) %}
+       {% for suffix in ['soc','power'] %}
+       {% if not is_number(states('number.wattlas_program_'~i~'_'~suffix)) %}{% set ns.ok=false %}{% endif %}
+       {% endfor %}
+       {% if not has_value('switch.emhass_netladning_p'~i) %}{% set ns.ok=false %}{% endif %}
+      {% endfor %}
+      {{ ns.ok and is_state_attr('sensor.emhass_maalekilde','spf_ok',true)
+       and 0<=t-(state_attr('sensor.emhass_maalekilde','sample_time')|float(0))<=90 }}
+  - name: EMHASS mangler inverterstyring
+    unique_id: emhass_ui_styrekanalfejl
+    default_entity_id: binary_sensor.emhass_ui_styrekanalfejl
+    state: '{{ is_state(''input_boolean.emhass_styring_aktiv'',''on'') and not is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
+      }}'
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 30
+    attributes:
+      forklaring: >-
+        SPF-styrekanalen er ikke klar – der kommer ingen målinger fra Solar Assistant over MQTT, regnestykket mellem sol, batteri, net og
+        forbrug passer ikke, eller Solar Assistant tog ikke imod en indstilling (er "Allow setting changes" slået til under MQTT Broker?
+        Se sensor.min_spf_svar). Netopladning er forsøgt stoppet; faktisk inverterdrift skal kontrolleres.

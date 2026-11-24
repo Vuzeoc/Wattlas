@@ -3,18 +3,22 @@
     "step": {
       "user": {
         "title": "Wattlas – vælg inverter-type",
-        "description": "Wattlas styrer dit batteri efter elprisen med EMHASS. Vælg, hvordan Home Assistant taler med din inverter.\n\n**Growatt** (eksperimentel): kun trefasede hybrid-invertere med Growatt-elmåler og lokal forbindelse via *solax_modbus* – ikke Growatts sky. Sæt *VPP Status* til *Enabled* i solax_modbus først.",
+        "description": "Wattlas styrer dit batteri efter elprisen med EMHASS. Vælg, hvordan Home Assistant taler med din inverter.\n\n**Growatt** (eksperimentel): kun trefasede hybrid-invertere med Growatt-elmåler og lokal forbindelse via *solax_modbus* – ikke Growatts sky. Sæt *VPP Status* til *Enabled* i solax_modbus først.\n\n**SolaX, Sofar og Solis** (eksperimentelle): kun trefasede hybrid-invertere lokalt via *solax_modbus*. SolaX: slå først *Grid Voltage L1–L3* til i solax_modbus. Solis: vælg plugin *solis_fb00*.",
         "data": {
           "kanal": "Inverter"
         }
       },
       "inverter": {
         "title": "Din inverter",
-        "description": "Vælg inverterens entitet, der slutter på `{suffix}` (Deye og Huawei: solcelle-effekten, Deye via ESPHome: *PV1 Power*, Growatt: batteriets SOC). De fleste har kun én inverter og skal ikke andet.\n\nHar du også en inverter **uden batteri** (fx et ældre anlæg), så slå *Ekstra inverter* til.",
+        "description": "Vælg inverterens entitet, der slutter på `{suffix}` (Deye og Huawei: solcelle-effekten, Deye via ESPHome: *PV1 Power*, Growatt: batteriets SOC, SolaX og Sofar: *Battery Capacity*, Solis: *Remote Dispatch Function Version*). De fleste har kun én inverter og skal ikke andet.\n\nHar du også en inverter **uden batteri** (fx et ældre anlæg), så slå *Ekstra inverter* til.",
         "data": {
           "inverter": "Inverterens entitet",
           "inverter2": "Jeg har også en ekstra inverter uden batteri"
         }
+      },
+      "spf": {
+        "title": "Growatt SPF via Solar Assistant",
+        "description": "Wattlas lytter på Solar Assistants MQTT-emner (solar_assistant/…) og skriver til dem. Det kræver *MQTT*-integrationen i Home Assistant, forbundet til Solar Assistants MQTT (eller til en broker, Solar Assistant sender til), og at *Allow setting changes* er slået til i Solar Assistant under Configuration → MQTT Broker.\n\nOff-grid og enfaset: kun én inverter, intet salg til nettet. **Går Home Assistant ned under netladning, lader inverteren videre, til batteriet er fuldt** – SPF har ingen nedtælling. Fasegrænsen gælder kun inverterens egen net-indgang.\n\nTryk *Send* – Wattlas lytter i op til 30 sekunder."
       },
       "sonnen": {
         "title": "SonnenBatterie: lokal forbindelse",
@@ -143,6 +147,8 @@
       "sonnen_adresse": "Skriv adressen som http://10.0.0.50 (uden sti).",
       "sonnen_token": "Tokenet ser forkert ud (kopiér det fra Software-Integration).",
       "sonnen_afvist": "Batteriet afviste tokenet. Er JSON API for Reading slået til, og er tokenet kopieret helt?",
+      "mqtt_mangler": "MQTT-integrationen findes ikke i Home Assistant – tilføj den under Indstillinger → Enheder og tjenester.",
+      "sa_svarer_ikke": "Der kom ingen emner fra Solar Assistant (solar_assistant/…) på 30 sekunder. Er MQTT-forbindelsen sat op?",
       "sonnen_svarer_ikke": "Batteriet svarer ikke på adressen (eller firmwaren er ældre end 1.40).",
       "forkert_emma": "Vælg EMMA's \"Feed in power\" (enheden EMMA).",
       "kun_deye": "En ekstra inverter kræver Deye.",
@@ -151,7 +157,7 @@
       "mangler": "Der mangler stadig noget med ❌.",
       "bekraeft": "Sæt flueben for at fortsætte trods advarslerne.",
       "adresse": "Adressen skal starte med http:// eller https://",
-      "noegle": "Nøglen er for kort.",
+      "noegle": "Nøglen skal være mindst 8 tegn uden linjeskift.",
       "prognose_format": "Sensoren har ikke en prognose med datetime og watts.",
       "prognose_kvarter": "Prognosen skal have en værdi pr. 15 minutter (se SOLPROGNOSE.md).",
       "over_nul": "Skal være større end 0."
@@ -171,6 +177,10 @@
         "sunmate": "SunMate",
         "huawei": "Huawei SUN2000 + LUNA2000 (via Huawei Solar)",
         "growatt": "Growatt MOD/MID TL3-XH (via solax_modbus, lokalt) – eksperimentel",
+        "solax": "SolaX X3-Hybrid G4 (via solax_modbus, lokalt) – eksperimentel",
+        "sofar": "Sofar HYD trefaset (via solax_modbus i Passive Mode, lokalt) – eksperimentel",
+        "spf": "Growatt SPF off-grid, fx SPF 5000 ES (via Solar Assistant, MQTT) – eksperimentel",
+        "solis": "Solis hybrid trefaset (via solax_modbus, Solis FB00, Remote Dispatch, lokalt) – eksperimentel",
         "sonnen": "SonnenBatterie (lokalt API v2) – eksperimentel"
       }
     },
@@ -221,9 +231,29 @@
         }
       }
     },
+    "noegle_mangler": {
+      "title": "Wattlas mangler EMHASS API-nøglen",
+      "description": "Wattlas kan ikke lave en plan uden nøglen. Skriv den under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* → Forbindelser og prognoser."
+    },
     "opdatering_fejlede": {
       "title": "Wattlas-opdateringen til {version} blev ikke gennemført",
       "description": "Den nye version bestod ikke Home Assistants konfigurationstjek, så den gamle er lagt tilbage og kører videre. Wattlas prøver igen ved næste genstart.\n\nFejl: {fejl}"
+    }
+  },
+  "services": {
+    "emhass": {
+      "name": "Kald EMHASS",
+      "description": "Bruges af Wattlas selv til at beregne og publicere planen. API-nøglen lægges på af integrationen.",
+      "fields": {
+        "handling": {
+          "name": "Handling",
+          "description": "Beregn (naive-mpc-optim) eller publicér (publish-data)."
+        },
+        "data": {
+          "name": "Data",
+          "description": "Det, der sendes til EMHASS."
+        }
+      }
     }
   },
   "options": {
@@ -327,7 +357,7 @@
     },
     "error": {
       "adresse": "Adressen skal starte med http:// eller https://",
-      "noegle": "Nøglen er for kort.",
+      "noegle": "Nøglen skal være mindst 8 tegn uden linjeskift.",
       "prognose_format": "Sensoren har ikke en prognose med datetime og watts.",
       "prognose_kvarter": "Prognosen skal have en værdi pr. 15 minutter (se SOLPROGNOSE.md).",
       "over_nul": "Skal være større end 0.",

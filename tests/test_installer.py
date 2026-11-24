@@ -164,6 +164,14 @@ assert 'Auth-Token: "Ab-12_x.y~z+/="' in ''.join(f.read_text(encoding='utf-8') f
 time.sleep(1.1)
 assert 'Ab-12_x.y~z+/=' not in i_backup(I.afinstaller(str(pl))), 'tokenet blev liggende efter fjernelsen'
 shutil.rmtree(pl, ignore_errors=True)
+# to installationer i samme sekund får hver sin backup-mappe (ellers lægger en tilbagerulning de forkerte filer tilbage)
+pl = ny('default_config:\n')
+k1 =I.installer(str(pl), 'deye', 'min_inverter', None, 'a1'); k2 = I.installer(str(pl), 'deye', 'min_inverter', None, 'a2')
+k3 = I.installer(str(pl), 'deye', 'min_inverter', None, 'a3')
+assert k2['backup'] != k3['backup'], (k2['backup'], k3['backup'])  # k1 havde intet at flytte, så den lavede ingen mappe
+I.rul_tilbage(k3)
+assert '?v=a2' in (pl / 'packages/wattlas/wattlas_frontend.yaml').read_text(encoding='utf-8'), 'tilbagerulningen lagde ikke den forrige version tilbage'
+shutil.rmtree(pl, ignore_errors=True)
 # afinstallation flytter til backup
 b = I.afinstaller(str(d))
 assert b and not (d / 'packages/wattlas').exists() and (pathlib.Path(b) / 'packages_wattlas').exists()

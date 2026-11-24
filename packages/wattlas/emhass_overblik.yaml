@@ -319,7 +319,7 @@ template:
   - name: EMHASS netdata til overvågning
     unique_id: emhass_ui_netdata_ok
     default_entity_id: binary_sensor.emhass_ui_netdata_ok
-    state: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman'',''SunMate'',''Huawei'',''Growatt'',''ESPHome'',''Sonnen''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
+    state: '{{ states(''sensor.emhass_maalekilde'') in [''Deye'',''Solarman'',''SunMate'',''Huawei'',''Growatt'',''ESPHome'',''Sonnen'',''SolaX'',''Sofar'',''Solis'',''SPF''] and 0<=as_timestamp(now())-(state_attr(''sensor.emhass_maalekilde'',''sample_time'')|float(0))<=25
       }}'
   - name: EMHASS målinger til beskedkontrol
     unique_id: emhass_ui_beskeddata_ok

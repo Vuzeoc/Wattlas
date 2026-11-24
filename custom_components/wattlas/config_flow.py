@@ -1,6 +1,7 @@
 """Opsætning af Wattlas: tjek forudsætninger, vælg inverter, udfyld indstillinger, installér."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import datetime
@@ -12,6 +13,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import selector as sel
@@ -19,16 +21,20 @@ from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.loader import async_get_integration
 
 from . import installer
-from .const import DOMAIN, EMHASS_SLUG, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TEKST, TRIN
+from .const import DOMAIN, EMHASS_SLUG, GAMMEL_NOEGLE, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TEKST, TRIN
 
 VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
 SUFFIX = {"deye": ("sensor", "_pv_power"), "sunmate": ("number", "_timepoint_1_power"), "huawei": ("sensor", "_input_power"),
-          "growatt": ("sensor", "_battery_soc"),
+          "growatt": ("sensor", "_battery_soc"), "solax": ("sensor", "_battery_capacity"), "sofar": ("sensor", "_battery_capacity_total"),
+          "solis": ("sensor", "_remote_dispatch_function_version"),
           "deye_esphome": ("sensor", "_pv1_power"), "deye_parallel": ("sensor", "_pv_power")}
 # Huawei (LUNA2000) og Growatt (ARK/APX) er højvoltbatterier; kernen regner i A ved et lavvoltbatteri. Kanalerne bruger derfor
 # en fast beregningsspænding, og A-indstillingerne udregnes fra W. Samme tal står i styrekanalerne (styrekanaler/huawei, growatt).
 HUAWEI_V = 50
-HOEJVOLT = ("huawei", "huawei_emma", "growatt")
+# kanaler, der selv laver inverterens entiteter (findes først efter installationen, ingen inverter-entitet at vælge)
+EGNE = ("sonnen", "spf")
+HOEJVOLT = ("huawei", "huawei_emma", "growatt", "solax", "sofar", "solis")
+SA_VENT_S = 30  # så længe ventes der på Solar Assistants emner
 A_FRA_W = {"maks_ladestroem_a": "maks_ladeeffekt_w", "maks_afladestroem_a": "maks_afladeeffekt_w",
            "maks_netladestroem_a": "maks_netladeeffekt_w"}
 
@@ -81,7 +87,8 @@ def _forbindelse_fejl(hass, ui: dict, kraev_noegle: bool) -> dict[str, str]:
     fejl = {}
     if not re.match(r"https?://", ui.get("emhass_adresse") or ""):
         fejl["emhass_adresse"] = "adresse"
-    if (kraev_noegle or ui.get("emhass_noegle")) and len(ui.get("emhass_noegle") or "") < 8:
+    noegle = ui.get("emhass_noegle") or ""
+    if (kraev_noegle or noegle) and (len(noegle) < 8 or not noegle.isprintable()):  # linjeskift mv. kan ikke stå i en HTTP-header
         fejl["emhass_noegle"] = "noegle"
     if (f := _prognose_fejl(hass, ui.get("solprognose") or "")):
         fejl["solprognose"] = f
@@ -116,6 +123,26 @@ def _med_a(kanal, tal: dict) -> dict:
     return tal
 
 
+async def _sa_svarer(hass) -> str | None:
+    """Kommer Solar Assistants emner over MQTT? None = ja, ellers fejlkoden (venter højst SA_VENT_S)."""
+    if not hass.services.has_service("mqtt", "publish"):
+        return "mqtt_mangler"
+    from homeassistant.components import mqtt
+    set_ = {e: asyncio.Event() for e in ("total/battery_state_of_charge", "inverter_1/output_source_priority")}
+    af = []
+    try:
+        for emne, e in set_.items():
+            af.append(await mqtt.async_subscribe(hass, f"solar_assistant/{emne}/state", lambda _b, e=e: e.set()))
+        async with asyncio.timeout(SA_VENT_S):
+            await asyncio.gather(*(e.wait() for e in set_.values()))
+    except (TimeoutError, HomeAssistantError):
+        return "sa_svarer_ikke"
+    finally:
+        for a in af:
+            a()
+    return None
+
+
 async def _sonnen_svarer(hass, host: str, token: str) -> str | None:
     """Læser batteriets status med tokenet. None = svarer; ellers en fejlkode."""
     from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -144,8 +171,7 @@ async def _laeg_filer(hass, d: dict) -> str | None:
     """Lægger Wattlas' filer på plads for opsætningen d og tjekker konfigurationen (rulles tilbage ved fejl).
     Returnerer en fejltekst – eller None: filerne ligger der, og Home Assistant skal genstartes (reparationen oprettes)."""
     try:
-        kvit = await hass.async_add_executor_job(installer.installer, hass.config.config_dir, d["kanal"], d["prefix"],
-                                                 d.get("inverter2"), VERSION, d.get("ekstra"), d.get("sonnen"))
+        kvit = await hass.async_add_executor_job(installer.opdater, hass.config.config_dir, dict(d), VERSION)
     except installer.InstallFejl as e:
         return str(e)
     res = await async_check_ha_config_file(hass)
@@ -185,12 +211,12 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
                 "fejl": f"Wattlas er lige blevet opdateret til {VERSION}. Genstart Home Assistant, og sæt Wattlas op bagefter."})
         if user_input is not None:
             self.d["kanal"] = user_input["kanal"]
-            if self.d["kanal"] == "sonnen":
-                return await self.async_step_sonnen()
+            if self.d["kanal"] in EGNE:
+                return await getattr(self, f"async_step_{self.d['kanal']}")()
             return await self.async_step_inverter()
         return self.async_show_form(step_id="user", data_schema=vol.Schema({
             vol.Required("kanal", default="deye"): sel.SelectSelector(sel.SelectSelectorConfig(
-                options=["deye", "deye_parallel", "deye_esphome", "sunmate", "huawei", "growatt", "sonnen"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
+                options=["deye", "deye_parallel", "deye_esphome", "sunmate", "huawei", "growatt", "solax", "sofar", "solis", "spf", "sonnen"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
 
     # 2 – vælg inverteren (de fleste har kun én)
     async def async_step_inverter(self, user_input=None) -> ConfigFlowResult:
@@ -228,6 +254,17 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="sonnen", errors=fejl, data_schema=vol.Schema({
             vol.Required("sonnen_host", default=(user_input or {}).get("sonnen_host", "http://")): sel.TextSelector(),
             vol.Required("sonnen_token"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD))}))
+
+    # 2 (SPF) – kanalen laver selv sensorerne af Solar Assistants MQTT-emner; her tjekkes kun, at emnerne kommer
+    async def async_step_spf(self, user_input=None) -> ConfigFlowResult:
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            if f := await _sa_svarer(self.hass):
+                fejl["base"] = f
+            else:
+                self.d.update(prefix="min_spf", inverter2=None)
+                return await self.async_step_tjek()
+        return self.async_show_form(step_id="spf", errors=fejl, data_schema=vol.Schema({}))
 
     # 2a – kun Deye i parallel: slaven er sin egen enhed i ha-solarman (sin egen logger); masteren er den, CT'erne sidder på
     async def async_step_slave(self, user_input=None) -> ConfigFlowResult:
@@ -329,8 +366,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 blok.append(f"❌ **{navn}** mangler – " + (f"[tilføj den]({link}), {hjælp}" if link else hjælp))
         alle = await hass.async_add_executor_job(installer.entiteter_i_kanal, self.d["kanal"], self.d["prefix"], self.d.get("ekstra"))
-        # Sonnen-kanalen laver selv batteriets entiteter (REST), så de findes først efter installationen
-        mangler = [e for e in alle if hass.states.get(e) is None and not e.endswith("_microinverter_power")] if self.d["kanal"] != "sonnen" else []
+        mangler = [e for e in alle if hass.states.get(e) is None and not e.endswith("_microinverter_power")] if self.d["kanal"] not in EGNE else []
         if mangler:
             vis = ", ".join(f"`{e}`" for e in mangler[:8]) + (f" og {len(mangler) - 8} til" if len(mangler) > 8 else "")
             adv.append(f"⚠️ Inverteren mangler {len(mangler)} entiteter, som Wattlas bruger: {vis}. "
@@ -459,11 +495,13 @@ class WattlasOptionsFlow(OptionsFlow):
             fejl = _forbindelse_fejl(self.hass, user_input, kraev_noegle=False)
             if not fejl:
                 for k, h in TEKST.items():
-                    v = user_input.get(k)
-                    if k == "emhass_noegle" and not v:
-                        continue  # tom = behold den nuværende nøgle
                     await self.hass.services.async_call("input_text", "set_value",
-                                                        {"entity_id": f"input_text.wattlas_{h}", "value": v or ""}, blocking=True)
+                                                        {"entity_id": f"input_text.wattlas_{h}", "value": user_input.get(k) or ""}, blocking=True)
+                if noegle := user_input.get("emhass_noegle"):  # tom = behold den nuværende nøgle
+                    self.hass.config_entries.async_update_entry(self.config_entry, data={**self.config_entry.data, "emhass_noegle": noegle})
+                    ir.async_delete_issue(self.hass, DOMAIN, "noegle_mangler")
+                    if self.hass.states.get(GAMMEL_NOEGLE):  # pakker fra før 0.4.2 kører endnu (genstart mangler) og læser nøglen her
+                        await self.hass.services.async_call("input_text", "set_value", {"entity_id": GAMMEL_NOEGLE, "value": noegle}, blocking=True)
                 return self.async_create_entry(data={})
         nu = {k: self._hjaelper("input_text", h) for k, h in TEKST.items()}
         d = lambda k: {"default": nu[k]} if nu.get(k) else {}  # noqa: E731

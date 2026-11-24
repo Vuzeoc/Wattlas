@@ -3,6 +3,8 @@
   "name": "Wattlas",
   "after_dependencies": [
     "hassio",
+    "input_text",
+    "mqtt",
     "recorder"
   ],
   "codeowners": [
@@ -18,5 +20,5 @@
   "issue_tracker": "https://github.com/Vuzeoc/Wattlas/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.4.1"
+  "version": "0.4.2"
 }

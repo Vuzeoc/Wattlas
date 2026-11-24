@@ -37,7 +37,7 @@ Normalt skal du ingenting. Det, folk typisk bruger:
 | Netselskabet skifter tarif (sommer/vinter) | Indstillinger → Enheder og tjenester → Wattlas → **Konfigurer** → *Priser* |
 | Forkert tal i opsætningen (fx fasegrænse, strømme i A) | samme sted: **Konfigurer** → *Batteri* eller *Elnet* – ændringen bruges med det samme |
 | Arbejde på inverter eller batteri | slå **Wattlas styrer batteriet** fra først |
-| Ny version af Wattlas | opdatér *Wattlas* i Markedspladsen, og tryk *Genstart* under Reparationer; dine indstillinger bevares |
+| Ny version af Wattlas | opdatér *Wattlas* i Markedspladsen, vent til reparationen *Genstart for at fuldføre Wattlas* kommer (under et minut), og tryk *Genstart*; dine indstillinger bevares. Genstarter du med det samme, beder Wattlas om én genstart mere |
 
 ## Wattlas Styring → Styring
 

@@ -1,0 +1,560 @@
+# Wattlas styrekanal – Growatt SPF (off-grid, enfaset, 48 V, fx SPF 5000 ES) via Solar Assistants MQTT.
+# EKSPERIMENTEL: skrevet ud fra Solar Assistants MQTT-vejledning og offentligt beskrevne emner – ikke kørt på et rigtigt anlæg, og
+# valgteksterne herunder er ikke bekræftet på en SPF. Kernen taler KUN med Wattlas-entiteterne herunder.
+#
+# Krav: MQTT-integrationen i Home Assistant får Solar Assistants emner (solar_assistant/…), og i Solar Assistant er
+# Configuration → MQTT Broker → "Allow setting changes" slået til. Kun én inverter (inverter_1).
+#
+# Sådan styres (skrives til solar_assistant/inverter_1/<navn>/set, og kun når inverterens egen værdi er en anden):
+#   netladning = output "Utility first" + lader "Solar and utility simultaneously" + max_grid_charge_current (hele 10 A)
+#   gem        = output "Utility first" + lader "Solar only": huset fra nettet, batteriet lades kun af sol. Kun uden soloverskud
+#   fri        = output "Solar/Battery/Utility" + lader "Solar only": huset fra sol og batteri
+#   slip       = dine egne tre værdier fra før Wattlas overtog, sættes tilbage
+#
+# SPF gemmer indstillingerne i inverterens hukommelse, som slides: strømmen hæves højst hvert 3. minut, der skiftes højst hvert 10. minut mellem gem og fri, og efter 40 skrivninger på et døgn startes ingen ny netladning før midnat. Ned og stop er altid tilladt.
+#
+# BEMÆRK: SPF har ingen nedtælling. Går Home Assistant eller Solar Assistant ned under netladning, lader den videre med den sidste
+# strøm, til batteriet er fuldt. Og inverteren ser kun sin egen net-indgang: fasegrænsen beskytter den, ikke husets andre forbrug.
+# Off-grid: intet salg til nettet. Solsalg-kontakten huskes kun.
+mqtt:
+  - sensor:
+      - {name: min_spf soc, unique_id: min_spf_soc, default_entity_id: sensor.min_spf_soc, state_topic: solar_assistant/total/battery_state_of_charge/state, unit_of_measurement: "%", device_class: battery, state_class: measurement, force_update: true}
+      - {name: min_spf batteri, unique_id: min_spf_batteri, default_entity_id: sensor.min_spf_batteri, state_topic: solar_assistant/total/battery_power/state, unit_of_measurement: W, device_class: power, state_class: measurement, force_update: true}
+      - {name: min_spf sol, unique_id: min_spf_sol, default_entity_id: sensor.min_spf_sol, state_topic: solar_assistant/inverter_1/pv_power/state, unit_of_measurement: W, device_class: power, state_class: measurement, force_update: true}
+      - {name: min_spf forbrug, unique_id: min_spf_forbrug, default_entity_id: sensor.min_spf_forbrug, state_topic: solar_assistant/inverter_1/load_power/state, unit_of_measurement: W, device_class: power, state_class: measurement, force_update: true}
+      - {name: min_spf net, unique_id: min_spf_net, default_entity_id: sensor.min_spf_net, state_topic: solar_assistant/inverter_1/grid_power/state, unit_of_measurement: W, device_class: power, state_class: measurement, force_update: true}
+      - {name: min_spf netspaending, unique_id: min_spf_netspaending, default_entity_id: sensor.min_spf_netspaending, state_topic: solar_assistant/inverter_1/grid_voltage/state, unit_of_measurement: V, device_class: voltage, state_class: measurement, force_update: true}
+      - {name: min_spf batterispaending, unique_id: min_spf_batterispaending, default_entity_id: sensor.min_spf_batterispaending, state_topic: solar_assistant/inverter_1/battery_voltage/state, unit_of_measurement: V, device_class: voltage, state_class: measurement, force_update: true}
+      - {name: min_spf temperatur, unique_id: min_spf_temperatur, default_entity_id: sensor.min_spf_temperatur, state_topic: solar_assistant/inverter_1/temperature/state, device_class: temperature, unit_of_measurement: "°C", state_class: measurement, force_update: true}
+      - {name: min_spf tilstand, unique_id: min_spf_tilstand, default_entity_id: sensor.min_spf_tilstand, state_topic: solar_assistant/inverter_1/device_mode/state}
+      - {name: min_spf output, unique_id: min_spf_output, default_entity_id: sensor.min_spf_output, state_topic: solar_assistant/inverter_1/output_source_priority/state}
+      - {name: min_spf lader, unique_id: min_spf_lader, default_entity_id: sensor.min_spf_lader, state_topic: solar_assistant/inverter_1/charger_source_priority/state}
+      - {name: min_spf netstroem, unique_id: min_spf_netstroem, default_entity_id: sensor.min_spf_netstroem, state_topic: solar_assistant/inverter_1/max_grid_charge_current/state, unit_of_measurement: A, device_class: current, state_class: measurement}
+      - {name: min_spf svar, unique_id: min_spf_svar, default_entity_id: sensor.min_spf_svar, state_topic: solar_assistant/set/response_message/state, value_template: "{{ value[:250] }}"}
+input_boolean:
+  wattlas_spf_netladning:
+    name: Wattlas SPF netladning (husket)
+  wattlas_spf_styret:
+    name: Wattlas SPF har overtaget indstillingerne
+  wattlas_spf_solsalg:
+    name: Wattlas SPF solsalg (husket – off-grid sælger ikke)
+  wattlas_spf_p1:
+    name: Wattlas Spf netladning program 1 (husket)
+  wattlas_spf_p2:
+    name: Wattlas Spf netladning program 2 (husket)
+  wattlas_spf_p3:
+    name: Wattlas Spf netladning program 3 (husket)
+  wattlas_spf_p4:
+    name: Wattlas Spf netladning program 4 (husket)
+  wattlas_spf_p5:
+    name: Wattlas Spf netladning program 5 (husket)
+  wattlas_spf_p6:
+    name: Wattlas Spf netladning program 6 (husket)
+input_text:
+  wattlas_spf_tilstand_nu:
+    name: Wattlas SPF tilstand (lad, gem, fri eller slip)
+    max: 10
+  wattlas_spf_oensket:
+    name: Wattlas SPF ønskede indstillinger
+    max: 120
+  wattlas_spf_egen_output:
+    name: Wattlas SPF – din egen output source priority (husket)
+    max: 60
+  wattlas_spf_egen_lader:
+    name: Wattlas SPF – din egen charger source priority (husket)
+    max: 60
+input_number:
+  wattlas_spf_netladestroem:
+    name: Wattlas SPF netladestrøm (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: A
+  wattlas_spf_egen_stroem:
+    name: Wattlas SPF – din egen netladestrøm (husket)
+    min: 0
+    max: 200
+    step: 1
+    unit_of_measurement: A
+  wattlas_spf_skrivninger:
+    name: Wattlas SPF skrivninger i dag
+    min: 0
+    max: 100000
+    step: 1
+  wattlas_spf_sat_stroem:
+    name: Wattlas SPF sidst sendte netladestrøm
+    min: 0
+    max: 200
+    step: 1
+    unit_of_measurement: A
+  wattlas_spf_p1_soc:
+    name: Wattlas Spf program 1 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_spf_p1_power:
+    name: Wattlas Spf program 1 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_spf_p2_soc:
+    name: Wattlas Spf program 2 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_spf_p2_power:
+    name: Wattlas Spf program 2 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_spf_p3_soc:
+    name: Wattlas Spf program 3 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_spf_p3_power:
+    name: Wattlas Spf program 3 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_spf_p4_soc:
+    name: Wattlas Spf program 4 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_spf_p4_power:
+    name: Wattlas Spf program 4 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_spf_p5_soc:
+    name: Wattlas Spf program 5 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_spf_p5_power:
+    name: Wattlas Spf program 5 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+  wattlas_spf_p6_soc:
+    name: Wattlas Spf program 6 SOC (husket)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+  wattlas_spf_p6_power:
+    name: Wattlas Spf program 6 effekt (husket)
+    min: 0
+    max: 50000
+    step: 10
+    unit_of_measurement: W
+template:
+  - switch:
+      - name: EMHASS netladning program 1
+        unique_id: emhass_netladning_p1
+        default_entity_id: switch.emhass_netladning_p1
+        state: "{{ is_state('input_boolean.wattlas_spf_p1', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_spf_p1}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_spf_p1}}]
+      - name: EMHASS netladning program 2
+        unique_id: emhass_netladning_p2
+        default_entity_id: switch.emhass_netladning_p2
+        state: "{{ is_state('input_boolean.wattlas_spf_p2', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_spf_p2}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_spf_p2}}]
+      - name: EMHASS netladning program 3
+        unique_id: emhass_netladning_p3
+        default_entity_id: switch.emhass_netladning_p3
+        state: "{{ is_state('input_boolean.wattlas_spf_p3', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_spf_p3}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_spf_p3}}]
+      - name: EMHASS netladning program 4
+        unique_id: emhass_netladning_p4
+        default_entity_id: switch.emhass_netladning_p4
+        state: "{{ is_state('input_boolean.wattlas_spf_p4', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_spf_p4}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_spf_p4}}]
+      - name: EMHASS netladning program 5
+        unique_id: emhass_netladning_p5
+        default_entity_id: switch.emhass_netladning_p5
+        state: "{{ is_state('input_boolean.wattlas_spf_p5', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_spf_p5}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_spf_p5}}]
+      - name: EMHASS netladning program 6
+        unique_id: emhass_netladning_p6
+        default_entity_id: switch.emhass_netladning_p6
+        state: "{{ is_state('input_boolean.wattlas_spf_p6', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_spf_p6}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_spf_p6}}]
+      - name: Wattlas netladning
+        unique_id: wattlas_netladning
+        default_entity_id: switch.wattlas_netladning
+        availability: "{{ has_value('sensor.min_spf_lader') }}"
+        state: "{{ is_state('input_boolean.wattlas_spf_netladning', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_spf_netladning}}]
+        # automationen stopper laderen med det samme (første ordre) – ikke også her, for hver skrivning slider på inverteren
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_spf_netladning}}]
+      - name: Wattlas solsalg
+        unique_id: wattlas_solsalg
+        default_entity_id: switch.wattlas_solsalg
+        state: "{{ is_state('input_boolean.wattlas_spf_solsalg', 'on') }}"
+        turn_on: [{action: input_boolean.turn_on, target: {entity_id: input_boolean.wattlas_spf_solsalg}}]
+        turn_off: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_spf_solsalg}}]
+  - number:
+      - name: Wattlas netladestrøm
+        unique_id: wattlas_netladestroem
+        default_entity_id: number.wattlas_netladestroem
+        availability: "{{ has_value('sensor.min_spf_netstroem') }}"
+        state: "{{ states('input_number.wattlas_spf_netladestroem') | float(0) }}"
+        min: 0
+        # enfaset: plads på inverterens net-indgang (fasegrænse × V − forbruget, som nettet også skal forsyne) med 10 % ladetab, i hele 10 A
+        max: >-
+          {% set vb = states('sensor.min_spf_batterispaending') | float(0) %}
+          {% set plads = states('input_number.wattlas_fase_graense_a') | float(0) * states('sensor.min_spf_netspaending') | float(0)
+                         - states('sensor.min_spf_forbrug') | float(999999) %}
+          {{ [100, (([0, plads] | max * 0.9 / vb) / 10) | round(0, 'floor') * 10] | min if vb > 0 else 0 }}
+        step: 10
+        unit_of_measurement: A
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_netladestroem}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 1 SOC
+        unique_id: wattlas_program_1_soc
+        default_entity_id: number.wattlas_program_1_soc
+        state: "{{ states('input_number.wattlas_spf_p1_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p1_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 1 effekt
+        unique_id: wattlas_program_1_power
+        default_entity_id: number.wattlas_program_1_power
+        state: "{{ states('input_number.wattlas_spf_p1_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p1_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 2 SOC
+        unique_id: wattlas_program_2_soc
+        default_entity_id: number.wattlas_program_2_soc
+        state: "{{ states('input_number.wattlas_spf_p2_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p2_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 2 effekt
+        unique_id: wattlas_program_2_power
+        default_entity_id: number.wattlas_program_2_power
+        state: "{{ states('input_number.wattlas_spf_p2_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p2_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 3 SOC
+        unique_id: wattlas_program_3_soc
+        default_entity_id: number.wattlas_program_3_soc
+        state: "{{ states('input_number.wattlas_spf_p3_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p3_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 3 effekt
+        unique_id: wattlas_program_3_power
+        default_entity_id: number.wattlas_program_3_power
+        state: "{{ states('input_number.wattlas_spf_p3_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p3_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 4 SOC
+        unique_id: wattlas_program_4_soc
+        default_entity_id: number.wattlas_program_4_soc
+        state: "{{ states('input_number.wattlas_spf_p4_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p4_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 4 effekt
+        unique_id: wattlas_program_4_power
+        default_entity_id: number.wattlas_program_4_power
+        state: "{{ states('input_number.wattlas_spf_p4_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p4_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 5 SOC
+        unique_id: wattlas_program_5_soc
+        default_entity_id: number.wattlas_program_5_soc
+        state: "{{ states('input_number.wattlas_spf_p5_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p5_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 5 effekt
+        unique_id: wattlas_program_5_power
+        default_entity_id: number.wattlas_program_5_power
+        state: "{{ states('input_number.wattlas_spf_p5_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p5_power}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 6 SOC
+        unique_id: wattlas_program_6_soc
+        default_entity_id: number.wattlas_program_6_soc
+        state: "{{ states('input_number.wattlas_spf_p6_soc') | float(0) }}"
+        min: 0
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p6_soc}, data: {value: "{{ value }}"}}]
+      - name: Wattlas program 6 effekt
+        unique_id: wattlas_program_6_power
+        default_entity_id: number.wattlas_program_6_power
+        state: "{{ states('input_number.wattlas_spf_p6_power') | float(0) }}"
+        min: 0
+        max: 50000
+        step: 10
+        unit_of_measurement: "W"
+        set_value: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_p6_power}, data: {value: "{{ value }}"}}]
+  - sensor:
+      - name: Wattlas maks. ladestrøm
+        unique_id: wattlas_maks_ladestroem
+        default_entity_id: sensor.wattlas_maks_ladestroem
+        unit_of_measurement: A
+        availability: "{{ states('input_number.wattlas_maks_ladestroem_a') | float(0) > 0 }}"
+        state: "{{ states('input_number.wattlas_maks_ladestroem_a') | float(0) }}"
+      - name: Wattlas maks. afladestrøm
+        unique_id: wattlas_maks_afladestroem
+        default_entity_id: sensor.wattlas_maks_afladestroem
+        unit_of_measurement: A
+        availability: "{{ states('input_number.wattlas_maks_afladestroem_a') | float(0) > 0 }}"
+        state: "{{ states('input_number.wattlas_maks_afladestroem_a') | float(0) }}"
+      - name: EMHASS Solproduktion samlet
+        unique_id: emhass_solproduktion_samlet
+        default_entity_id: sensor.emhass_solproduktion_samlet
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_spf_sol')) }}"
+        state: "{{ [0, states('sensor.min_spf_sol') | float(0)] | max | round(0) }}"
+      # effekter til dagstællerne (W). Solar Assistant: net positiv ved køb, batteri positiv ved ladning
+      - name: Wattlas SPF netkøb
+        unique_id: wattlas_spf_netkoeb
+        default_entity_id: sensor.wattlas_spf_netkoeb
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_spf_net')) }}"
+        state: "{{ [0, states('sensor.min_spf_net') | float(0)] | max | round(0) }}"
+      - name: Wattlas SPF solgt
+        unique_id: wattlas_spf_solgt
+        default_entity_id: sensor.wattlas_spf_solgt
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_spf_net')) }}"
+        state: "0"
+      - name: Wattlas SPF lader med
+        unique_id: wattlas_spf_lader_med
+        default_entity_id: sensor.wattlas_spf_lader_med
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_spf_batteri')) }}"
+        state: "{{ [0, states('sensor.min_spf_batteri') | float(0)] | max | round(0) }}"
+      - name: Wattlas SPF aflader med
+        unique_id: wattlas_spf_aflader_med
+        default_entity_id: sensor.wattlas_spf_aflader_med
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.min_spf_batteri')) }}"
+        state: "{{ [0, -(states('sensor.min_spf_batteri') | float(0))] | max | round(0) }}"
+  - binary_sensor:
+      - name: Wattlas tidsprogrammer aktive
+        unique_id: wattlas_tidsprogram_aktiv
+        default_entity_id: binary_sensor.wattlas_tidsprogram_aktiv
+        # SPF har ingen tidsprogrammer, Wattlas kan bruge; kanalens egne virker, når indstillingerne kan læses
+        state: "{{ has_value('sensor.min_spf_output') and has_value('sensor.min_spf_lader') }}"
+      - name: Wattlas inverter forbundet
+        unique_id: wattlas_forbindelse
+        default_entity_id: binary_sensor.wattlas_forbindelse
+        device_class: connectivity
+        state: >-
+          {% set s = states.sensor.min_spf_forbrug %}
+          {{ s is not none and s.state not in ['unknown', 'unavailable'] and (now() - s.last_reported).total_seconds() < 300 }}
+      - name: Wattlas PV-måling OK
+        unique_id: wattlas_pv_maaling_ok
+        default_entity_id: binary_sensor.wattlas_pv_maaling_ok
+        state: "{{ is_number(states('sensor.min_spf_sol')) }}"
+
+# Produktion, forbrug, købt, ladet og afladet laves her med HA's egne værktøjer ud fra effekterne.
+sensor:
+  - {platform: integration, source: sensor.emhass_solproduktion_samlet, name: wattlas_total_produktion, unique_id: wattlas_total_produktion, unit_prefix: k, round: 2, method: left, max_sub_interval: {minutes: 1}}
+  - {platform: integration, source: sensor.min_spf_forbrug, name: wattlas_total_forbrug, unique_id: wattlas_total_forbrug, unit_prefix: k, round: 2, method: left, max_sub_interval: {minutes: 1}}
+  - {platform: integration, source: sensor.wattlas_spf_netkoeb, name: wattlas_total_koebt, unique_id: wattlas_total_koebt, unit_prefix: k, round: 2, method: left, max_sub_interval: {minutes: 1}}
+  - {platform: integration, source: sensor.wattlas_spf_solgt, name: wattlas_total_solgt, unique_id: wattlas_total_solgt, unit_prefix: k, round: 2, method: left, max_sub_interval: {minutes: 1}}
+  - {platform: integration, source: sensor.wattlas_spf_lader_med, name: wattlas_total_ladet, unique_id: wattlas_total_ladet, unit_prefix: k, round: 2, method: left, max_sub_interval: {minutes: 1}}
+  - {platform: integration, source: sensor.wattlas_spf_aflader_med, name: wattlas_total_afladet, unique_id: wattlas_total_afladet, unit_prefix: k, round: 2, method: left, max_sub_interval: {minutes: 1}}
+utility_meter:
+  wattlas_i_dag_produktion:
+    unique_id: wattlas_i_dag_produktion
+    source: sensor.wattlas_total_produktion
+    cycle: daily
+  wattlas_i_dag_forbrug:
+    unique_id: wattlas_i_dag_forbrug
+    source: sensor.wattlas_total_forbrug
+    cycle: daily
+  wattlas_i_dag_koebt:
+    unique_id: wattlas_i_dag_koebt
+    source: sensor.wattlas_total_koebt
+    cycle: daily
+  wattlas_i_dag_solgt:
+    unique_id: wattlas_i_dag_solgt
+    source: sensor.wattlas_total_solgt
+    cycle: daily
+
+  wattlas_i_dag_ladet:
+    unique_id: wattlas_i_dag_ladet
+    source: sensor.wattlas_total_ladet
+    cycle: daily
+  wattlas_i_dag_afladet:
+    unique_id: wattlas_i_dag_afladet
+    source: sensor.wattlas_total_afladet
+    cycle: daily
+
+automation:
+  - id: wattlas_spf_styring
+    alias: Wattlas SPF – styring
+    description: >-
+      Det eneste sted, Wattlas styrer SPF'en. Sender kun de indstillinger, der er anderledes end inverterens
+      egne, og kun sjældent (inverteren gemmer dem). Slippes styringen, sættes dine egne værdier tilbage.
+    # en ny ordre afbryder den gamle: en kø ville kunne sende en forældet ladeordre, efter at ladningen er stoppet
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: [input_boolean.wattlas_spf_netladning, input_number.wattlas_spf_netladestroem,
+                    input_boolean.emhass_styring_aktiv, input_boolean.emhass_har_overtaget]
+      - trigger: state
+        entity_id: [input_boolean.wattlas_spf_p1, input_boolean.wattlas_spf_p2, input_boolean.wattlas_spf_p3,
+                    input_boolean.wattlas_spf_p4, input_boolean.wattlas_spf_p5, input_boolean.wattlas_spf_p6]
+      - trigger: time_pattern
+        minutes: /1
+      - trigger: homeassistant
+        event: start
+    variables:
+      periode: "{{ 6 if now().hour < 1 else 1 if now().hour < 5 else 2 if now().hour < 9 else 3 if now().hour < 13 else 4 if now().hour < 17 else 5 if now().hour < 21 else 6 }}"
+      soc: "{{ states('sensor.min_spf_soc') | float(-1) }}"
+      maal: "{{ states('input_number.wattlas_spf_p' ~ periode ~ '_soc') | float(0) }}"
+      effekt: "{{ states('input_number.wattlas_spf_p' ~ periode ~ '_power') | float(0) }}"
+      styrer: "{{ is_state('input_boolean.emhass_styring_aktiv', 'on') and is_state('input_boolean.emhass_har_overtaget', 'on') }}"
+      overskud: "{{ states('sensor.min_spf_sol') | float(0) - states('sensor.min_spf_forbrug') | float(0) }}"
+      # hele 10 A, aldrig over det, net-indgangen har plads til (number.wattlas_netladestroem's maks.)
+      ampere: "{{ ([states('input_number.wattlas_spf_netladestroem') | float(0), state_attr('number.wattlas_netladestroem', 'max') | float(0)] | min / 10) | round(0, 'floor') * 10 }}"
+      nu_output: "{{ states('sensor.min_spf_output') }}"
+      nu_lader: "{{ states('sensor.min_spf_lader') }}"
+      nu_stroem: "{{ states('sensor.min_spf_netstroem') | float(-1) | int }}"
+      sidst: "{{ states('input_text.wattlas_spf_tilstand_nu') }}"
+      siden: "{{ (now() - states.input_text.wattlas_spf_tilstand_nu.last_changed).total_seconds() }}"
+      budget: "{{ states('input_number.wattlas_spf_skrivninger') | float(0) < 40 }}"
+      oensket: >-
+        {% if not styrer %}slip
+        {% elif is_state('input_boolean.wattlas_spf_netladning', 'on') and is_state('input_boolean.wattlas_spf_p' ~ periode, 'on')
+              and ampere >= 10 and 0 <= soc < maal %}lad
+        {% elif (soc <= maal or effekt < 50) and overskud < 200 %}gem
+        {% else %}fri{% endif %}
+      tilstand: >-
+        {% if oensket in ['slip', sidst] %}{{ oensket }}
+        {% elif oensket == 'lad' %}{{ 'lad' if budget else (sidst if sidst in ['gem', 'fri'] else 'fri') }}
+        {% elif sidst in ['gem', 'fri'] and (siden < 600 or not budget) %}{{ sidst }}
+        {% else %}{{ oensket }}{% endif %}
+      output: "{{ states('input_text.wattlas_spf_egen_output') if tilstand == 'slip' else 'Solar/Battery/Utility' if tilstand == 'fri' else 'Utility first' }}"
+      lader: "{{ states('input_text.wattlas_spf_egen_lader') if tilstand == 'slip' else 'Solar and utility simultaneously' if tilstand == 'lad' else 'Solar only' }}"
+      stroem: >-
+        {% if tilstand == 'slip' %}{{ states('input_number.wattlas_spf_egen_stroem') | int(0) }}
+        {% elif tilstand != 'lad' %}{{ nu_stroem }}
+        {% elif ampere > nu_stroem and sidst == 'lad' and (not budget or (now() - states.input_number.wattlas_spf_sat_stroem.last_reported).total_seconds() < 170) %}{{ nu_stroem }}
+        {% else %}{{ ampere | int }}{% endif %}
+    conditions:
+      # Solar Assistants indstillinger skal kunne læses (dine egne huskes, før Wattlas ændrer dem)
+      - condition: template
+        value_template: >-
+          {{ has_value('sensor.min_spf_output') and has_value('sensor.min_spf_lader') and nu_stroem >= 0 and soc >= 0
+             and (styrer or is_state('input_boolean.wattlas_spf_styret', 'on')) }}
+    actions:
+      # flere udløsere lige efter hinanden (fx styring og overtagelse) samles til én ordre, før Solar Assistant har meldt tilbage
+      - delay: {seconds: 2}
+      - if: "{{ styrer and not is_state('input_boolean.wattlas_spf_styret', 'on') }}"
+        then:
+          - action: input_text.set_value
+            target: {entity_id: input_text.wattlas_spf_egen_output}
+            data: {value: "{{ nu_output }}"}
+          - action: input_text.set_value
+            target: {entity_id: input_text.wattlas_spf_egen_lader}
+            data: {value: "{{ nu_lader }}"}
+          - action: input_number.set_value
+            target: {entity_id: input_number.wattlas_spf_egen_stroem}
+            data: {value: "{{ nu_stroem }}"}
+          - action: input_boolean.turn_on
+            target: {entity_id: input_boolean.wattlas_spf_styret}
+      - action: input_text.set_value
+        target: {entity_id: input_text.wattlas_spf_tilstand_nu}
+        data: {value: "{{ tilstand }}"}
+      - action: input_text.set_value
+        target: {entity_id: input_text.wattlas_spf_oensket}
+        data: {value: "{{ output }}|{{ lader }}"}
+      - variables:
+          # netladning: strømmen først, så den aldrig starter på en gammel højere. Ellers: laderen først, så ladningen stopper straks
+          ordrer: >-
+            {% set s = dict(emne='max_grid_charge_current', ny=stroem | string, nu=nu_stroem | string) %}
+            {% set l = dict(emne='charger_source_priority', ny=lader, nu=nu_lader) %}
+            {% set o = dict(emne='output_source_priority', ny=output, nu=nu_output) %}
+            {{ ([s, l, o] if tilstand == 'lad' else [l, o, s]) | rejectattr('ny', 'in', ['', 'unknown', 'unavailable']) | list }}
+          # tages en ordre ikke imod, gentages den i 5 minutter og derefter hvert 10. minut
+          sendes: "{{ (now() - states.input_text.wattlas_spf_oensket.last_changed).total_seconds() < 300 or now().minute % 10 == 0 }}"
+      - repeat:
+          for_each: "{{ ordrer }}"
+          sequence:
+            # strømmen under netladning er allerede begrænset ovenfor (ned altid, op højst hvert 3. minut og kun inden for døgnloftet)
+            - if: "{{ repeat.item.ny != repeat.item.nu and (sendes or (tilstand == 'lad' and repeat.item.emne == 'max_grid_charge_current')) }}"
+              then:
+                - action: mqtt.publish
+                  data: {topic: "solar_assistant/inverter_1/{{ repeat.item.emne }}/set", payload: "{{ repeat.item.ny }}"}
+                - action: input_number.increment
+                  target: {entity_id: input_number.wattlas_spf_skrivninger}
+                - if: "{{ repeat.item.emne == 'max_grid_charge_current' }}"
+                  then: [{action: input_number.set_value, target: {entity_id: input_number.wattlas_spf_sat_stroem}, data: {value: "{{ repeat.item.ny | float(0) }}"}}]
+                # Solar Assistant skriver én ad gangen; for hurtigt efter hinanden kan en gå tabt
+                - delay: {seconds: 5}
+      # givet tilbage, når inverteren selv melder dine egne værdier
+      - if: "{{ tilstand == 'slip' and output == nu_output and lader == nu_lader and stroem | int == nu_stroem }}"
+        then: [{action: input_boolean.turn_off, target: {entity_id: input_boolean.wattlas_spf_styret}}]
+
+  - id: wattlas_spf_skrivninger_nulstil
+    alias: Wattlas SPF – nulstil dagens skrivninger
+    triggers:
+      - trigger: time
+        at: "00:00:00"
+    actions:
+      - action: input_number.set_value
+        target: {entity_id: input_number.wattlas_spf_skrivninger}
+        data: {value: 0}

@@ -1,0 +1,11 @@
+emhass:
+  fields:
+    handling:
+      required: true
+      selector:
+        select:
+          options: [naive-mpc-optim, publish-data]
+    data:
+      required: true
+      selector:
+        object:

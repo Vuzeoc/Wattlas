@@ -31,4 +31,5 @@ recorder:
     entities:
       - sensor.emhass_husforbrug_historik
       - sensor.emhass_udetemperatur_historik
-      - input_text.wattlas_emhass_noegle  # API-nøglen gemmes ikke i historikken
+    entity_globs:
+      - sensor.hh_*  # hvad-hvis-beregningens resultater – kun de aktuelle tal bruges

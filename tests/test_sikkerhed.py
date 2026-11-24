@@ -152,6 +152,7 @@ async def main():
     assert styring(soc='unavailable')[0] != 'lad'                            # ukendt SOC: aldrig netladning
     print('Growatt styringsvalg og VPP-procent: OK')
 
+
     # Hele målelaget (sample-skabelonen) gengives med HA's egen motor, som triggeren gør hvert 10. sekund
     def sample(kanal):
         doc = yaml.safe_load((REPO / 'styrekanaler' / kanal / 'emhass_maalinger.yaml').read_text(encoding='utf-8'))
@@ -270,6 +271,159 @@ async def main():
     hass.states.get('switch.min_inverter_battery_grid_charging').last_changed = __import__('datetime').datetime.now(__import__('datetime').timezone.utc) - __import__('datetime').timedelta(minutes=5)
     assert Template(vagt, hass).async_render() is False, 'slaven følger ikke masteren – styringen skal stoppe'
     print('Deye i parallel: deling, summer og status: OK')
+
+    # SolaX: elmålerens tal er POSITIVT ved salg (solax_modbus regner husforbrug = inverter − målt) og batteriets positivt ved
+    # ladning. Til kernen: net og fasetal positive ved køb, batteri positivt ved afladning – ellers er fasegrænsen sat ud af kraft.
+    def solax(maalt, batt_lad, faser, last=900, pv=0, styret='off', valg='Disabled', bedt=0, status='Normal Mode'):
+        for e, v in {'grid_feed_in_power': maalt, 'house_load': last, 'battery_power_charge': batt_lad, 'battery_capacity': 55,
+                     'pv_power_total': pv, 'run_mode': status, 'battery_temperature': 21, 'inverter_temperature': 40,
+                     'grid_voltage_l1': 231, 'grid_voltage_l2': 230, 'grid_voltage_l3': 232}.items():
+            sæt(f'sensor.min_solax_{e}', str(v))
+        for i, f in enumerate(faser, 1):
+            sæt(f'sensor.min_solax_measured_power_l{i}', str(f))
+        sæt('input_boolean.wattlas_solax_fjern_styret', styret); sæt('select.min_solax_remotecontrol_power_control_mode_1', valg)
+        sæt('number.min_solax_remotecontrol_active_power_mode_1', str(bedt))
+        sæt('sensor.emhass_maalekilde', 'x', {})
+        return sample('solax')
+    s = solax(-4000, 3000, (-2000, -1000, -1000), styret='on', valg='Enabled Power Control', bedt=3000)  # køber 4 kW, lader 3 kW
+    v = s['values']
+    assert s['source'] == 'SolaX' and v['grid_out_total_power'] == 4000 and v['battery_output_w_power'] == -3000, s
+    assert (v['external_ct_w_l1'], v['external_ct_w_l2']) == (2000, 1000) and v['inverter_status'] == 'Normal' and v['battery_voltage'] == 50, v
+    v = solax(2500, -1000, (800, 800, 900), pv=4000)['values']                                         # sælger 2,5 kW, aflader 1 kW
+    assert v['grid_out_total_power'] == -2500 and v['battery_output_w_power'] == 1000 and v['external_ct_w_l3'] == -900, v
+    assert solax(0, 0, (0, 0, 0), status='Idle Mode')['values']['inverter_status'] == 'Normal'           # nat-hvile er normal drift
+    assert solax(0, 0, (0, 0, 0), status='Permanent Fault Mode')['values']['inverter_status'] == 'Permanent Fault Mode'
+    # kommando-tjek: Wattlas beder om 3 kW fra nettet, men batteriet aflader → målingerne afvises
+    assert solax(-1000, -2000, (-300, -300, -400), styret='on', valg='Enabled Power Control', bedt=3000)['balance_ok'] is False
+    assert solax(-1000, -2000, (-300, -300, -400))['balance_ok'] is True                                  # uden ladeordre: normal afladning
+    # styringen: lad med effekt i hele 100 W og aldrig over loftet; gem kun uden soloverskud; fri, når Wattlas ikke styrer
+    kanal = yaml.safe_load((REPO / 'styrekanaler/solax/wattlas_kanal_solax.yaml').read_text(encoding='utf-8'))
+    VAR = next(a for a in kanal['automation'] if a['id'] == 'wattlas_solax_styring')['variables']
+
+    def solax_styring(*, a=40, loft=10000, soc=50, maal=80, effekt=0, netlad='on', prog='on', styrer='on', pv=0, last=500):
+        for e, s in {'sensor.min_solax_pv_power_total': pv, 'sensor.min_solax_house_load': last, 'input_number.wattlas_solax_netladestroem': a,
+                     'input_number.wattlas_maks_ladeeffekt_w': loft, 'sensor.min_solax_battery_capacity': soc, 'input_boolean.wattlas_solax_netladning': netlad,
+                     'input_boolean.emhass_styring_aktiv': styrer, 'input_boolean.emhass_har_overtaget': styrer}.items():
+            sæt(e, str(s))
+        for p in range(1, 7):
+            sæt(f'input_number.wattlas_solax_p{p}_soc', str(maal)); sæt(f'input_number.wattlas_solax_p{p}_power', str(effekt))
+            sæt(f'input_boolean.wattlas_solax_p{p}', prog)
+        v = {}
+        for k, t in VAR.items():
+            v[k] = Template(str(t), hass).async_render(v)
+        return v['tilstand'].strip(), v['watt'], v['valg']
+
+    assert solax_styring() == ('lad', 2000, 'Enabled Power Control'), solax_styring()     # 40 A × 50 V = 2000 W fra nettet
+    assert solax_styring(a=47)[1] == 2300, solax_styring(a=47)                            # 2350 W rundes NED til hele 100 W
+    assert solax_styring(a=400)[1] == 10000                                                # aldrig over batteriets maks. ladeeffekt
+    assert solax_styring(a=900, loft=45000)[1] == 30000                                    # solax_modbus tager højst 30 kW
+    assert solax_styring(a=1)[0] == 'gem'                                                  # under 100 W: ingen netladning
+    assert solax_styring(soc=80)[0] == 'gem' and solax_styring(soc=80)[2] == 'Enabled No Discharge'
+    assert solax_styring(netlad='off', soc=90, effekt=3000)[0] == 'fri'
+    assert solax_styring(netlad='off', soc=50, effekt=0, pv=3000)[0] == 'fri'              # soloverskud: egen drift, ikke køb til huset
+    assert solax_styring(netlad='off', styrer='off')[0] == 'fri'
+    assert solax_styring(soc='unavailable')[0] != 'lad'
+    print('SolaX fortegn, kommando-tjek og styringsvalg: OK')
+
+    # Sofar: effekter i kW; fortegnene er ANTAGET (elmåler positiv ved salg, batteri positiv ved ladning). Er de forkerte, skal
+    # regnestykke-tjekket (sol + afladning + køb = hus, faserne = total) fange det – ellers ville fasegrænsen være sat ud af kraft.
+    def sofar(pcc, batt, faser, last, pv=0, status='Grid-connected'):
+        for e, v in {'active_power_pcc_total': pcc, 'active_power_load_sys': last, 'battery_power_total': batt, 'battery_capacity_total': 55,
+                     'pv_power_total': pv, 'system_state': status, 'battery_temperature_1': 21, 'inverter_temperature_1': 40,
+                     'voltage_l1': 231, 'voltage_l2': 230, 'voltage_l3': 232}.items():
+            sæt(f'sensor.min_sofar_{e}', str(v))
+        for i, f in enumerate(faser, 1):
+            sæt(f'sensor.min_sofar_active_power_pcc_l{i}', str(f))
+        sæt('sensor.emhass_maalekilde', 'x', {})
+        return sample('sofar')
+    s = sofar(-4.0, 3.0, (-2.0, -1.0, -1.0), last=1.0)                       # køber 4 kW, lader 3 kW, huset 1 kW
+    v = s['values']
+    assert s['source'] == 'Sofar' and s['balance_ok'] and v['grid_out_total_power'] == 4000 and v['battery_output_w_power'] == -3000, s
+    assert (v['external_ct_w_l1'], v['external_ct_w_l3']) == (2000, 1000) and v['load_w_totalpower'] == 1000 and v['inverter_status'] == 'Normal', v
+    assert sofar(2.0, -1.0, (0.7, 0.7, 0.6), last=3.0, pv=4.0)['balance_ok'] is True     # sælger 2 kW, aflader 1 kW, sol 4 kW
+    # forkert fortegn på batteriet (melder +ladning, men aflader): regnestykket passer ikke
+    assert sofar(0.0, 2.0, (0.0, 0.0, 0.0), last=2.0)['balance_ok'] is False
+    # forkert fortegn på nettet (melder +salg, men køber): regnestykket passer ikke
+    assert sofar(3.0, 0.0, (1.0, 1.0, 1.0), last=3.0)['balance_ok'] is False
+    # faserne med modsat fortegn af totalen: fanges også
+    assert sofar(-3.0, 0.0, (1.0, 1.0, 1.0), last=3.0)['balance_ok'] is False
+    assert sofar(0, 0, (0, 0, 0), last=0, status='Permanent fault')['values']['inverter_status'] == 'Permanent fault'
+    # styringens tre tal [net-mål, mindste, største batterieffekt]: nettet giver aldrig mere end bedt; gem = ingen afladning
+    kanal = yaml.safe_load((REPO / 'styrekanaler/sofar/wattlas_kanal_sofar.yaml').read_text(encoding='utf-8'))
+    VAR = next(a for a in kanal['automation'] if a['id'] == 'wattlas_sofar_styring')['variables']
+
+    def sofar_styring(*, a=40, loft=10000, aflad=9000, soc=50, maal=80, effekt=0, netlad='on', prog='on', styrer='on'):
+        for e, s in {'input_number.wattlas_sofar_netladestroem': a, 'input_number.wattlas_maks_ladeeffekt_w': loft,
+                     'input_number.wattlas_maks_afladeeffekt_w': aflad, 'sensor.min_sofar_battery_capacity_total': soc,
+                     'input_boolean.wattlas_sofar_netladning': netlad, 'input_boolean.emhass_styring_aktiv': styrer,
+                     'input_boolean.emhass_har_overtaget': styrer}.items():
+            sæt(e, str(s))
+        for p in range(1, 7):
+            sæt(f'input_number.wattlas_sofar_p{p}_soc', str(maal)); sæt(f'input_number.wattlas_sofar_p{p}_power', str(effekt))
+            sæt(f'input_boolean.wattlas_sofar_p{p}', prog)
+        v = {}
+        for k, t in VAR.items():
+            v[k] = Template(str(t), hass).async_render(v)
+        return v['tilstand'].strip(), list(v['tal'])
+
+    assert sofar_styring() == ('lad', [0, 2000, 10000]), sofar_styring()             # mindst 2000 W ind i batteriet
+    assert sofar_styring(a=400)[1][1] == 10000                                         # aldrig over batteriets maks.
+    assert sofar_styring(a=900, loft=45000, aflad=45000)[1] == [0, 20000, 20000]        # solax_modbus tager højst 20 kW
+    assert sofar_styring(soc=80) == ('gem', [0, 0, 10000])                             # målet nået: ingen afladning
+    assert sofar_styring(netlad='off', soc=90, effekt=3000) == ('fri', [0, -9000, 10000])
+    assert sofar_styring(netlad='off', styrer='off')[0] == 'fri'
+    assert sofar_styring(soc='unavailable')[0] != 'lad'
+    print('Sofar fortegn, regnestykke-tjek og styringens tal: OK')
+
+    # Solis: elmåleren (kW) ANTAGES positiv ved salg – regnestykket fanger et forkert fortegn; batteriet læses som to positive
+    # W-tal (Battery Input/Output Energy), så dets retning er sikker. Husforbrug = House Load + Bypass Load (nødstrømsudgangen).
+    def solis(meter, ind, ud, faser, last, bypass=0, pv=0, styret='off', valg='Battery Hold', bedt=0, status='Normal Running'):
+        for e, v in {'meter_active_power_total': meter, 'house_load': last, 'bypass_load': bypass, 'battery_input_energy': ind,
+                     'battery_output_energy': ud, 'battery_soc': 55, 'pv_total_power': pv, 'inverter_status': status,
+                     'inverter_temperature': 40, 'meter_ac_voltage_l1': 231, 'meter_ac_voltage_l2': 230, 'meter_ac_voltage_l3': 232}.items():
+            sæt(f'sensor.min_solis_{e}', str(v))
+        for i, f in enumerate(faser, 1):
+            sæt(f'sensor.min_solis_meter_active_power_l{i}', str(f))
+        sæt('input_boolean.wattlas_solis_fjern_styret', styret); sæt('select.min_solis_dispatch_control_mode', valg)
+        sæt('number.min_solis_dispatch_power', str(bedt))
+        sæt('sensor.emhass_maalekilde', 'x', {})
+        return sample('solis')
+    s = solis(-4.0, 3000, 0, (-2.0, -1.0, -1.0), last=800, bypass=200, styret='on', valg='Battery Charge', bedt=3000)  # køber 4 kW, lader 3 kW
+    v = s['values']
+    assert s['source'] == 'Solis' and s['balance_ok'] and v['grid_out_total_power'] == 4000 and v['battery_output_w_power'] == -3000, s
+    assert (v['external_ct_w_l1'], v['external_ct_w_l3']) == (2000, 1000) and v['load_w_totalpower'] == 1000 and v['inverter_status'] == 'Normal', v
+    v = solis(2.0, 0, 1000, (0.7, 0.7, 0.6), last=3000, pv=4000)['values']                       # sælger 2 kW, aflader 1 kW
+    assert v['grid_out_total_power'] == -2000 and v['battery_output_w_power'] == 1000, v
+    assert solis(3.0, 0, 0, (1.0, 1.0, 1.0), last=3000)['balance_ok'] is False                    # forkert fortegn på elmåleren
+    assert solis(-3.0, 0, 0, (1.0, 1.0, 1.0), last=3000)['balance_ok'] is False                   # faserne modsat totalen
+    assert solis(-3.0, 0, 0, (-1.0, -1.0, -1.0), last=2000, bypass=1000)['balance_ok'] is True    # nødstrømsudgangen tæller med
+    # kommando-tjek: Wattlas beder om 3 kW ladning, men batteriet aflader → afvist (også når regnestykket passer)
+    assert solis(-1.0, 0, 2000, (-0.3, -0.3, -0.4), last=3000, styret='on', valg='Battery Charge', bedt=3000)['balance_ok'] is False
+    assert solis(-1.0, 0, 2000, (-0.3, -0.3, -0.4), last=3000)['balance_ok'] is True                # uden ladeordre: normal afladning
+    assert solis(0, 0, 0, (0, 0, 0), last=0, status='Grid Off')['values']['inverter_status'] == 'Grid Off'
+    print('Solis fortegn, regnestykke- og kommando-tjek: OK')
+
+    # Growatt SPF via Solar Assistant: net + ved køb, batteri + ved ladning; enfaset på fase 1; forkert fortegn og afviste ordrer fanges
+    def spf(net, batt, last, pv=0, styret='off', tilstand='slip', oensket='', output='Utility first', lader='Solar only', mode='Grid mode', v=231):
+        for e, x in {'net': net, 'batteri': batt, 'forbrug': last, 'sol': pv, 'soc': 55, 'netspaending': v, 'batterispaending': 52.4,
+                     'temperatur': 35, 'tilstand': mode, 'output': output, 'lader': lader}.items():
+            sæt(f'sensor.min_spf_{e}', str(x))
+        sæt('input_boolean.wattlas_spf_styret', styret); sæt('input_text.wattlas_spf_tilstand_nu', tilstand); sæt('input_text.wattlas_spf_oensket', oensket)
+        sæt('sensor.emhass_maalekilde', 'x', {})
+        return sample('growatt_spf')
+    s = spf(3700, 3000, 600); v = s['values']
+    assert s['source'] == 'SPF' and s['balance_ok'] and v['grid_out_total_power'] == 3700 and v['battery_output_w_power'] == -3000, s
+    assert (v['external_ct_w_l1'], v['external_ct_w_l2'], v['battery_voltage']) == (3700, 0, '52.4') and v['inverter_status'] == 'Normal', v
+    assert spf(0, -1400, 1300)['balance_ok'] and spf(0, 1000, 1900, pv=3000)['balance_ok']              # afladning; sol lader
+    assert spf(3700, -3000, 600)['balance_ok'] is False and spf(-3700, 3000, 600)['balance_ok'] is False   # forkert fortegn
+    assert spf(600, -1500, 2000, styret='on', tilstand='lad', lader='Solar and utility simultaneously')['balance_ok'] is False  # lader ikke
+    sæt('input_number.wattlas_spf_sat_stroem', '20'); sæt('sensor.min_spf_netstroem', '50')
+    for alder, ok in ((10, True), (200, False)):                                    # en lavere strøm, der ikke blev taget imod
+        n = hass.states.get('input_number.wattlas_spf_sat_stroem')
+        hass.states._states[n.entity_id] = type(n)(n.entity_id, n.state, n.attributes, last_changed=n.last_changed - timedelta(seconds=alder))
+        assert spf(3200, 2600, 600, styret='on', tilstand='lad', lader='Solar and utility simultaneously')['balance_ok'] is ok, alder
+    assert spf(0, 0, 0, mode='Fault mode')['values']['inverter_status'] == 'Fault mode'
+    print('SPF fortegn, enfaset og regnestykke-tjek: OK')
 
     # Sonnen: kun husets forbrug pr. fase kendes, og batteriet er enfaset. Kernens fasebudget regner med 3 faser, så kanalen
     # holder selv grænsen: netladestrømmens maks. = den værste fases plads. Hver runde af kernen skal holde sig under den.

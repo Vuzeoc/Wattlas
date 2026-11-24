@@ -37,41 +37,6 @@ input_number:
     max: 50000
     step: 0.01
     unit_of_measurement: W
-# EMHASS (0.18+) kræver API-nøgle (Bearer). Nøglen står i input_text.wattlas_emhass_noegle (sæt den i Wattlas Styring → Indstillinger).
-rest_command:
-  emhass_test_forbindelse:
-    url: "{{ states('input_text.wattlas_emhass_adresse') | trim('/') }}/"
-    headers:
-      Authorization: "Bearer {{ states('input_text.wattlas_emhass_noegle') }}"
-    method: GET
-    timeout: 15
-  emhass_beregn_helios:
-    url: "{{ states('input_text.wattlas_emhass_adresse') | trim('/') }}/action/naive-mpc-optim"
-    headers:
-      Authorization: "Bearer {{ states('input_text.wattlas_emhass_noegle') }}"
-    method: POST
-    content_type: application/json
-    timeout: 120
-    payload: '{{ beregning | to_json }}'
-  emhass_publicer_plan:
-    url: "{{ states('input_text.wattlas_emhass_adresse') | trim('/') }}/action/publish-data"
-    headers:
-      Authorization: "Bearer {{ states('input_text.wattlas_emhass_noegle') }}"
-    method: POST
-    content_type: application/json
-    timeout: 60
-    payload: >-
-      {"method_ts_round":"first","continual_publish":false,"set_use_battery":true{% if med_forbruger | default(false) %},"number_of_deferrable_loads":1,"custom_deferrable_forecast_id":[{"entity_id":"sensor.p_deferrable0","unit_of_measurement":"W","friendly_name":"Wattlas fleksibel forbruger"}]{% else %},"number_of_deferrable_loads":0{% endif %}}
-  # Wattlas hvad-hvis – publicerer under prefix hh_, så de rigtige sensorer ikke røres
-  emhass_publicer_hvadhvis:
-    url: "{{ states('input_text.wattlas_emhass_adresse') | trim('/') }}/action/publish-data"
-    headers:
-      Authorization: "Bearer {{ states('input_text.wattlas_emhass_noegle') }}"
-    method: POST
-    content_type: application/json
-    timeout: 60
-    payload: >-
-      {"method_ts_round":"first","continual_publish":false,"set_use_battery":true,"publish_prefix":"hh_"{% if med_forbruger | default(false) %},"number_of_deferrable_loads":1,"custom_deferrable_forecast_id":[{"entity_id":"sensor.p_deferrable0","unit_of_measurement":"W","friendly_name":"Wattlas fleksibel forbruger"}]{% else %},"number_of_deferrable_loads":0{% endif %}}
 script:
   emhass_test_helios:
     alias: EMHASS – beregn og publicer Helios-plan
@@ -289,9 +254,10 @@ script:
           {{ dict(battery_minimum_state_of_charge=r / 100, soc_final=([hh.get('slut_soc', 30) | float(30), r] | max) / 100,
                   maximum_power_from_grid=([1000, [states('input_number.wattlas_maks_netimport_w')|float(0), (hh.get('max_net_kw', 0) | float(0) * 1000 or 99999)] | min] | max) | int,
                   weight_battery_discharge=[0, [1, hh.get('slid', 0.25) | float(0.25)] | min] | max, publish_prefix='hh_') }}{% endif %}
-    - action: rest_command.emhass_beregn_helios
+    - action: wattlas.emhass
       data:
-        beregning: >-
+        handling: naive-mpc-optim
+        data: >-
           {% set b = dict(beregning_basis, load_forecast_method='list', load_power_forecast=hus.liste) if hus.ok else beregning_basis %}
           {% set c = dict(b, **fb_ekstra) %}{{ dict(c, **hh_ekstra) }}
       response_variable: emhass_svar
@@ -308,9 +274,13 @@ script:
         - condition: template
           value_template: '{{ emhass_svar.status | int == 200 }}'
         then:
-        - action: rest_command.emhass_publicer_hvadhvis
+        - action: wattlas.emhass
           data:
-            med_forbruger: "{{ fb_ekstra | count > 0 }}"
+            handling: publish-data
+            data: >-
+              {{ dict(dict(method_ts_round='first', continual_publish=false, set_use_battery=true, publish_prefix='hh_', number_of_deferrable_loads=0),
+                   **(dict(number_of_deferrable_loads=1, custom_deferrable_forecast_id=[dict(entity_id='sensor.p_deferrable0',
+                      unit_of_measurement='W', friendly_name='Wattlas fleksibel forbruger')]) if fb_ekstra | count > 0 else {})) }}
       - stop: Hvad-hvis færdig – den rigtige plan er ikke ændret.
     - if:
       - condition: template
@@ -325,9 +295,13 @@ script:
         error: true
     - variables:
         publiceret_fra: '{{ as_timestamp(now()) }}'
-    - action: rest_command.emhass_publicer_plan
+    - action: wattlas.emhass
       data:
-        med_forbruger: "{{ fb_ekstra | count > 0 }}"
+        handling: publish-data
+        data: >-
+          {{ dict(dict(method_ts_round='first', continual_publish=false, set_use_battery=true, number_of_deferrable_loads=0),
+               **(dict(number_of_deferrable_loads=1, custom_deferrable_forecast_id=[dict(entity_id='sensor.p_deferrable0',
+                  unit_of_measurement='W', friendly_name='Wattlas fleksibel forbruger')]) if fb_ekstra | count > 0 else {})) }}
       response_variable: publicering
     - delay:
         seconds: 2

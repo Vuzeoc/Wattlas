@@ -2,6 +2,32 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.4.2
+- **Nye styrekanaler (eksperimentelle, ikke kørt på rigtige anlæg):** SolaX X3-Hybrid G4, Sofar HYD og Solis-hybrider –
+  alle trefasede og lokalt via solax_modbus. Vælg dem i opsætningen; krav og begrænsninger står i *docs/STYREKANALER.md*.
+  Prøv dem gerne først med *Skygge (vis kun)*
+- **Ny styrekanal (eksperimentel):** Growatt SPF off-grid (fx SPF 5000 ES) via Solar Assistants MQTT. Enfaset, ingen nedtælling og intet
+  salg – læs begrænsningerne i *docs/STYREKANALER.md*, før styringen slås til
+- **Rettet (Growatt):** svarede inverteren langsomt, kunne en ladeordre, der lå i kø, blive sendt, efter at netladningen var stoppet
+  (til næste minut). En ny ordre afbryder nu den gamle
+- **Én genstart ved opdatering** (før to): når du har hentet en ny version i Markedspladsen, lægger Wattlas dens filer på plads
+  med det samme og viser reparationen *Genstart for at fuldføre Wattlas* – typisk inden for et minut. Genstarter du, før den
+  er kommet, sker det efter genstarten som før (to genstarter). Gælder fra næste opdatering efter denne
+- **Rettet (Deye med ekstra inverter på GEN-porten):** produktionstællerne kunne få falske hop i langtidsstatistikken, når
+  GEN-inverterens tæller kom senere end hovedinverterens efter en genstart. Wattlas' egen økonomi var ikke berørt
+- Hvad-hvis-beregningens sensorer (`sensor.hh_…`) gemmes ikke længere i databasen. De forsvinder ved hver genstart, og deres
+  efterladte langtidsstatistik gav advarslen *Forældreløse langtidsstatistikker* hos dem, der bruger Spook. Har du
+  allerede advarslen, så vælg *Ryd disse statistikker* én gang
+- **Sikkerhed – EMHASS API-nøglen er ikke længere en tilstand.** Til og med 0.4.1 lå den i `input_text.wattlas_emhass_noegle`. Feltet var
+  skjult på skærmen, men alle med adgang til din Home Assistant (også skabeloner og API) kunne læse nøglen. Nu ligger den kun i
+  integrationens opsætning, og integrationen laver selv kaldene til EMHASS. Nøglen flyttes af sig selv ved opdateringen.
+  **Lav gerne en ny nøgle bagefter:** skriv en ny kode i EMHASS-app'ens *emhass_api_token*, genstart app'en, og skriv samme kode under
+  Wattlas → *Konfigurer* → Forbindelser og prognoser. Den gamle kan stadig ligge i Home Assistants backupper
+- **Ændret:** `rest_command.emhass_…` og `input_text.wattlas_emhass_noegle` findes ikke mere. Bruger du dem i egne automationer, så kald
+  `wattlas.emhass` (*handling* og *data*) i stedet
+- **Nyt logo:** en halv sol med et W over et batteri. Skærmbillederne i dokumentationen viser stadig det gamle
+- Ingen andre ændringer i kernens styring
+
 ## 0.4.1
 - **Konfigurer-knap:** under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* kan du rette opsætningens tal
   (batteri, strømme i A, fasegrænse, importloft, priser) og forbindelser (EMHASS, solprognose, vejr). Felterne er udfyldt med de

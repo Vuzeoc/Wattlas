@@ -351,7 +351,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         tx(560, 192, tjener == null && husS !== null ? `med slid ${nf(husS, 2)}` : '', C.hus) +
         anl.map(([n, v], k) => tx(398, 52 + 16 * k, v !== null ? `${esc(n)}  ${kw(Math.max(0, v))}` : '', C.sol, 'ex', 'start')).join('') +
         tx(404, 410, bK !== null ? `${nf(bK, 1)} kWh over reserven` : '', C.bat, 'exb', 'start') +
-        tx(404, 426, [bV !== null && !['Huawei', 'Growatt'].includes(this.st('sensor.emhass_maalekilde')?.state) ? nf(bV, 1) + ' V' : '',  /* Huawei: kanalens beregningsspænding, ikke batteriets */ bT !== null ? nf(bT, 1) + ' °C' : '', batPris !== null ? nf(batPris, 2) + ' kr/kWh' : ''].filter(Boolean).join(' · '), 'var(--secondary-text-color)', 'ex', 'start') +
+        tx(404, 426, [bV !== null && !['Huawei', 'Growatt', 'SolaX', 'Sofar', 'Solis'].includes(this.st('sensor.emhass_maalekilde')?.state) ? nf(bV, 1) + ' V' : '',  /* Huawei: kanalens beregningsspænding, ikke batteriets */ bT !== null ? nf(bT, 1) + ' °C' : '', batPris !== null ? nf(batPris, 2) + ' kr/kWh' : ''].filter(Boolean).join(' · '), 'var(--secondary-text-color)', 'ex', 'start') +
         tx(404, 442, eta, C.bat, 'ex', 'start') +
         tx(330, 290, invT !== null ? `inverter ${nf(invT, 0)} °C` : '', 'var(--secondary-text-color)');
       const svg = `<svg viewBox="0 0 660 490" class="flow"><defs><radialGradient id="nodebg"><stop offset="0" stop-color="#16294a"/><stop offset="1" stop-color="#0a1426"/></radialGradient></defs>
@@ -493,7 +493,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         return `<li class="${a ? 'bad' : ''}"><ha-icon icon="${a ? 'mdi:alert-circle' : 'mdi:check-circle'}" style="color:${a ? C.err : C.ok}"></ha-icon><div><b>${n}</b>${a ? `<span>${esc(e.attributes.forklaring || '')}</span>` : ''}</div></li>`; }).join('');
       const nAl = ALARM.filter(([k]) => on('binary_sensor.emhass_ui_' + k)).length;
       const chip = (ok, t) => `<span class="pill ${ok ? 'ok' : 'err'}">● ${t}</span>`;
-      const forb = `<div class="chips">${chip(['Deye', 'Solarman', 'SunMate', 'Huawei', 'Growatt', 'ESPHome', 'Sonnen'].includes(s('sensor.emhass_maalekilde')?.state), 'Måling: ' + (s('sensor.emhass_maalekilde')?.state || '–'))}${chip(on('binary_sensor.emhass_ui_data_frisk'), 'Målekontrol')}
+      const forb = `<div class="chips">${chip(['Deye', 'Solarman', 'SunMate', 'Huawei', 'Growatt', 'ESPHome', 'Sonnen', 'SolaX', 'Sofar', 'Solis', 'SPF'].includes(s('sensor.emhass_maalekilde')?.state), 'Måling: ' + (s('sensor.emhass_maalekilde')?.state || '–'))}${chip(on('binary_sensor.emhass_ui_data_frisk'), 'Målekontrol')}
         ${chip(on('binary_sensor.emhass_styrekanal_ok'), 'Inverterstyring')}${chip(['Frisk', 'Reserve'].includes(s('sensor.emhass_planvalg')?.state), 'Plan: ' + (s('sensor.emhass_planvalg')?.state || '–'))}
         ${chip(s('sensor.optim_status')?.state === 'Optimal', 'EMHASS: ' + (s('sensor.optim_status')?.state || '–'))}${chip(on('binary_sensor.wattlas_forbindelse'), 'Inverterforbindelse')}
         ${chip(on('input_boolean.emhass_har_overtaget'), 'Har overtaget')}${chip(on('input_boolean.emhass_opstart_klar'), 'Opstart klar')}</div>`;

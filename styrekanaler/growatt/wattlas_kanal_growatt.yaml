@@ -443,8 +443,8 @@ automation:
       Det eneste sted, Wattlas styrer Growatt. Lader fra nettet (i 10 min ad gangen, kun op til det aktive programs SOC),
       gemmer batteriet (0 %) eller giver inverteren sin egen drift tilbage. Uden for styringen slås kun Wattlas' egen
       fjernstyring fra, og et stoppet solsalg gives tilbage.
-    mode: queued
-    max: 3
+    # en ny ordre afbryder den gamle: en kø ville kunne sende en forældet ladeordre, efter at ladningen er stoppet
+    mode: restart
     triggers:
       - trigger: state
         entity_id: [input_boolean.wattlas_growatt_netladning, input_number.wattlas_growatt_netladestroem,
@@ -465,7 +465,7 @@ automation:
       watt: "{{ [states('input_number.wattlas_growatt_netladestroem') | float(0) * 50, loft] | min | int(0) }}"
       # VPP Power er en procentdel; den rundes NED i trin á 5 %, og "VPP AC Charge Max Power 2" er loftet for ladning fra nettet
       procent: "{{ [100, ((watt / loft * 20) | round(0, 'floor') * 5) if loft > 0 else 0] | min | int }}"
-      kw: "{{ ((watt / 100) | round(0, 'floor')) / 10 }}"
+      kw: "{{ [((watt / 100) | round(0, 'floor')) / 10, 30] | min }}"  # solax_modbus tager højst 30 kW
       styrer: "{{ is_state('input_boolean.emhass_styring_aktiv', 'on') and is_state('input_boolean.emhass_har_overtaget', 'on') }}"
       # 0 % stopper også solladning – med soloverskud køres egen drift (overskuddet lades, intet aflades)
       overskud: "{{ states('sensor.min_growatt_pv_power_total') | float(0) - states('sensor.min_growatt_total_load_power') | float(0) }}"
