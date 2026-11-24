@@ -320,7 +320,9 @@ hver opdatering. Får batteriet en ny adresse eller et nyt token, rettes det und
 
 - **Netladning:** manual mode (`EM_OperatingMode=1`) med et ladnings-setpoint i W: Wattlas skriver strøm i A, kanalen ganger
   med batterispændingen (Ubat) og sender W til `POST /api/v2/setpoint/charge/{W}`. Når netladningen slås fra, ryddes
-  setpointene, og batteriet går i selvforbrug (`EM_OperatingMode=2`).
+  setpointene, og batteriet får **sin egen driftstilstand tilbage** (`EM_OperatingMode` huskes første gang kanalen
+  overtager – fx 10 for tidsplan, 6 for backup; ukendt eller ugyldig værdi giver 2 = selvforbrug). En fast
+  `EM_OperatingMode=2` ville ellers slå en tidsplan fra, uden at nogen kunne se hvorfor.
 - **Tidsprogrammer** p1–p6 findes ikke i Sonnens API: kontakterne og program-SOC/-effekt huskes kun i Home Assistant,
   og Wattlas stopper selv ladningen ved programmets mål-SOC. Derfor virker *gem batteriet* ikke – uden netladning kører
   batteriet altid selvforbrug.
@@ -329,7 +331,12 @@ hver opdatering. Får batteriet en ny adresse eller et nyt token, rettes det und
   med en trefaset inverter). Kanalen sætter derfor netladestrømmens maks. til det, den værste fase har plads til:
   (fasegrænse × V − husets forbrug på fasen) × 0,95 / batterispændingen – uden fradrag for sol. Forsigtigt, men aldrig for meget.
 - **Går Home Assistant ned under netladning,** bliver batteriet i manual mode og lader videre med det sidste setpoint,
-  til det er fuldt. Sonnen har ingen nedtælling som Huawei og Growatt. Sæt batteriet i selvforbrug i dets app, hvis HA er nede længe.
+  til det er fuldt. Sonnen har ingen nedtælling som Huawei og Growatt. *Nyere enheder har en:* API-dokumentationen
+  beskriver `PUT /api/v2/site/setpoint` med en `duration` (standard `PT30S`), men den svarer
+  `400 {"error":"Setpoint commands can only be set in EM2"}` på fw 1.40.5 — også i mode 2 — så den kræver en
+  EM2-energimanager, som ældre enheder ikke har. Risikoen ved et nedbrud er derfor **økonomisk** (utilsigtet netkøb om
+  natten), ikke en sikkerhedsrisiko: ladestrømmen er allerede begrænset af kanalens fasegrænse. Sæt batteriet i
+  selvforbrug i dets app, hvis HA er nede længe.
 - **Dagstællere og totaler** findes ikke i API'et og laves af kanalen med HA's `integration` og `utility_meter`.
 - Læsningen er bygget mod en rigtig SonnenBatterie (fw 1.40.5); styringen er ikke kørt i drift. Kør et døgn i skygge først.
 

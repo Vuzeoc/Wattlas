@@ -9,7 +9,8 @@
 # Sådan styres batteriet:
 #  - Netladning: manual mode (EM_OperatingMode=1) og ladnings-setpoint i W (POST /api/v2/setpoint/charge/{W}).
 #    Wattlas skriver strøm i A; kanalen ganger med batterispændingen (Ubat). Slås netladningen fra, ryddes setpointene,
-#    og batteriet går i selvforbrug (mode 2).
+#    og batteriet får sin egen driftstilstand tilbage (husket første gang kanalen overtager – fx mode 10 = tidsplan;
+#    ukendt eller ugyldig værdi giver mode 2 = selvforbrug).
 #  - Fasegrænse: batteriet måler kun husets forbrug pr. fase. Sonnen eco er enfaset, men kernen regner med en trefaset
 #    inverter (3 × fasens plads). Derfor sætter kanalen netladestrømmens maks. til det, den VÆRSTE fase har plads til:
 #    (fasegrænse × V − husets forbrug på fasen) × 0,95 / Ubat. Kernen går aldrig over maks.
@@ -57,6 +58,12 @@ input_number:
     max: 400
     step: 1
     unit_of_measurement: A
+  # batteriets egen driftstilstand huskes, så den kan gives tilbage, når Wattlas slipper
+  wattlas_sonnen_egen_driftstilstand:
+    name: Wattlas Sonnen – din egen driftstilstand (husket)
+    min: 0
+    max: 10
+    step: 1
   wattlas_sonnen_p1_soc:
     name: Wattlas Sonnen program 1 SOC (husket)
     min: 0
@@ -173,6 +180,14 @@ template:
         availability: "{{ has_value('sensor.min_sonnen_status') }}"
         state: "{{ state_attr('sensor.min_sonnen_status', 'OperatingMode') | int(-1) == 1 }}"
         turn_on:
+          # husk batteriets egen driftstilstand (10 = tidsplan, 6 = backup, 2 = selvforbrug),
+          # så den kan gives tilbage i turn_off. Kun når vi ikke allerede står i manual mode,
+          # ellers ville vi gemme vores egen 1'er og give den tilbage for evigt.
+          - if: "{{ state_attr('sensor.min_sonnen_status', 'OperatingMode') | int(-1) != 1 }}"
+            then:
+              - action: input_number.set_value
+                target: {entity_id: input_number.wattlas_sonnen_egen_driftstilstand}
+                data: {value: "{{ state_attr('sensor.min_sonnen_status', 'OperatingMode') | int(2) }}"}
           - action: rest_command.sonnen_saet_mode
             data: {mode: 1}
           - action: rest_command.sonnen_lad
@@ -184,7 +199,12 @@ template:
           - action: rest_command.sonnen_aflad
             data: {watt: 0}
           - action: rest_command.sonnen_saet_mode
-            data: {mode: 2}
+            data:
+              # giv batteriet sin egen driftstilstand tilbage (fx 10 = tidsplan) i stedet
+              # for altid at tvinge selvforbrug. Ukendt eller ugyldig værdi -> 2.
+              mode: >-
+                {% set husket = states('input_number.wattlas_sonnen_egen_driftstilstand') | int(0) %}
+                {{ husket if husket in [2, 6, 10] else 2 }}
       - name: Wattlas solsalg
         unique_id: wattlas_solsalg
         default_entity_id: switch.wattlas_solsalg
