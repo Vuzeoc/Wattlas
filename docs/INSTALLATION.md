@@ -123,7 +123,7 @@ inverteren (eller via Solarman) til de tider. Wattlas skriver kun SOC, effekt og
 
 - batteri, effekter og strømme (fra inverterens og batteriets datablad)
 - sikringer: strøm pr. fase og importloft
-- nettarif og afgifter (fra din netselskabs- og elregning)
+- nettarif og afgifter (hentes selv, hvis du vælger netselskab under Konfigurer → Netselskab – ellers fra din netselskabs- og elregning)
 - EMHASS-adresse og API-nøgle
 - solprognose- og vejr-entitet (udetemperatur-sensor er valgfri)
 - batteriets slidpris `wattlas_slid` (står den på 0, regner planen batteriet som gratis at bruge – se KONFIGURATION.md)

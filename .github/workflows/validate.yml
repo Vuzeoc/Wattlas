@@ -43,3 +43,5 @@ jobs:
       - run: python tests/test_skygge.py
       - run: python tests/test_kanalstyring.py
       - run: python tests/test_forbruger.py
+      - run: python tests/test_tariffer.py
+      - run: python tests/test_elbil.py

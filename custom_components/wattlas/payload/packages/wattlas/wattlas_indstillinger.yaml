@@ -171,6 +171,10 @@ input_text:
   wattlas_udetemperatur_entitet:
     name: Wattlas · udetemperatur-sensor (valgfri – ellers vejr-entitetens temperatur)
     max: 255
+  # sættes af integrationen, når nettarifferne er hentet fra Energinet (Konfigurer → Netselskab); tom = du taster selv
+  wattlas_tarif_hentet:
+    name: Wattlas · nettariffer hentet
+    max: 40
   wattlas_besked_handling:
     name: Wattlas · send også beskeder til (notify.mobile_app_… eller script.…)
     max: 255
@@ -259,7 +263,9 @@ automation:
         at: "09:00:00"
     conditions:
       - condition: template
-        value_template: "{{ now().day == 1 and now().month in [1, 4, 10] }}"
+        value_template: >-
+          {{ now().day == 1 and now().month in [1, 4, 10]
+             and as_timestamp(states('input_text.wattlas_tarif_hentet'), 0) < as_timestamp(now()) - 3 * 86400 }}
     actions:
       - action: script.wattlas_besked
         data:

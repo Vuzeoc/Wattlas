@@ -34,7 +34,7 @@ Normalt skal du ingenting. Det, folk typisk bruger:
 | Gæster, ferie eller et dyrt apparat skal køre i aften | **Gem batteriet** nogle timer i forvejen, eller en regel |
 | Strømmen er dyr nu, men planen venter | **Brug batteriet** |
 | Vinter (lidt sol, kolde nætter) | hæv **Reserve** til 20–30 % |
-| Netselskabet skifter tarif (sommer/vinter) | Indstillinger → Enheder og tjenester → Wattlas → **Konfigurer** → *Priser* |
+| Netselskabet skifter tarif (sommer/vinter) | Indstillinger → Enheder og tjenester → Wattlas → **Konfigurer** → *Netselskab* (følger selv med) eller *Priser* |
 | Forkert tal i opsætningen (fx fasegrænse, strømme i A) | samme sted: **Konfigurer** → *Batteri* eller *Elnet* – ændringen bruges med det samme |
 | Arbejde på inverter eller batteri | slå **Wattlas styrer batteriet** fra først |
 | Ny version af Wattlas | opdatér *Wattlas* i Markedspladsen, vent til reparationen *Genstart for at fuldføre Wattlas* kommer (under et minut), og tryk *Genstart*; dine indstillinger bevares. Genstarter du med det samme, beder Wattlas om én genstart mere |
@@ -120,6 +120,14 @@ slukket, så sørg for, at apparatet har sin egen termostat eller sikring.
 batteriets netladning, viger den først. Er en fase eller importloftet alligevel overskredet i et minut, slukkes forbrugeren, og der
 går mindst 10 minutter, før den tændes igen. Det er et værn oven på apparatets egen sikring, ikke i stedet for den: Wattlas ser
 målingerne hvert 30. sekund, og går Home Assistant ned, bliver kontakten stående.
+
+**Elbilen må ikke tømme husbatteriet:** vælg laderens effekt (W eller kW) under Indstillinger → Enheder og tjenester → Wattlas → Konfigurer →
+*Elbil-lader*. Mens bilen lader (over 500 W, og husets måling viser mindst halvdelen), aflader batteriet ikke; det må gerne lades. *Brug
+batteriet* – manuelt eller som regel – vinder. Husprognosen trækker bilens forbrug fra.
+- Mens holdet er på, køber hele huset fra nettet, også i dyre timer.
+- Det virker kun, mens Wattlas styrer. Har den ingen plan, eller er laderens måling væk, styres der som ellers.
+- SonnenBatterie kan ikke holdes. Growatt SPF skriver højst hvert 10. minut og 40 gange i døgnet, så holdet kommer senere dér.
+- Hænger laderens sensor på et lavt tal (fx 3,7 kW), mens huset bruger meget, kan holdet blive stående. Se banneret i appen.
 
 **Lader til elbil (tænd/sluk):** vælg laderens kontakt, skriv ladeeffekten (fx 11000 W, 3 faser) og timerne (kWh ÷ kW). Laderen skal
 have sin egen maks. strøm og offline-grænse, sat af installatøren, og der må ikke være anden belastningsstyring på den. Wattlas
@@ -253,5 +261,5 @@ pege styrekanalen på master-inverteren. Det er ikke testet.
 
 ## Gode vaner
 - Følg **Overvågning** den første uge.
-- Ret de tre nettarif-helpers, når netselskabet skifter mellem sommer- og vintertarif.
+- Vælg dit netselskab under Wattlas → Konfigurer → *Netselskab*, så følger nettarif og afgifter selv med. Ellers ret dem, når de skifter.
 - Slå **Wattlas styrer batteriet** fra, før du arbejder på inverteren eller batteriet.

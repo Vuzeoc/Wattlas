@@ -47,8 +47,12 @@ Købspris = spot (inkl. moms) + (nettarif + elafgift) × 1,25 + tillæg. Salgspr
 | `wattlas_salg_gebyr` | elselskabets gebyr pr. solgt kWh |
 | `wattlas_solcelle_slid` | hvad du regner en kWh solstrøm koster i slid (bruges i "strømmen koster nu"), fx 0,10 |
 
-Tarifferne står på din elregning eller netselskabets hjemmeside. Sommer- og vintertarif skal du selv skifte. Det er en
-alpha-begrænsning.
+**Automatisk:** vælg netselskab under Wattlas → Konfigurer → *Netselskab*. De fire første tal hentes så én gang om dagen fra Energinets
+åbne liste (DatahubPricelist, CC BY 4.0, Kilde: Energinet, www.energidataservice.dk). Du ser tallene, før de gemmes, og får besked, når de
+skifter. Passer en pris ikke (0, mangler, dobbelt, andre tidsrum eller en forkert rabat), beholdes de gamle tal. `input_text.wattlas_tarif_hentet` viser,
+hvornår de sidst blev hentet. Elselskabets tillæg, indfødningstarif og gebyr taster du altid selv.
+
+**Manuelt:** tallene står på din elregning eller netselskabets hjemmeside, og du skifter selv sommer- og vintertarif.
 
 ## Forbindelser og prognoser (påkrævet)
 

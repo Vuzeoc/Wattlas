@@ -2,13 +2,15 @@
 # Læser kun fra Home Assistants egen database. Selve prognosen beregnes i
 # script.emhass_test_helios (emhass_forbindelse.yaml) lige før EMHASS-kaldet.
 sql:
-  # Husets forbrug pr. halve time de sidste 8 døgn (fra 5-minutters statistik)
+  # Husets forbrug uden elbilen pr. halve time de sidste 8 døgn (fra 5-minutters statistik)
   - name: EMHASS husforbrug historik
     unique_id: emhass_husforbrug_historik
     query: >-
       SELECT COUNT(*) AS antal, json_group_array(json_array(slot, m)) AS data FROM (
-        SELECT CAST(st.start_ts / 1800 AS INTEGER) * 1800 AS slot, ROUND(AVG(st.mean)) AS m
+        SELECT CAST(st.start_ts / 1800 AS INTEGER) * 1800 AS slot, ROUND(AVG(MAX(st.mean - COALESCE(ev.mean, 0), MIN(st.mean, 0)))) AS m
         FROM statistics_short_term st JOIN statistics_meta sm ON st.metadata_id = sm.id
+        LEFT JOIN statistics_short_term ev ON ev.start_ts = st.start_ts
+          AND ev.metadata_id = (SELECT id FROM statistics_meta WHERE statistic_id = 'sensor.wattlas_elbil_effekt')
         WHERE sm.statistic_id = 'sensor.emhass_m_load_w_totalpower'
           AND st.start_ts >= CAST(strftime('%s', 'now') AS INTEGER) - 8 * 86400
           AND st.mean IS NOT NULL

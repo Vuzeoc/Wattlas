@@ -201,7 +201,7 @@ script:
               {%- set ns.juster = ns.juster + adj -%}
               {%- set ns.liste = ns.liste + [[150, (base + adj) | round(0)] | max] -%}
             {%- else -%}
-              {%- set ns.fejl = ns.fejl + 1 -%}{%- set nu = states('sensor.emhass_m_load_w_totalpower') -%}{%- set ns.liste = ns.liste + [[150, ((h.v | sum) / (h.v | count)) if h.v | count > 0 else (nu | float if is_number(nu) else 500)] | max | round(0)] -%}
+              {%- set ns.fejl = ns.fejl + 1 -%}{%- set nu = states('sensor.emhass_m_load_w_totalpower') -%}{%- set nu = [0, nu | float - states('sensor.wattlas_elbil_effekt') | float(0)] | max if is_number(nu) else nu -%}{%- set ns.liste = ns.liste + [[150, ((h.v | sum) / (h.v | count)) if h.v | count > 0 else (nu | float if is_number(nu) else 500)] | max | round(0)] -%}
             {%- endif -%}
           {%- endfor -%}
           {{ dict(ok=(ns.liste | count == prognose.intervaller | int), liste=ns.liste, fejl=ns.fejl,
@@ -618,6 +618,12 @@ script:
           {% elif ts == 'gem' %}{{ [100, [maal | float(15), (soc / 5) | round(0, 'ceil') * 5] | max] | min }}
           {% elif ts == 'brug' %}{{ [15, states('input_number.wattlas_reserve') | float(15)] | max }}
           {% else %}{{ maal }}{% endif %}
+    # elbilen lader: ingen afladning, ladning er stadig tilladt (wattlas_elbil.yaml)
+    - variables:
+        elbil: "{{ ts != 'brug' and is_state('binary_sensor.wattlas_elbil_hold', 'on') }}"
+    - variables:
+        p_batt: "{{ p_batt if not elbil else 0 if p_net | float(0) > 150 and soc >= (maal | float(15) / 5) | round(0, 'ceil') * 5 else [p_batt | float(0), 0] | min }}"
+        maal: "{{ [100, [maal | float(15), (soc / 5) | round(0, 'ceil') * 5] | max] | min if elbil else maal }}"
     - if:
       - condition: template
         value_template: '{{ not drift_ok }}'

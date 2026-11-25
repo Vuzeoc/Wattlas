@@ -22,7 +22,7 @@ from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.start import async_at_started
 
-from . import emhass, installer
+from . import emhass, installer, tariffer
 from .config_flow import VERSION, priser_fejl
 from .const import DOMAIN, GAMLE, GENSTART, GYLDIG, STANDARD, TEKST
 
@@ -222,6 +222,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def tjek(_nu) -> None:
         await _forbered_opdatering(hass, entry)
     entry.async_on_unload(async_track_time_interval(hass, tjek, timedelta(seconds=TJEK_S)))
+
+    async def tarif(_nu) -> None:
+        await tariffer.opdater(hass, entry)
+    entry.async_on_unload(async_at_started(hass, tarif))
+    # shortcut: ny dato ses op til en time efter midnat; et fast klokkeslæt ville få alle installationer til at kalde Energinet samtidig
+    entry.async_on_unload(async_track_time_interval(hass, tarif, timedelta(hours=1)))
     return True
 
 
@@ -249,7 +255,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # stadig "overtaget": inverteren svarede ikke (fx offline), så den står i det sidste program
     selvforbrug = not hass.states.is_state("input_boolean.emhass_har_overtaget", "on")
     backup = await hass.async_add_executor_job(installer.afinstaller, hass.config.config_dir)
-    for i in ("genstart", "opdatering_fejlede", "noegle_mangler", "priser_dobbelt"):
+    for i in ("genstart", "opdatering_fejlede", "noegle_mangler", "priser_dobbelt", "tarif_fejl"):
         ir.async_delete_issue(hass, DOMAIN, i)
     if backup:
         _LOGGER.warning("Wattlas er fjernet. Filerne ligger i %s. Genstart Home Assistant.", backup)

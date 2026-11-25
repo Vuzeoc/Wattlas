@@ -12,6 +12,7 @@ REPO = pathlib.Path(__file__).parent.parent
 TAL = {'batteri': {'batteri_kwh': 20, 'maks_ladeeffekt_w': 10000, 'maks_afladeeffekt_w': 10000, 'maks_ladestroem_a': 200,
                    'maks_afladestroem_a': 200, 'maks_netladestroem_a': 100, 'maks_netladeeffekt_w': 6000},
        'elnet': {'fase_graense_a': 16, 'import_graense_w': 11000, 'maks_netimport_w': 9000, 'maks_eksport_w': 6000},
+       'netselskab': {'netselskab': 'manuel'},
        'priser': {'nettarif_lav': 0.1, 'nettarif_hoej': 0.3, 'nettarif_spids': 0.9, 'elafgift': 0.8}}
 STYRING, OVERTAGET = 'input_boolean.emhass_styring_aktiv', 'input_boolean.emhass_har_overtaget'
 GENSTART = 'wattlas_genstart_mangler'
@@ -55,7 +56,7 @@ async def opsaet(hass, kanal, inverter, inv2=None):
     r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
     r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
-    for t in ('batteri', 'elnet', 'priser'):
+    for t in ('batteri', 'elnet', 'netselskab', 'priser'):
         assert r.get('step_id') == t, r
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
@@ -227,7 +228,7 @@ async def main():
     assert r['step_id'] == 'batteri' and not any(str(k).endswith('_a') for k in r['data_schema'].schema), 'Huawei spørges ikke om A'
     hb = {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')}
     r = await fm.async_configure(r['flow_id'], hb)
-    for t in ('elnet', 'priser'):
+    for t in ('elnet', 'netselskab', 'priser'):
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
     await hass.async_block_till_done()
@@ -267,7 +268,7 @@ async def main():
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
     assert r['step_id'] == 'batteri' and not any(str(k).endswith('_a') for k in r['data_schema'].schema), 'EMMA spørges ikke om A'
     r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
-    for t in ('elnet', 'priser'):
+    for t in ('elnet', 'netselskab', 'priser'):
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
     await hass.async_block_till_done()
@@ -298,7 +299,7 @@ async def main():
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
     assert r['step_id'] == 'batteri' and not any(str(k).endswith('_a') for k in r['data_schema'].schema), 'Growatt spørges ikke om A'
     r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
-    for t in ('elnet', 'priser'):
+    for t in ('elnet', 'netselskab', 'priser'):
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
     await hass.async_block_till_done()
@@ -326,7 +327,7 @@ async def main():
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
     assert r['step_id'] == 'batteri' and not any(str(k).endswith('_a') for k in r['data_schema'].schema), 'SolaX spørges ikke om A'
     r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
-    for t in ('elnet', 'priser'):
+    for t in ('elnet', 'netselskab', 'priser'):
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
     await hass.async_block_till_done()
@@ -353,7 +354,7 @@ async def main():
     r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
     r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
-    for t in ('elnet', 'priser'):
+    for t in ('elnet', 'netselskab', 'priser'):
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
     await hass.async_block_till_done()
@@ -379,7 +380,7 @@ async def main():
     r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
     r = await fm.async_configure(r['flow_id'], {k: v for k, v in TAL['batteri'].items() if not k.endswith('_a')})
-    for t in ('elnet', 'priser'):
+    for t in ('elnet', 'netselskab', 'priser'):
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
     await hass.async_block_till_done()
@@ -412,7 +413,7 @@ async def main():
     r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
     r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
-    for t in ('batteri', 'elnet', 'priser'):
+    for t in ('batteri', 'elnet', 'netselskab', 'priser'):
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
     CF._sa_svarer = rigtig
@@ -500,7 +501,7 @@ async def main():
     r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
     r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
-    for t in ('batteri', 'elnet', 'priser'):
+    for t in ('batteri', 'elnet', 'netselskab', 'priser'):
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
     await hass.async_block_till_done()
@@ -534,7 +535,7 @@ async def main():
     r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
     r = await fm.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123',
                                                'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
-    for t in ('batteri', 'elnet', 'priser'):
+    for t in ('batteri', 'elnet', 'netselskab', 'priser'):
         r = await fm.async_configure(r['flow_id'], TAL[t])
     assert r['type'] == 'create_entry', r
     await hass.async_block_till_done()
@@ -578,7 +579,7 @@ async def main():
     entry = hass.config_entries.async_entries('wattlas')[0]
     om = hass.config_entries.options
     r = await om.async_init(entry.entry_id)
-    assert r['type'] == 'menu' and set(r['menu_options']) == {'forbindelser', 'batteri', 'elnet', 'priser'}, r
+    assert r['type'] == 'menu' and set(r['menu_options']) == {'forbindelser', 'batteri', 'elnet', 'netselskab', 'priser', 'elbil'}, r
     r = await om.async_configure(r['flow_id'], {'next_step_id': 'elnet'})
     standard = {str(k): k.default() for k in r['data_schema'].schema if callable(getattr(k, 'default', None))}
     assert standard.get('fase_graense_a') == 16.0, standard  # den nuværende værdi, ikke opsætningens
@@ -871,4 +872,5 @@ async def main():
     print('F opdateret uden genstart: OK')
     await hass.async_stop(force=True)
 
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())

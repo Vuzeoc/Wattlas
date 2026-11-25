@@ -2,6 +2,18 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.4.4
+- **Ny: automatiske nettariffer.** Vælg dit netselskab (i opsætningen eller under Konfigurer → *Netselskab*), så henter Wattlas nettarif, elafgift og
+  Energinets tariffer én gang om dagen, også når de skifter ved sommer, vinter og nytår. Du ser tallene, før de gemmes, og får besked, når de
+  ændres. Det gælder husholdninger (*Nettarif C*); elselskabets tillæg og gebyrer taster du stadig selv. Slået fra, indtil du vælger
+- Tal, der ikke ser rigtige ud (0, mangler, dobbelt eller andre tidsrum end Wattlas bruger), skrives aldrig: de gamle bliver stående, og du får en reparation
+- Påmindelsen 1. januar, 1. april og 1. oktober kommer kun, hvis tarifferne ikke hentes selv
+- Data: Energinet (www.energidataservice.dk), CC BY 4.0
+- **Ny: hold batteriet, mens elbilen lader.** Vælg laderens effekt under Konfigurer → *Elbil-lader*, så aflader husbatteriet ikke, mens bilen lader (det må
+  gerne lades). *Brug batteriet* vinder. Holdet slippes 5 min. efter, at bilen er færdig. Laderen læses kun. Slået fra, indtil du vælger; uden lader er
+  reguleringen uændret
+- **Husprognosen regner uden elbilen**, når laderen er valgt
+
 ## 0.4.3
 - **Rettet: ingen plan på solrige dage.** EMHASS' standard tillader højst 9 kW salg og ingen nedregulering. Var der mere sol i overskud, kunne
   opgaven ikke løses, og batteriet fik ingen plan. Wattlas sender nu din grænse for salg og lader EMHASS regne med nedregulering

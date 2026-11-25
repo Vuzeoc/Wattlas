@@ -111,9 +111,16 @@
           "maks_eksport_w": "Den eksport, du har lov til."
         }
       },
+      "netselskab": {
+        "title": "Netselskab",
+        "description": "Vælg dit netselskab, så henter Wattlas nettarif, elafgift og Energinets tariffer hver dag fra Energinets åbne liste (husholdninger, *Nettarif C*), også når de skifter ved sommer, vinter og nytår. Elselskabets tillæg og gebyrer taster du selv.\n\nStår dit netselskab der ikke, så vælg *Jeg taster selv tallene*.\n\nKilde: Energinet (www.energidataservice.dk)\n\n{grund}",
+        "data": {
+          "netselskab": "Netselskab"
+        }
+      },
       "priser": {
         "title": "Priser",
-        "description": "Tallene står på din elregning eller netselskabets hjemmeside. Sommer- og vintertarif retter du selv senere.",
+        "description": "{tariffer}",
         "data": {
           "nettarif_lav": "Nettarif lav (kl. 0–6)",
           "nettarif_hoej": "Nettarif høj (kl. 6–17 og 21–24)",
@@ -160,7 +167,9 @@
       "noegle": "Nøglen skal være mindst 8 tegn uden linjeskift.",
       "prognose_format": "Sensoren har ikke en prognose med datetime og watts.",
       "prognose_kvarter": "Prognosen skal have en værdi pr. 15 minutter (se SOLPROGNOSE.md).",
-      "over_nul": "Skal være større end 0."
+      "over_nul": "Skal være større end 0.",
+      "elbil_sensor": "Vælg laderens effekt i W eller kW (ikke kWh, og ikke en af Wattlas' egne sensorer).",
+      "tarif": "Tallene kunne ikke hentes (grunden står ovenfor). Prøv igen om lidt, eller vælg at taste dem selv."
     },
     "abort": {
       "single_instance_allowed": "Wattlas er allerede sat op.",
@@ -235,6 +244,10 @@
       "title": "Wattlas får ikke ren spotpris fra Energi Data Service",
       "description": "Tariffer (eller visning i øre/MWh) er slået til i Energi Data Service. Wattlas lægger selv nettarif og elafgift på, så de tælles to gange, og salgsprisen bliver forkert. Slå dem fra i Energi Data Service, og genstart Home Assistant."
     },
+    "tarif_fejl": {
+      "title": "Wattlas kan ikke hente nettarifferne",
+      "description": "Planen regner videre med de seneste tal: {fejl}.\n\nWattlas prøver igen hver time. Er tallene forkerte, så vælg *Jeg taster selv tallene* under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* → Netselskab, og ret dem under Priser og tariffer."
+    },
     "noegle_mangler": {
       "title": "Wattlas mangler EMHASS-adressen eller API-nøglen",
       "description": "Wattlas kan ikke lave en plan uden. Skriv dem under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* → Forbindelser og prognoser."
@@ -269,7 +282,9 @@
           "forbindelser": "Forbindelser og prognoser (EMHASS, solprognose, vejr)",
           "batteri": "Batteri og inverter (kWh, effekter og strømme i A)",
           "elnet": "Elnet og sikringer (fasegrænse, importloft, eksport)",
+          "netselskab": "Netselskab (hent nettarif og afgifter automatisk)",
           "priser": "Priser og tariffer",
+          "elbil": "Elbil-lader (hold batteriet, mens bilen lader)",
           "sonnen": "SonnenBatterie: adresse og token"
         }
       },
@@ -324,7 +339,7 @@
       },
       "priser": {
         "title": "Priser",
-        "description": "Tallene står på din elregning eller netselskabets hjemmeside. Sommer- og vintertarif retter du selv senere.",
+        "description": "{tariffer}",
         "data": {
           "nettarif_lav": "Nettarif lav (kl. 0–6)",
           "nettarif_hoej": "Nettarif høj (kl. 6–17 og 21–24)",
@@ -350,6 +365,25 @@
           "kulde_w_pr_grad": "Ekstra husforbrug pr. grad koldere. Varmepumpe: 50–150. 0 = ingen justering (valgfri)."
         }
       },
+      "netselskab": {
+        "title": "Netselskab",
+        "description": "Vælg dit netselskab, så henter Wattlas nettarif, elafgift og Energinets tariffer hver dag fra Energinets åbne liste (husholdninger, *Nettarif C*), også når de skifter ved sommer, vinter og nytår. Elselskabets tillæg og gebyrer taster du selv.\n\nStår dit netselskab der ikke, så vælg *Jeg taster selv tallene*.\n\nKilde: Energinet (www.energidataservice.dk)\n\n{grund}",
+        "data": {
+          "netselskab": "Netselskab"
+        }
+      },
+      "elbil": {
+        "title": "Elbil-lader",
+        "description": "Vælg laderens **effekt lige nu** (W eller kW). Så aflader husbatteriet ikke, mens bilen lader, og husprognosen regner ikke bilen med. Laderen læses kun – Wattlas styrer den ikke.\n\n**Godt at vide:** mens holdet er på, køber hele huset fra nettet, også i dyre timer. Det virker kun, mens Wattlas styrer, og kun når laderen sidder bag den måler, Wattlas bruger. SonnenBatterie kan ikke holdes.\n\n**Fundet:** {fundet}\n\nRyd feltet for at slå det helt fra.",
+        "data": {
+          "elbil_sensor": "Laderens effekt",
+          "elbil_hold": "Hold batteriet, mens elbilen lader"
+        }
+      },
+      "netselskab_vis": {
+        "title": "Nye tariffer: {navn}",
+        "description": "**Nu:** {nu}\n\n**Fra Energinet i dag:** {ny}\n\nPasser det med din elregning, så tryk *Send*. Derefter hentes tallene hver dag, og felterne forsvinder fra *Priser og tariffer*. Passer det ikke, så luk vinduet – intet er ændret."
+      },
       "sonnen": {
         "title": "SonnenBatterie: adresse og token",
         "description": "Har batteriet fået en ny adresse (fx en ny IP fra routeren) eller et nyt token, så ret det her. Wattlas tjekker, at batteriet svarer, og skriver styrekanalens filer igen.\n\n**Home Assistant skal genstartes bagefter** – tryk *Genstart* under Reparationer. Lad tokenet stå tomt for at beholde det nuværende.",
@@ -365,13 +399,16 @@
       "prognose_format": "Sensoren har ikke en prognose med datetime og watts.",
       "prognose_kvarter": "Prognosen skal have en værdi pr. 15 minutter (se SOLPROGNOSE.md).",
       "over_nul": "Skal være større end 0.",
+      "tarif": "Tallene kunne ikke hentes (grunden står ovenfor). Prøv igen om lidt, eller vælg at taste dem selv.",
+      "elbil_sensor": "Vælg laderens effekt i W eller kW (ikke kWh, og ikke en af Wattlas' egne sensorer).",
       "sonnen_adresse": "Skriv adressen som http://10.0.0.50 (uden sti).",
       "sonnen_token": "Tokenet ser forkert ud (kopiér det fra Software-Integration).",
       "sonnen_afvist": "Batteriet afviste tokenet. Er JSON API for Reading slået til, og er tokenet kopieret helt?",
       "sonnen_svarer_ikke": "Batteriet svarer ikke på adressen (eller firmwaren er ældre end 1.40)."
     },
     "abort": {
-      "install_fejl": "Installationen blev ikke gennemført: {fejl}"
+      "install_fejl": "Installationen blev ikke gennemført: {fejl}",
+      "genstart_foerst": "Genstart Home Assistant først – Wattlas' nye filer er ikke indlæst endnu."
     }
   }
 }

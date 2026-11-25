@@ -20,7 +20,7 @@ from homeassistant.helpers import selector as sel
 from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.loader import async_get_integration
 
-from . import installer
+from . import installer, tariffer
 from .const import DOMAIN, EMHASS_SLUG, GAMLE, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TEKST, TRIN
 
 VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
@@ -67,6 +67,42 @@ def priser_fejl(hass) -> bool:
     return s is not None and bool(s.attributes.get("tariffs") or s.attributes.get("use_cent") or s.attributes.get("unit", "kWh") != "kWh")
 
 
+# kendte ladere: integrationens navn i Home Assistant → navn. Kun for at foreslå laderens effekt-sensor; alle andre vælges selv
+LADERE = {"zaptec": "Zaptec", "easee": "Easee", "goecharger_api2": "go-e", "wallbox": "Wallbox", "tesla_wall_connector": "Tesla Wall Connector",
+          "ocpp": "OCPP", "keba": "Keba", "ohme": "Ohme", "abb_terra_ac": "ABB", "chargeamps": "Charge Amps", "garo_wallbox": "Garo", "besen": "Besen",
+          "nexblue": "NexBlue"}
+ELBIL, ELBIL_HOLD = "input_text.wattlas_elbil_entitet", "input_boolean.wattlas_elbil_hold"
+
+
+def _fundne_ladere(hass) -> list[tuple[str, str]]:
+    """(entitet, navn) for kendte laderes samlede effekt."""
+    fundet = []
+    for e in er.async_get(hass).entities.values():
+        if e.domain == "sensor" and e.platform in LADERE and not e.disabled and (s := hass.states.get(e.entity_id)) is not None:
+            if s.attributes.get("device_class") == "power" and not re.search(r"phase|fase|_l[123]\b|import|export|equali[sz]er|offered", f"{e.entity_id} {e.unique_id}"):
+                fundet.append((e.entity_id, f"{LADERE[e.platform]}: {s.attributes.get('friendly_name') or e.entity_id} (`{e.entity_id}`)"))
+    return sorted(fundet)
+
+
+def _elbil_fejl(hass, entity_id: str, d) -> bool:
+    """Kan sensoren ikke bruges som laderens effekt? Husets forbrug (Wattlas' egne, EMHASS' prognoser og inverterens) ville holde batteriet hele tiden."""
+    s = hass.states.get(entity_id)
+    prefixer = tuple(f"sensor.{p.partition('|')[0]}_" for p in (d.get("prefix"), *(d.get("ekstra") or {}).values()) if p)
+    if entity_id.startswith(("sensor.wattlas_", "sensor.emhass_", "sensor.p_", "sensor.hh_", *prefixer)):
+        return True
+    reg = er.async_get(hass)
+    e = reg.async_get(entity_id)
+    if e and e.device_id and any(x.device_id == e.device_id for x in reg.entities.values() if x.entity_id.startswith(prefixer)):
+        return True  # inverterens egen sensor, omdøbt
+    if s is None or s.attributes.get("unit_of_measurement") not in ("W", "kW"):
+        return True
+    try:
+        float(s.state)
+    except ValueError:
+        return s.state not in ("unknown", "unavailable")  # laderen er offline lige nu
+    return False
+
+
 def _platform_entitet(hass, domæne: str, platform: str) -> str | None:
     """Første entitet i domænet fra integrationen `platform`, fx Workday's binary_sensor."""
     for e in er.async_get(hass).entities.values():
@@ -101,9 +137,23 @@ def _forbindelse_fejl(hass, ui: dict, kraev_noegle: bool) -> dict[str, str]:
     return fejl
 
 
-def _tal_felter(kanal, trin: str) -> list[str]:
-    """Indstillingerne i trinnet. Højvolt: A-grænserne udregnes fra W (se HUAWEI_V) og spørges ikke om."""
-    return [k for k in TRIN[trin] if not (kanal in HOEJVOLT and k in A_FRA_W)]
+def _tal_felter(d, trin: str) -> list[str]:
+    """Indstillingerne i trinnet. Højvolt: A-grænserne udregnes fra W (se HUAWEI_V) og spørges ikke om – det gør hentede tariffer heller ikke."""
+    return [k for k in TRIN[trin] if not (d.get("kanal") in HOEJVOLT and k in A_FRA_W) and not (d.get("netselskab") and k in tariffer.FELTER)]
+
+
+def _pris_tekst(d, tal: dict) -> dict[str, str]:
+    if not (gln := d.get("netselskab")):
+        return {"tariffer": "Tallene står på din elregning eller netselskabets hjemmeside. Sommer- og vintertarif retter du selv senere."}
+    return {"tariffer": f"Nettarif, elafgift og Energinets tariffer hentes hver dag fra Energinet ({tariffer.SELSKABER.get(gln, (gln,))[0]}). "
+                        f"Lige nu {tariffer.vis({k: tal.get(k) or 0.0 for k in tariffer.FELTER})}."}
+
+
+def _netselskab_skema(valgt: str | None) -> vol.Schema:
+    valg = [sel.SelectOptionDict(value=tariffer.MANUEL, label="Jeg taster selv tallene"),
+            *(sel.SelectOptionDict(value=g, label=s[0]) for g, s in tariffer.SELSKABER.items())]
+    return vol.Schema({vol.Required("netselskab", default=valgt if valgt in tariffer.SELSKABER else tariffer.MANUEL):
+                       sel.SelectSelector(sel.SelectSelectorConfig(options=valg, mode=sel.SelectSelectorMode.DROPDOWN))})
 
 
 def _tal_skema(felter: list[str], std: dict) -> vol.Schema:
@@ -429,20 +479,34 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         }))
 
     async def _tal_trin(self, trin: str, user_input, naeste) -> ConfigFlowResult:
-        felter = _tal_felter(self.d.get("kanal"), trin)
+        felter = _tal_felter(self.d, trin)
         fejl = {}
         if user_input is not None:
             fejl = _tal_fejl(felter, user_input)
             if not fejl:
                 self.d["tal"] = _med_a(self.d.get("kanal"), {**self.d.get("tal", {}), **{k: v for k, v in user_input.items() if v is not None}})
                 return await naeste()
-        return self.async_show_form(step_id=trin, data_schema=_tal_skema(felter, STANDARD), errors=fejl)
+        return self.async_show_form(step_id=trin, data_schema=_tal_skema(felter, STANDARD), errors=fejl, description_placeholders=_pris_tekst(self.d, self.d.get("tal", {})))
 
     async def async_step_batteri(self, user_input=None) -> ConfigFlowResult:
         return await self._tal_trin("batteri", user_input, self.async_step_elnet)
 
     async def async_step_elnet(self, user_input=None) -> ConfigFlowResult:
-        return await self._tal_trin("elnet", user_input, self.async_step_priser)
+        return await self._tal_trin("elnet", user_input, self.async_step_netselskab)
+
+    async def async_step_netselskab(self, user_input=None) -> ConfigFlowResult:
+        fejl, grund = {}, ""
+        if user_input is not None:
+            if (gln := user_input["netselskab"]) == tariffer.MANUEL:
+                return await self.async_step_priser()
+            try:
+                self.d["tal"] = {**self.d.get("tal", {}), **await tariffer.hent(self.hass, gln)}
+                self.d["netselskab"] = gln
+                return await self.async_step_priser()
+            except tariffer.TarifFejl as e:
+                fejl, grund = {"base": "tarif"}, str(e)
+        return self.async_show_form(step_id="netselskab", errors=fejl, data_schema=_netselskab_skema((user_input or {}).get("netselskab")),
+                                    description_placeholders={"grund": grund})
 
     async def async_step_priser(self, user_input=None) -> ConfigFlowResult:
         return await self._tal_trin("priser", user_input, self.async_step_installer)
@@ -467,7 +531,7 @@ class WattlasOptionsFlow(OptionsFlow):
     Inverteren (styrekanalen) skiftes ved at fjerne Wattlas og tilføje den igen."""
 
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="init", menu_options=["forbindelser", "batteri", "elnet", "priser"]
+        return self.async_show_menu(step_id="init", menu_options=["forbindelser", "batteri", "elnet", "netselskab", "priser", "elbil"]
                                     + (["sonnen"] if self.config_entry.data.get("kanal") == "sonnen" else []))
 
     async def async_step_sonnen(self, user_input=None) -> ConfigFlowResult:
@@ -500,6 +564,9 @@ class WattlasOptionsFlow(OptionsFlow):
         except ValueError:
             return None
 
+    def _tariffer(self) -> dict[str, float]:
+        return {k: self._hjaelper("input_number", k) or 0.0 for k in tariffer.FELTER}
+
     async def async_step_forbindelser(self, user_input=None) -> ConfigFlowResult:
         fejl: dict[str, str] = {}
         if user_input is not None:
@@ -528,7 +595,7 @@ class WattlasOptionsFlow(OptionsFlow):
 
     async def _tal(self, trin: str, user_input) -> ConfigFlowResult:
         kanal = self.config_entry.data.get("kanal")
-        felter = _tal_felter(kanal, trin)
+        felter = _tal_felter(self.config_entry.data, trin)
         fejl: dict[str, str] = {}
         if user_input is not None:
             fejl = _tal_fejl(felter, user_input)
@@ -542,7 +609,63 @@ class WattlasOptionsFlow(OptionsFlow):
                 self.hass.config_entries.async_update_entry(self.config_entry, data={**self.config_entry.data, "tal": tal})
                 return self.async_create_entry(data={})
         nu = {k: self._hjaelper("input_number", k) for k in felter}
-        return self.async_show_form(step_id=trin, data_schema=_tal_skema(felter, nu), errors=fejl)
+        return self.async_show_form(step_id=trin, data_schema=_tal_skema(felter, nu), errors=fejl,
+                                    description_placeholders=_pris_tekst(self.config_entry.data, self._tariffer()))
+
+    async def async_step_netselskab(self, user_input=None) -> ConfigFlowResult:
+        d = self.config_entry.data
+        fejl, grund = {}, ""
+        if user_input is not None:
+            if (gln := user_input["netselskab"]) == tariffer.MANUEL:
+                ir.async_delete_issue(self.hass, DOMAIN, "tarif_fejl")
+                if self.hass.states.get(tariffer.HENTET):  # så minder Wattlas om nettarifferne igen
+                    await self.hass.services.async_call("input_text", "set_value", {"entity_id": tariffer.HENTET, "value": ""}, blocking=True)
+                self.hass.config_entries.async_update_entry(self.config_entry, data={k: v for k, v in self.config_entry.data.items() if k != "netselskab"})
+                return self.async_create_entry(data={})
+            try:
+                self._valgt = gln, await tariffer.hent(self.hass, gln)
+                return await self.async_step_netselskab_vis()
+            except tariffer.TarifFejl as e:
+                fejl, grund = {"base": "tarif"}, str(e)
+        return self.async_show_form(step_id="netselskab", errors=fejl, description_placeholders={"grund": grund},
+                                    data_schema=_netselskab_skema((user_input or d).get("netselskab")))
+
+    async def async_step_elbil(self, user_input=None) -> ConfigFlowResult:
+        """Elbil-laderens effekt og holdet. Ligger kun i hjælperne (styringen læser dem)."""
+        nu, til = self.hass.states.get(ELBIL), self.hass.states.get(ELBIL_HOLD)
+        if nu is None or til is None:
+            return self.async_abort(reason="genstart_foerst")
+        fejl = {}
+        kan = self.config_entry.data.get("kanal") != "sonnen"  # Sonnen kan ikke holdes; prognosen uden bilen virker stadig
+        if user_input is not None:
+            lader = user_input.get("elbil_sensor") or ""
+            if lader and _elbil_fejl(self.hass, lader, self.config_entry.data):
+                fejl = {"elbil_sensor": "elbil_sensor"}
+            else:
+                await self.hass.services.async_call("input_text", "set_value", {"entity_id": ELBIL, "value": lader}, blocking=True)
+                await self.hass.services.async_call("input_boolean", "turn_on" if lader and user_input.get("elbil_hold") else "turn_off",
+                                                    {"entity_id": ELBIL_HOLD}, blocking=True)
+                return self.async_create_entry(data={})
+        fundet = _fundne_ladere(self.hass)
+        valgt = nu.state if nu.state.startswith("sensor.") else None
+        foreslag = (user_input or {}).get("elbil_sensor") or valgt or (fundet[0][0] if len(fundet) == 1 else None)
+        return self.async_show_form(step_id="elbil", errors=fejl, data_schema=vol.Schema({
+            vol.Optional("elbil_sensor", description={"suggested_value": foreslag}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="power")),
+            **({vol.Required("elbil_hold", default=til.state == "on" if valgt else True): sel.BooleanSelector()} if kan else {}),
+        }), description_placeholders={"fundet": "; ".join(n for _, n in fundet) or "Ingen kendt lader fundet – vælg selv"})
+
+    async def async_step_netselskab_vis(self, user_input=None) -> ConfigFlowResult:
+        """Vis de nye tal, før de gemmes."""
+        gln, ny = self._valgt
+        if user_input is None:
+            return self.async_show_form(step_id="netselskab_vis", data_schema=vol.Schema({}), description_placeholders={
+                "navn": tariffer.SELSKABER[gln][0], "nu": tariffer.vis(self._tariffer()), "ny": tariffer.vis(ny)})
+        await tariffer.anvend(self.hass, ny)
+        self.hass.data.pop(tariffer.SIDST, None)  # vinduet kan have stået åbent over midnat: hent igen i næste time
+        d = self.config_entry.data
+        ir.async_delete_issue(self.hass, DOMAIN, "tarif_fejl")
+        self.hass.config_entries.async_update_entry(self.config_entry, data={**d, "netselskab": gln, "tal": {**(d.get("tal") or {}), **ny}})
+        return self.async_create_entry(data={})
 
     async def async_step_batteri(self, user_input=None) -> ConfigFlowResult:
         return await self._tal("batteri", user_input)

@@ -375,7 +375,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         xmin: 0, xmax: 24, xticks: [0, 3, 6, 9, 12, 15, 18, 21, 24].map(h => [h, String(h).padStart(2, '0')]), unit: 'kW', fmt: v => nf(v, 1), height: 200, W: this.w('side')});
       const ov = this.st('binary_sensor.wattlas_tilsidesaettelse_aktiv')?.state === 'on';
       const flowList = F.filter(f => f[1] >= 30).map(f => `<li><i style="background:${f[2]}"></i>${f[3]}<b>${kw(f[1])}</b></li>`).join('') || '<li>Ingen strøm flyder lige nu</li>';
-      return `${ov ? this.ovBanner() : ''}<div class="grid g21">
+      return `${ov ? this.ovBanner() : ''}${this.bilBanner()}<div class="grid g21">
         ${this.card('Energi lige nu', svg + `<div class="flowfoot"><ul class="fl2">${flowList}</ul><div class="aut"><b>${nf(autark)} %</b><span>autarki lige nu</span></div></div>`,
           {icon: 'mdi:flash', right: `<span class="pill ${this.st('binary_sensor.wattlas_forbindelse')?.state === 'on' ? 'ok' : 'err'}">● Inverter ${this.st('binary_sensor.wattlas_forbindelse')?.state === 'on' ? 'online' : 'offline'}</span>`})}
         <div class="stack">
@@ -588,6 +588,11 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       const navn = {lad: `Lader fra elnettet til ${s?.attributes?.lad_til} %`, ingen_netladning: 'Ingen netopladning', gem: 'Batteriet gemmes (ingen afladning)', brug: 'Batteriet forsyner huset'}[m] || m;
       return `<div class="ovb"><ha-icon icon="mdi:hand-back-right"></ha-icon><div><b>Manuel tilsidesættelse: ${navn}</b><span>Udløber kl. ${String(til.getHours()).padStart(2, '0')}:${String(til.getMinutes()).padStart(2, '0')} (om ${min >= 60 ? Math.floor(min / 60) + ' t ' : ''}${min % 60} min) – derefter følger Wattlas planen igen.</span></div><button data-a="ts" data-v="ingen">Stop nu</button></div>`;
     }
+    bilBanner() {
+      const w = Number(this.st('sensor.wattlas_elbil_effekt')?.state), kw = w > 0 ? ` (${nf(w / 1000, 1)} kW)` : '';
+      const on = e => this.st(e)?.state === 'on', brug = (on('binary_sensor.wattlas_tilsidesaettelse_aktiv') ? this.st('input_select.wattlas_tilsidesaettelse') : this.st('sensor.wattlas_aktiv_regel'))?.state === 'brug';
+      return !on('binary_sensor.wattlas_elbil_hold') || !on('input_boolean.emhass_har_overtaget') || !on('input_boolean.emhass_plan_gyldig') || brug ? '' : `<div class="ovb"><ha-icon icon="mdi:car-electric"></ha-icon><div><b>Elbilen lader${kw}: batteriet aflader ikke</b><span>Batteriet må stadig lades. Holdet slippes 5 min. efter, at bilen er færdig.</span></div></div>`;
+    }
     async _tilsidesaet(v) {
       const nu = new Date(), midnat = Math.max(15, Math.round((new Date(nu.getFullYear(), nu.getMonth(), nu.getDate() + 1) - nu) / 60000));
       const minutter = this._dur === 'midnat' ? midnat : Number(this._dur);
@@ -623,7 +628,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
           <span>Plan: ${esc(mode || '–')} · EMHASS genberegner hvert 5. min · regulerer hvert 30. sek.</span></div>
           <div class="hbtn"><button class="lnk" data-a="tog" data-v="input_boolean.wattlas_skygge" title="Skygge: Wattlas viser, hvad den ville gøre, men styrer ikke inverteren"><ha-icon icon="mdi:ghost${skygge ? '' : '-off-outline'}" style="--mdc-icon-size:16px"></ha-icon> Skygge ${skygge ? 'til' : 'fra'}</button>
           <a class="lnk" href="#plan" data-a="tab" data-v="plan">Planens logik ›</a></div></div>
-        ${ov ? this.ovBanner() : ''}
+        ${ov ? this.ovBanner() : ''}${this.bilBanner()}
         ${this.card('Elpris i dag og i morgen', this.prisStribe(), {icon: 'mdi:currency-usd', right: `<button class="lnk" data-a="tab" data-v="elpris">Elpris ›</button>`})}
         ${this.card('Manuel tilsidesættelse', `<p class="note" style="margin:0 0 12px">Tilsidesætter planen i en periode og udløber altid af sig selv. Sikkerhedsgrænserne (sikring, faser, spænding, reserve) gælder stadig.</p>
           <div class="toolbar"><span class="muted">Varighed</span>${this.seg('dur', [['30', '30 min'], ['60', '1 time'], ['120', '2 timer'], ['240', '4 timer'], ['midnat', 'Til midnat']], this._dur)}

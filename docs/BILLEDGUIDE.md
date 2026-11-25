@@ -111,9 +111,12 @@ med, at batteriet lader fra nettet. Er du i tvivl, så spørg din elinstallatør
 
 ![Elnet og sikringer](billeder/installation/10-elnet.jpg)
 
-## 8. Priser
+## 8. Netselskab og priser
 
-Netselskabets tariffer (lav, høj og spids), elafgiften og evt. elselskabets tillæg og gebyrer. De står på din
+Først vælger du dit **netselskab**. Så henter Wattlas selv nettarif, elafgift og Energinets tariffer hver dag, og de felter vises ikke i
+næste trin. Står dit netselskab der ikke, så vælg *Jeg taster selv tallene*.
+
+Derefter elselskabets tillæg og gebyrer – og, hvis du taster selv, netselskabets tariffer (lav, høj og spids) og elafgiften. De står på din
 elregning eller netselskabets hjemmeside. Felter mærket *valgfri* kan stå tomme.
 
 **Batterislid** er forudfyldt med 0,25 kr. pr. kWh. Regn gerne dit eget tal: batteriets pris / (kapacitet × cykler).

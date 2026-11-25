@@ -1,0 +1,43 @@
+# Wattlas – elbil: batteriet aflader ikke, mens elbilen lader (Konfigurer → Elbil-lader). Laderen læses kun, den styres ikke.
+# Reguleringen (emhass_reguler) klemmer planen, mens binary_sensor.wattlas_elbil_hold er on: ingen afladning, men gerne ladning.
+input_text:
+  wattlas_elbil_entitet:
+    name: Wattlas · elbil-laderens effekt (entity_id)
+    max: 255
+
+input_boolean:
+  wattlas_elbil_hold:
+    name: Wattlas · hold batteriet, mens elbilen lader
+    icon: mdi:car-electric
+
+template:
+  - sensor:
+      # Elbilens del af husets forbrug i W. Husprognosen trækker den fra (langtidsstatistik), så plan og prognose ikke regner med bilen.
+      # 0, hvis husets måling ikke viser mindst halvdelen: så sidder laderen uden for målingen (batteriet kan ikke forsyne den), eller
+      # laderens sensor hænger på en gammel værdi.
+      - name: Wattlas elbil effekt
+        unique_id: wattlas_elbil_effekt
+        default_entity_id: sensor.wattlas_elbil_effekt
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:car-electric
+        availability: >-
+          {% set e = states('input_text.wattlas_elbil_entitet') %}
+          {{ e.startswith('sensor.') and is_number(states(e)) and state_attr(e, 'unit_of_measurement') in ['W', 'kW']
+             and is_number(states('sensor.emhass_m_load_w_totalpower')) }}
+        state: >-
+          {% set e = states('input_text.wattlas_elbil_entitet') %}
+          {% set p = states(e) | float(0) * (1000 if state_attr(e, 'unit_of_measurement') == 'kW' else 1) %}
+          {{ p | round(0) if p > 0 and states('sensor.emhass_m_load_w_totalpower') | float(0) >= p / 2 else 0 }}
+  - binary_sensor:
+      # Fem minutters efterløb: en lader holder pauser og skifter trin, og hvert skift skrives til inverteren
+      - name: Wattlas elbil hold
+        unique_id: wattlas_elbil_hold
+        default_entity_id: binary_sensor.wattlas_elbil_hold
+        icon: mdi:battery-lock
+        delay_on:
+          seconds: 15
+        delay_off:
+          minutes: 5
+        state: "{{ is_state('input_boolean.wattlas_elbil_hold', 'on') and states('sensor.wattlas_elbil_effekt') | float(0) > 500 }}"
