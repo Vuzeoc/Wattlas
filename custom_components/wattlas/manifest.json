@@ -7,6 +7,9 @@
     "mqtt",
     "recorder"
   ],
+  "categories": [
+    "energy.solar_batteries"
+  ],
   "codeowners": [
     "@Vuzeoc"
   ],
