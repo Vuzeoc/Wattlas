@@ -197,6 +197,17 @@ template:
     attributes:
       forklaring: Ingen frisk eller brugbar gemt plan i tre minutter. Reserveplan må højst være to timer gammel
         og skal dække den aktuelle halvtime. Se EMHASS-log og beregningsscriptets spor.
+  - name: EMHASS mangler noget påkrævet
+    unique_id: emhass_ui_spaerre
+    default_entity_id: binary_sensor.emhass_ui_spaerre
+    state: "{{ is_state('input_boolean.emhass_styring_aktiv','on') and is_state('input_boolean.emhass_har_overtaget','on') and is_state('binary_sensor.wattlas_konfigureret','off') }}"
+    device_class: problem
+    delay_on:
+      seconds: 120
+    delay_off:
+      seconds: 60
+    attributes:
+      forklaring: "Startspærren er faldet, så batteriet er sat i selvforbrug. Wattlas genoptager selv. Mangler: {{ state_attr('binary_sensor.wattlas_konfigureret','mangler') | default([], true) | join(', ') }}"
   - name: EMHASS mangler friske målinger
     unique_id: emhass_ui_datafejl
     default_entity_id: binary_sensor.emhass_ui_datafejl
@@ -437,6 +448,7 @@ automation:
   - trigger: state
     entity_id:
     - binary_sensor.emhass_ui_planfejl
+    - binary_sensor.emhass_ui_spaerre
     - binary_sensor.emhass_ui_datafejl
     - binary_sensor.emhass_ui_netbelastning
     - binary_sensor.emhass_ui_temperatur
@@ -450,6 +462,7 @@ automation:
   - trigger: state
     entity_id:
     - binary_sensor.emhass_ui_planfejl
+    - binary_sensor.emhass_ui_spaerre
     - binary_sensor.emhass_ui_datafejl
     - binary_sensor.emhass_ui_netbelastning
     - binary_sensor.emhass_ui_temperatur

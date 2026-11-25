@@ -63,6 +63,10 @@ alpha-begrænsning.
 adressen, den sendes til, kan ikke rettes af skabeloner eller almindelige brugere. Nøglen ligger stadig i Home Assistants egne filer
 og backupper, som alle andre integrationers nøgler.
 
+**Tarifferne skifter** typisk 1. januar, 1. april og 1. oktober. Wattlas sender en påmindelse den dag (til den modtager, du har valgt
+under Overvågning). Energi Data Service skal stå på ren spotpris pr. kWh, uden tariffer – ellers tælles de to gange, og Wattlas viser en
+reparation. Vælg samme opløsning (time eller kvarter), som du afregnes efter.
+
 ## Husprognose (valgfri)
 
 | Helper | Betydning |
@@ -76,7 +80,7 @@ Alarmen *Høj netbelastning* går, når en fase under netladning bruger mere end
 > Efter installationen står skyderne på deres laveste værdi (fx net-loft 1 kW). **Sæt dem, før du slår styringen til**,
 > ellers kan EMHASS ikke lægge en brugbar plan.
 
-Reserve, slut-SOC, net-loft til planen, batteriets slidpris og fleksibel forbruger sættes på **Wattlas Styring → Styring**.
+Reserve, højeste batteriniveau, slut-SOC, net-loft til planen, batteriets slidpris og fleksibel forbruger sættes på **Wattlas Styring → Styring**.
 Batteriets slidpris (`wattlas_slid`) = batteriets pris / (kapacitet × cykler), fx 40 000 kr. / (20 kWh × 6000) ≈ 0,33 kr./kWh.
 Planen bruger kun batteriet, når prisforskellen er større end tab og slid.
 

@@ -2,6 +2,26 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.4.3
+- **Rettet: ingen plan på solrige dage.** EMHASS' standard tillader højst 9 kW salg og ingen nedregulering. Var der mere sol i overskud, kunne
+  opgaven ikke løses, og batteriet fik ingen plan. Wattlas sender nu din grænse for salg og lader EMHASS regne med nedregulering
+- **Rettet: planen brugte kun 90 % af batteriet**, medmindre du selv havde ændret EMHASS. Nu 100 %, eller det, du vælger i *Højeste batteriniveau*
+  (Wattlas Styring → Styring). Vil du blive på 90 %, så sæt den dér
+- **Rettet: en fleksibel forbruger kunne koste hele planen.** Kunne dens timer ikke nås før fristen, fandt EMHASS ingen løsning, og batteriet fik
+  ingen plan. Timerne klippes nu til det, der kan nås, og kan opgaven alligevel ikke løses, regnes planen uden forbrugeren. Den tændes
+  heller ikke længere på en gammel plan
+- **Ny: fasevagt på den fleksible forbruger.** Den tændes kun, når faserne og importloftet har plads; batteriets netladning viger for den, og den
+  slukkes, hvis en fase er overskredet i et minut. Så kan den også bruges til en **lader med tænd/sluk** – læs *docs/BRUG.md* først. Ikke
+  prøvet på en rigtig lader. **Nyt felt: Faser** (står på 1, som holder mest plads fri – sæt 3 til en trefaset forbruger)
+- **Ny: prisvagt.** Er tariffer, øre eller MWh slået til i Energi Data Service, blev tarifferne talt to gange. Opsætningen spærrer nu, og en
+  kørende Wattlas viser en reparation
+- **Ny: påmindelse om nettariffer** 1. januar, 1. april og 1. oktober
+- **Ny: diagnostik-download** til fejlrapporter, uden adresser, nøgler, navne og dine egne entiteter
+- **Besked, når startspærren falder**, mens Wattlas styrer. Et udfald af vejr, udetemperatur eller Workday sænker den ikke længere
+- **Rettet:** med kvarterpriser fik planen en opdigtet halvtime til sidst. En fasesensor, der slet ikke findes, stopper ikke længere reguleringen med en fejl
+- **Rettet:** Spook meldte *Ukendte entiteter* (`sensor.p_deferrable0`), når den fleksible forbruger ikke var i brug
+- Reguleringen af batteriet er ellers uændret
+
 ## 0.4.2
 - **Nye styrekanaler (eksperimentelle, ikke kørt på rigtige anlæg):** SolaX X3-Hybrid G4, Sofar HYD og Solis-hybrider –
   alle trefasede og lokalt via solax_modbus. Vælg dem i opsætningen; krav og begrænsninger står i *docs/STYREKANALER.md*.

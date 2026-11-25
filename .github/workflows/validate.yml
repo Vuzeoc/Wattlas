@@ -35,9 +35,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-      - run: pip install homeassistant
+      # fast version ved ændringer, nyeste i det natlige tjek
+      - run: pip install homeassistant${{ github.event_name != 'schedule' && '==2026.11.3' || '' }}
       - run: python tests/test_installer.py
       - run: python tests/test_flow.py
       - run: python tests/test_sikkerhed.py
       - run: python tests/test_skygge.py
       - run: python tests/test_kanalstyring.py
+      - run: python tests/test_forbruger.py

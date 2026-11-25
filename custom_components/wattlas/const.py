@@ -30,7 +30,7 @@ TEKST = {"solprognose": "solprognose_entitet", "vejr": "vejr_entitet", "udetempe
 # til og med 0.4.1 lå EMHASS' adresse og nøgle i hjælpere: nøglen kunne læses, og adressen (hvor nøglen sendes hen) rettes, af alle
 GAMLE = {"emhass_adresse": "input_text.wattlas_emhass_adresse", "emhass_noegle": "input_text.wattlas_emhass_noegle"}
 GYLDIG = {"emhass_adresse": re.compile(r"https?://.+"), "emhass_noegle": re.compile(r"(?!unavailable$).{8,}")}
-STANDARD = {"slid": 0.25}  # forudfyldt i opsætningen: uden en slidpris regner planen batteriet som gratis at bruge
+STANDARD = {"slid": 0.25, "maks_soc": 100}  # slid: forudfyldt i opsætningen: uden en slidpris regner planen batteriet som gratis at bruge
 NAVN_RE = r"[A-Za-z0-9 ._æøåÆØÅ-]*"  # navnet skrives ind i dashboardets YAML
 
 _INDST = Path(__file__).parent / "payload" / "packages" / "wattlas" / "wattlas_indstillinger.yaml"

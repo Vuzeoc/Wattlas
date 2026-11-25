@@ -44,7 +44,7 @@ automation:
         target:
           entity_id: input_datetime.emhass_sidst_fuld
         data:
-          date: "{{ now().date().isoformat() if trigger.id == 'fuldt' else now().date().isoformat() }}"
+          date: "{{ now().date().isoformat() }}"
       - action: system_log.write
         data:
           logger: emhass.fuldt

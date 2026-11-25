@@ -42,7 +42,7 @@ input_number:
   wattlas_forbruger1_effekt:
     name: Wattlas · fleksibel forbruger effekt
     min: 0
-    max: 11000
+    max: 22000
     step: 100
     mode: box
     unit_of_measurement: W
@@ -291,48 +291,6 @@ automation:
         data: {option: ingen}
       - action: logbook.log
         data: {name: Wattlas, entity_id: input_select.wattlas_tilsidesaettelse, message: tilsidesættelse udløbet – følger planen igen}
-
-  # Fleksibel forbruger: tænd/sluk kontakten efter EMHASS' plan (sensor.p_deferrable0). Slukket, når planen ikke er frisk.
-  - id: wattlas_forbruger1_styring
-    alias: Wattlas · fleksibel forbruger følger planen
-    mode: single
-    max_exceeded: silent
-    triggers:
-      - trigger: time_pattern
-        seconds: /30
-    conditions:
-      - condition: state
-        entity_id: input_boolean.wattlas_forbruger1_aktiv
-        state: "on"
-      - condition: template
-        value_template: >-
-          {{ states('input_text.wattlas_forbruger1_entitet') | regex_match('^(switch|light|input_boolean)[.][a-z0-9_]+$') }}
-    actions:
-      - variables:
-          ent: "{{ states('input_text.wattlas_forbruger1_entitet') }}"
-          tilbage: "{{ states('input_number.wattlas_forbruger1_timer') | float(0) - states('input_number.wattlas_forbruger1_koert') | float(0) }}"
-          oensket: >-
-            {{ is_state('input_boolean.emhass_styring_aktiv', 'on') and is_state('binary_sensor.emhass_ui_plan_frisk', 'on')
-               and states('sensor.p_deferrable0') | float(0) > 50 and tilbage | float(0) > 0 }}
-      - if:
-          - condition: template
-            value_template: "{{ oensket and not is_state(ent, 'on') }}"
-        then:
-          - action: homeassistant.turn_on
-            target: {entity_id: "{{ ent }}"}
-      - if:
-          - condition: template
-            value_template: "{{ not oensket and is_state(ent, 'on') }}"
-        then:
-          - action: homeassistant.turn_off
-            target: {entity_id: "{{ ent }}"}
-      - if:
-          - condition: template
-            value_template: "{{ is_state(ent, 'on') }}"
-        then:
-          - action: input_number.set_value
-            target: {entity_id: input_number.wattlas_forbruger1_koert}
-            data: {value: "{{ [24, states('input_number.wattlas_forbruger1_koert') | float(0) + 1 / 120] | min | round(3) }}"}
 
   - id: wattlas_forbruger1_nulstil
     alias: Wattlas · fleksibel forbruger ny periode

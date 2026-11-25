@@ -69,6 +69,7 @@ Disse tal sendes med til EMHASS ved hver beregning. Planen tager altså højde f
 
 | Indstilling | Betydning | Tommelfingerregel |
 |---|---|---|
+| **Højeste batteriniveau** | så højt lader planen fra nettet. Solen kan stadig fylde batteriet, og den ugentlige fuldladning går til 100 % | 100 % |
 | **Reserve** | laveste batteriniveau i planen | 15–20 % til daglig; hæv den om vinteren eller ved stormvarsel |
 | **Batteri ved planens slutning** | hvor meget der skal være tilbage, når planens horisont slutter | 20–30 %, så planen ikke tømmer batteriet lige før en dyr morgen |
 | **Maks. køb fra elnettet** | højeste import, planen må bruge (kW) | under din sikringsgrænse; kan ikke sættes over `wattlas_maks_netimport_w`. **0 = ingen ekstra grænse** (standard) |
@@ -106,12 +107,24 @@ pool, affugter eller elbil.
 | **Navn** | det, appen kalder den |
 | **Kontakt** | den entitet, Wattlas tænder og slukker: `switch.…`, `light.…` eller `input_boolean.…` |
 | **Effekt** | hvad apparatet bruger, når det kører (W) |
+| **Faser** | 1 eller 3. Er du i tvivl, så 1 – så holdes der mest plads |
 | **Timer pr. døgn** | hvor mange timer det skal køre i hver periode |
 | **Skal være færdig kl.** | periodens slut; en ny periode starter her |
 | **Wattlas styrer forbrugeren** | slår styringen til. Kan først slås til, når kontakten findes |
 
 Wattlas tænder kun kontakten, når planen er frisk og har lagt en kørsel i dette tidsrum, og slukker den, når timerne er
-brugt. Uden frisk plan er kontakten slukket, så sørg for, at apparatet har sin egen termostat eller sikring.
+brugt. Beder du om flere timer, end der er tilbage inden fristen, planlægges så mange, der kan nås. Uden plan er kontakten
+slukket, så sørg for, at apparatet har sin egen termostat eller sikring.
+
+**Fasevagten:** kontakten tændes kun, når der er plads på alle tre faser (regnet på den værste) og under importloftet. Fylder
+batteriets netladning, viger den først. Er en fase eller importloftet alligevel overskredet i et minut, slukkes forbrugeren, og der
+går mindst 10 minutter, før den tændes igen. Det er et værn oven på apparatets egen sikring, ikke i stedet for den: Wattlas ser
+målingerne hvert 30. sekund, og går Home Assistant ned, bliver kontakten stående.
+
+**Lader til elbil (tænd/sluk):** vælg laderens kontakt, skriv ladeeffekten (fx 11000 W, 3 faser) og timerne (kWh ÷ kW). Laderen skal
+have sin egen maks. strøm og offline-grænse, sat af installatøren, og der må ikke være anden belastningsstyring på den. Wattlas
+regulerer ikke ladestrømmen, kender ikke bilens batteri og er ikke prøvet på en rigtig lader.
+
 Prøv den i Hvad-hvis først, så du kan se, hvornår den vil køre.
 
 ## Wattlas Styring → Regler

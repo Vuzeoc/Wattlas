@@ -71,6 +71,7 @@ automation:
     - binary_sensor.emhass_ui_datafejl
     - binary_sensor.emhass_ui_netbelastning
     - binary_sensor.emhass_ui_planfejl
+    - binary_sensor.emhass_ui_spaerre
     - binary_sensor.emhass_ui_temperatur
     - binary_sensor.emhass_ui_inverterfejl
     - binary_sensor.emhass_ui_lav_soc
@@ -90,7 +91,7 @@ automation:
   - condition: template
     value_template: '{{ trigger.id == ''transition'' or (is_state(''input_boolean.emhass_styring_aktiv'',''on'')
       and (not is_state(''binary_sensor.emhass_ui_data_frisk'',''on'') or is_state(''binary_sensor.emhass_ui_datafejl'',''on'')
-      or is_state(''binary_sensor.emhass_ui_netbelastning'',''on'') or is_state(''binary_sensor.emhass_ui_planfejl'',''on'')
+      or is_state(''binary_sensor.emhass_ui_netbelastning'',''on'') or is_state(''binary_sensor.emhass_ui_planfejl'',''on'') or is_state(''binary_sensor.emhass_ui_spaerre'',''on'')
       or is_state(''binary_sensor.emhass_ui_temperatur'',''on'') or is_state(''binary_sensor.emhass_ui_inverterfejl'',''on'')
       or is_state(''binary_sensor.emhass_ui_lav_soc'',''on'') or is_state(''binary_sensor.emhass_ui_indstillingsfejl'',''on'')
       or is_state(''binary_sensor.emhass_ui_lader_ikke'',''on'') or is_state(''binary_sensor.emhass_ui_soc_afvigelse'',''on'')

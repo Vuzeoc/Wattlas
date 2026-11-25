@@ -23,7 +23,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.start import async_at_started
 
 from . import emhass, installer
-from .config_flow import VERSION
+from .config_flow import VERSION, priser_fejl
 from .const import DOMAIN, GAMLE, GENSTART, GYLDIG, STANDARD, TEKST
 
 _LOGGER = logging.getLogger(__name__)
@@ -189,6 +189,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         else:
             ir.async_create_issue(hass, DOMAIN, "noegle_mangler", is_fixable=False, is_persistent=False,
                                   severity=ir.IssueSeverity.ERROR, translation_key="noegle_mangler")
+        if priser_fejl(hass):
+            ir.async_create_issue(hass, DOMAIN, "priser_dobbelt", is_fixable=False, is_persistent=False,
+                                  severity=ir.IssueSeverity.WARNING, translation_key="priser_dobbelt")
+        else:
+            ir.async_delete_issue(hass, DOMAIN, "priser_dobbelt")
         d = entry.data  # frisk: opdateringen ovenfor kan have skrevet en ny version
         foer = d.get("overfoert")
         sat = set(foer) if isinstance(foer, list) else set()  # navne, der er overført – så et 0, brugeren selv sætter, får lov at stå
@@ -244,7 +249,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # stadig "overtaget": inverteren svarede ikke (fx offline), så den står i det sidste program
     selvforbrug = not hass.states.is_state("input_boolean.emhass_har_overtaget", "on")
     backup = await hass.async_add_executor_job(installer.afinstaller, hass.config.config_dir)
-    for i in ("genstart", "opdatering_fejlede", "noegle_mangler"):
+    for i in ("genstart", "opdatering_fejlede", "noegle_mangler", "priser_dobbelt"):
         ir.async_delete_issue(hass, DOMAIN, i)
     if backup:
         _LOGGER.warning("Wattlas er fjernet. Filerne ligger i %s. Genstart Home Assistant.", backup)

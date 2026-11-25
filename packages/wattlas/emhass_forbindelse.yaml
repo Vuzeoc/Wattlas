@@ -67,10 +67,11 @@ script:
           {%- set pv = state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') or [] -%} {%- set priser = (state_attr('sensor.energi_data_service', 'raw_today') or [])
             + (state_attr('sensor.energi_data_service', 'raw_tomorrow') or []) -%}
           {%- set extent = namespace(end=start_ts | float) -%}
+          {%- set trin = [3600, [900, as_timestamp(priser[1].hour, 0) - as_timestamp(priser[0].hour, 0)] | max] | min if priser | count > 1 else 3600 -%}
           {%- for p in priser -%}
             {%- set pt = as_timestamp(p.hour, 0) -%}
             {%- if pt > 0 and is_number(p.price) -%}
-              {%- set extent.end = [extent.end, pt + 3600] | max -%}
+              {%- set extent.end = [extent.end, pt + trin] | max -%}
             {%- endif -%}
           {%- endfor -%}
           {#- Horisont: alle kendte priser, men aldrig længere end solprognosen (ellers fejler
@@ -163,6 +164,7 @@ script:
     - variables:
         # Watt ekstra forbrug pr. grad koldere end ugens gennemsnit (input_number.wattlas_kulde_w_pr_grad, 0 = ingen justering).
         kulde_w_pr_grad: "{{ states('input_number.wattlas_kulde_w_pr_grad')|float(0) }}"
+        maks_soc: "{{ [50, states('input_number.wattlas_reserve') | float(15), [100, states('input_number.wattlas_maks_soc') | float(0) or 100] | min] | max }}"
         hus: |-
           {%- set raw = state_attr('sensor.emhass_husforbrug_historik', 'data') -%}
           {%- set rows = (raw | from_json if raw is string else raw) or [] -%}
@@ -219,7 +221,10 @@ script:
           soc_init: '{{ soc / 100 }}'
           # Wattlas-indstillinger (wattlas_styring.yaml). Reserve højst nuværende SOC, ellers kan EMHASS ikke løse opgaven.
           battery_minimum_state_of_charge: "{{ ([15, [states('input_number.wattlas_reserve') | float(15), soc | float(15)] | min] | max) / 100 }}"
-          soc_final: "{{ ([states('input_number.wattlas_slut_soc') | float(30), [15, [states('input_number.wattlas_reserve') | float(15), soc | float(15)] | min] | max] | max) / 100 }}"
+          battery_maximum_state_of_charge: "{{ ([maks_soc, soc | float(0)] | max) / 100 }}"
+          maximum_power_to_grid: "{{ (states('input_number.wattlas_maks_eksport_w')|float(0)) | int }}"
+          compute_curtailment: "{{ prognose.pv | max > states('input_number.wattlas_maks_eksport_w')|float(0) }}"
+          soc_final: "{{ ([[states('input_number.wattlas_slut_soc') | float(30), maks_soc] | min, [15, [states('input_number.wattlas_reserve') | float(15), soc | float(15)] | min] | max] | max) / 100 }}"
           battery_nominal_energy_capacity: "{{ (states('input_number.wattlas_batteri_kwh')|float(0) * 1000) | int }}"
           battery_charge_power_max: '{{ charge_limit|int }}'
           battery_discharge_power_max: '{{ discharge_limit|int }}'
@@ -236,6 +241,7 @@ script:
           weight_battery_charge: 0
     # Wattlas – fleksibel forbruger (wattlas_styring.yaml) og hvad-hvis (kaldt med data hvadhvis={...})
     - variables:
+        fb_udeladt: false
         hh: "{{ hvadhvis if hvadhvis is defined and hvadhvis is mapping else none }}"
     - variables:
         fb_ekstra: >-
@@ -244,6 +250,7 @@ script:
           {% set rest = ([0, states('input_number.wattlas_forbruger1_timer') | float(0) - states('input_number.wattlas_forbruger1_koert') | float(0)] | max * 2) | round(0) / 2 %}
           {% set dl = today_at(states('input_datetime.wattlas_forbruger1_faerdig')) %}{% if dl <= now() %}{% set dl = dl + timedelta(days=1) %}{% endif %}
           {% set slut = [1, [((dl - now()).total_seconds() / 1800) | int, prognose.intervaller | int] | min] | max %}
+          {% set rest = [rest, slut / 2] | min %}
           {% if med and P >= 100 and rest > 0 %}{{ dict(number_of_deferrable_loads=1, nominal_power_of_deferrable_loads=[P], minimum_power_of_deferrable_loads=[0],
              operating_hours_of_each_deferrable_load=[rest], start_timesteps_of_each_deferrable_load=[0], end_timesteps_of_each_deferrable_load=[slut],
              treat_deferrable_load_as_semi_cont=[true], set_deferrable_load_single_constant=[false], set_deferrable_startup_penalty=[0],
@@ -251,7 +258,7 @@ script:
         hh_ekstra: >-
           {% if hh is none %}{{ {} }}{% else %}
           {% set r = [15, [hh.get('reserve', 15) | float(15), soc | float(15)] | min] | max %}
-          {{ dict(battery_minimum_state_of_charge=r / 100, soc_final=([hh.get('slut_soc', 30) | float(30), r] | max) / 100,
+          {{ dict(battery_minimum_state_of_charge=r / 100, soc_final=([[hh.get('slut_soc', 30) | float(30), maks_soc] | min, r] | max) / 100,
                   maximum_power_from_grid=([1000, [states('input_number.wattlas_maks_netimport_w')|float(0), (hh.get('max_net_kw', 0) | float(0) * 1000 or 99999)] | min] | max) | int,
                   weight_battery_discharge=[0, [1, hh.get('slid', 0.25) | float(0.25)] | min] | max, publish_prefix='hh_') }}{% endif %}
     - action: wattlas.emhass
@@ -263,13 +270,27 @@ script:
       response_variable: emhass_svar
     - if:
       - condition: template
+        value_template: '{{ emhass_svar.status | int != 200 and fb_ekstra | count > 0 }}'
+      then:
+      - variables:
+          fb_ekstra: '{{ {} }}'
+          fb_udeladt: true
+      - action: wattlas.emhass
+        data:
+          handling: naive-mpc-optim
+          data: >-
+            {% set b = dict(beregning_basis, load_forecast_method='list', load_power_forecast=hus.liste) if hus.ok else beregning_basis %}
+            {{ dict(b, **hh_ekstra) }}
+        response_variable: emhass_svar
+    - if:
+      - condition: template
         value_template: '{{ hh is not none }}'
       then:
       - action: input_text.set_value
         target:
           entity_id: input_text.wattlas_hvadhvis_status
         data:
-          value: "{{ ('ok ' if emhass_svar.status | int == 200 else 'fejl ' ~ emhass_svar.status ~ ' ') ~ now().strftime('%H:%M') }}"
+          value: "{{ ('ok (uden forbruger) ' if emhass_svar.status | int == 200 and fb_udeladt else 'ok ' if emhass_svar.status | int == 200 else 'fejl ' ~ emhass_svar.status ~ ' ') ~ now().strftime('%H:%M') }}"
       - if:
         - condition: template
           value_template: '{{ emhass_svar.status | int == 200 }}'
@@ -279,7 +300,7 @@ script:
             handling: publish-data
             data: >-
               {{ dict(dict(method_ts_round='first', continual_publish=false, set_use_battery=true, publish_prefix='hh_', number_of_deferrable_loads=0),
-                   **(dict(number_of_deferrable_loads=1, custom_deferrable_forecast_id=[dict(entity_id='sensor.p_deferrable0',
+                   **(dict(number_of_deferrable_loads=1, custom_deferrable_forecast_id=[dict(entity_id='sensor.' ~ 'p_deferrable0',
                       unit_of_measurement='W', friendly_name='Wattlas fleksibel forbruger')]) if fb_ekstra | count > 0 else {})) }}
       - stop: Hvad-hvis færdig – den rigtige plan er ikke ændret.
     - if:
@@ -300,7 +321,7 @@ script:
         handling: publish-data
         data: >-
           {{ dict(dict(method_ts_round='first', continual_publish=false, set_use_battery=true, number_of_deferrable_loads=0),
-               **(dict(number_of_deferrable_loads=1, custom_deferrable_forecast_id=[dict(entity_id='sensor.p_deferrable0',
+               **(dict(number_of_deferrable_loads=1, custom_deferrable_forecast_id=[dict(entity_id='sensor.' ~ 'p_deferrable0',
                   unit_of_measurement='W', friendly_name='Wattlas fleksibel forbruger')]) if fb_ekstra | count > 0 else {})) }}
       response_variable: publicering
     - delay:
@@ -310,7 +331,7 @@ script:
           {% set ns = namespace(ok=true) %} {% for id in ['sensor.optim_status','sensor.p_batt_forecast',
                         'sensor.soc_batt_forecast','sensor.p_grid_forecast'] %}
             {% set s = states[id] %}
-            {% if s is not defined or s.state in ['unknown','unavailable'] %}
+            {% if s is none or s.state in ['unknown','unavailable'] %}
               {% set ns.ok = false %}
             {% elif as_timestamp(s.last_reported, 0) < (publiceret_fra | float) %}
               {% set ns.ok = false %}
@@ -629,7 +650,7 @@ script:
           {% set ns = namespace(ok=is_state('binary_sensor.emhass_ui_data_frisk','on')) %} {% for i in range(1,4) %}
             {% set ps = states['sensor.emhass_m_external_ct_w_l' ~ i] %}
             {% set vs = states['sensor.emhass_m_grid_current_v_l' ~ i] %}
-            {% if ps is not defined or vs is not defined or not is_number(ps.state) or not is_number(vs.state) %}
+            {% if ps is none or vs is none or not is_number(ps.state) or not is_number(vs.state) %}
               {% set ns.ok=false %}
             {% elif not (210 <= vs.state | float <= 250)
                 %}
@@ -643,15 +664,17 @@ script:
           {% set surplus=[0,pv-load]|max %}
           {% set existing=[0,-b/0.95-surplus]|max if is_state('switch.wattlas_netladning','on') else 0 %}
           {% set desired=[0,-p_batt-surplus]|max %}
+          {% set rs=states.input_number.wattlas_forbruger1_reserve %}
+          {% set reserve=rs.state|float(0) if rs is not none and (now()-rs.last_changed).total_seconds()<300 and is_state(states('input_text.wattlas_forbruger1_entitet'),'off') else 0 %}
           {% set vb=states('sensor.emhass_m_battery_voltage')|float(0) %}
           {% set a=[states('input_number.wattlas_maks_ladestroem_a')|float(0),states('sensor.wattlas_maks_ladestroem')|float(0)]|min %}
           {% set hardware=[0,a*vb/0.95-surplus]|max %}
           {# netladning holdes under fasegrænsen (input_number.wattlas_fase_graense_a) og importloftet inkl. husets forbrug #}
-          {% set ns=namespace(budget=states('input_number.wattlas_import_graense_w')|float(0)-states('sensor.emhass_m_grid_out_total_power')|float(99999)+existing) %}
+          {% set ns=namespace(budget=states('input_number.wattlas_import_graense_w')|float(0)-states('sensor.emhass_m_grid_out_total_power')|float(99999)+existing-reserve) %}
           {% for i in range(1,4) %}
            {% set p=states('sensor.emhass_m_external_ct_w_l'~i)|float(99999) %}
            {% set v=states('sensor.emhass_m_grid_current_v_l'~i)|float(0) %}
-           {% set ns.budget=[ns.budget,3*(states('input_number.wattlas_fase_graense_a')|float(0)*v-p)+existing]|min %}
+           {% set ns.budget=[ns.budget,3*(states('input_number.wattlas_fase_graense_a')|float(0)*v-p)+existing-reserve]|min %}
           {% endfor %}
           {{ [0,[ns.budget,desired,hardware]|min]|max }}
         ladeamp: |-

@@ -30,7 +30,11 @@ Ikke i alpha. Spændingsvinduet 45–58 V er bygget ind som sikkerhedsgrænse.
 Traces på `script.emhass_reguler` viser hver regulering.
 
 **Kan Wattlas styre min varmepumpe, mine radiatorer eller min ladestander?**
-Ikke med en færdig opsætning endnu. I alpha er der én *fleksibel forbruger* (en kontakt, som planen lægger i de bedste
+Kun med tænd/sluk: der er én *fleksibel forbruger* (en kontakt, fx en lader eller varmtvand, som planen lægger i de bedste
 timer), og Wattlas' priser, plan og soloverskud er almindelige sensorer, du kan bruge i dine egne automationer.
 [OM_WATTLAS.md](OM_WATTLAS.md) viser, hvordan udviklerens eget hus gør. Færdige koblinger står højt på ønskelisten –
 skriv gerne, hvad du har.
+
+**Hvordan melder jeg en fejl?** Hent *Download diagnostik* under Indstillinger → Enheder og tjenester → Wattlas → ⋮, og vedhæft filen
+til et issue på Wattlas' GitHub-side. Den rummer styrekanalen, dine tal og Wattlas' egne tilstande – ikke adresse,
+nøgle, token, placering, navne eller dine egne entiteter. Kig den gerne igennem, før du sender den.

@@ -734,14 +734,17 @@ async def main():
         elif isinstance(x, list):
             for v in x: find(v)
     find(yaml.safe_load((REPO / 'packages/wattlas/emhass_forbindelse.yaml').read_text(encoding='utf-8')))
-    assert [t['handling'] for t in trin] == ['naive-mpc-optim', 'publish-data', 'publish-data']
+    assert [t['handling'] for t in trin] == ['naive-mpc-optim', 'naive-mpc-optim', 'publish-data', 'publish-data']
     base = {'method_ts_round': 'first', 'continual_publish': False, 'set_use_battery': True, 'number_of_deferrable_loads': 0}
     forbr = {'number_of_deferrable_loads': 1, 'custom_deferrable_forecast_id': [{'entity_id': 'sensor.p_deferrable0', 'unit_of_measurement': 'W', 'friendly_name': 'Wattlas fleksibel forbruger'}]}
-    for t, ekstra in zip(trin[1:], ({'publish_prefix': 'hh_'}, {})):
+    for t, ekstra in zip(trin[2:], ({'publish_prefix': 'hh_'}, {})):
         assert Template(t['data'], hass).async_render({'fb_ekstra': {}}) == {**base, **ekstra}
         assert Template(t['data'], hass).async_render({'fb_ekstra': {'x': 1}}) == {**base, **ekstra, **forbr}
     r = Template(trin[0]['data'], hass).async_render({'hus': {'ok': True, 'liste': [1, 2]}, 'beregning_basis': {'a': True}, 'fb_ekstra': {'b': 1}, 'hh_ekstra': {}})
     assert r == {'a': True, 'load_forecast_method': 'list', 'load_power_forecast': [1, 2], 'b': 1}, r
+    # genforsøget uden den fleksible forbruger (EMHASS svarer 400, når opgaven ikke kan løses)
+    r = Template(trin[1]['data'], hass).async_render({'hus': {'ok': True, 'liste': [1, 2]}, 'beregning_basis': {'a': True}, 'fb_ekstra': {'b': 1}, 'hh_ekstra': {'c': 2}})
+    assert r == {'a': True, 'load_forecast_method': 'list', 'load_power_forecast': [1, 2], 'c': 2}, r
     # startspærren og stop må ikke afhænge af noget, integrationen selv laver: det forsvinder, før inverteren gives tilbage ved fjernelse
     pakker = ''.join(f.read_text(encoding='utf-8') for f in (REPO / 'packages').rglob('*.yaml'))
     egne = [e.entity_id for e in reg.entities.values() if e.platform == 'wattlas']
@@ -751,6 +754,41 @@ async def main():
     await hass.async_block_till_done()
     assert not hass.services.has_service('wattlas', 'emhass') and not hass.config_entries.async_entries('wattlas')
     print('N EMHASS-nøglen: migrering, kald og fjernelse: OK')
+
+    # diagnostik-download: med alt det, fejlsøgning kræver, men uden hemmeligheder, navne og brugerens egne entiteter
+    from custom_components.wattlas import diagnostics
+    hass, cfg = await ny_hass('homeassistant:\n')
+    await opsaet(hass, 'deye', 'sensor.hemmeligvej_12_pv_power', None)
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'sonnen': {'host': '10.9.8.7', 'token': 'tok-hemmelig'}})
+    hass.states.async_set('binary_sensor.wattlas_konfigureret', 'off', {'mangler': ['input_number.wattlas_slid'], 'friendly_name': 'Hemmeligt navn'})
+    hass.states.async_set('sensor.wattlas_regler', '1', {'regler': [{'navn': 'Hemmelig regel'}]})
+    hass.states.async_set('input_text.wattlas_besked_handling', 'notify.mobile_app_hemmelig')
+    hass.states.async_set('person.hemmelig', 'home')
+    hass.states.async_set('automation.wattlas_lad_hemmelig_bil', 'on')
+    hass.states.async_set('sensor.p_deferrable0', '3000')
+    r = json.dumps(await diagnostics.async_get_config_entry_diagnostics(hass, entry), ensure_ascii=False)
+    assert '"kanal": "deye"' in r and 'input_number.wattlas_slid' in r and '"tal"' in r and 'sensor.p_deferrable0' in r and '"emhass_sat": true' in r, r[:600]
+    for ord_ in ('hemmelig', 'Hemmelig', '10.9.8.7', 'http://emhass', 'helios_power_now', 'weather.test'):
+        assert ord_ not in r, ord_
+    print('D diagnostik uden hemmeligheder: OK')
+
+    # Energi Data Service med tariffer slået til: opsætningen spærrer, og en kørende Wattlas får en reparation
+    from custom_components.wattlas.config_flow import priser_fejl
+    for attr, fejl in (({}, False), ({'tariffs': None, 'use_cent': False, 'unit': 'kWh'}, False), ({'tariffs': {'tariffs': {'0': .1}}}, True), ({'use_cent': True}, True), ({'unit': 'MWh'}, True)):
+        hass.states.async_set('sensor.energi_data_service', '1.5', {'raw_today': [], **attr})
+        assert priser_fejl(hass) is fejl, attr
+    hass2, _ = await ny_hass('homeassistant:\n')
+    hass2.states.async_set('sensor.energi_data_service', '1.5', {'raw_today': [], 'tariffs': {'tariffs': {'0': .1}}})
+    hass2.states.async_set('sensor.deye_pv_power', '0')
+    r = await hass2.config_entries.flow.async_init('wattlas', context={'source': 'user'})
+    r = await hass2.config_entries.flow.async_configure(r['flow_id'], {'kanal': 'deye'})
+    r = await hass2.config_entries.flow.async_configure(r['flow_id'], {'inverter': 'sensor.deye_pv_power', 'inverter2': False})
+    assert r['step_id'] == 'tjek' and 'ren spotpris' in r['description_placeholders']['liste'], r
+    r = await hass2.config_entries.flow.async_configure(r['flow_id'], {})
+    assert r['step_id'] == 'tjek', r
+    await hass2.async_stop(force=True)
+    print('D prisvagt: OK')
     await hass.async_stop(force=True)
 
     # U: én genstart – en nyere version på disken (hentet af Markedspladsen, endnu ikke indlæst) lægges på plads af den

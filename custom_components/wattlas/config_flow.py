@@ -61,6 +61,12 @@ def _database(hass) -> str | None:
         return None
 
 
+def priser_fejl(hass) -> bool:
+    """Energi Data Service giver noget andet end ren spotpris i kr./kWh: så ville Wattlas lægge tarifferne på to gange og regne forkert salgspris."""
+    s = hass.states.get("sensor.energi_data_service")
+    return s is not None and bool(s.attributes.get("tariffs") or s.attributes.get("use_cent") or s.attributes.get("unit", "kWh") != "kWh")
+
+
 def _platform_entitet(hass, domæne: str, platform: str) -> str | None:
     """Første entitet i domænet fra integrationen `platform`, fx Workday's binary_sensor."""
     for e in er.async_get(hass).entities.values():
@@ -368,6 +374,8 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
                             "Bruger dine egne automationer det gamle navn, så ret dem bagefter.")
             else:
                 blok.append(f"❌ **{navn}** mangler – " + (f"[tilføj den]({link}), {hjælp}" if link else hjælp))
+        if priser_fejl(hass):
+            blok.append("❌ **Energi Data Service** skal give ren spotpris pr. kWh: slå *tariffer* og *vis i øre* fra, og vælg *kWh*, i dens indstillinger. Wattlas lægger selv tarifferne på.")
         alle = await hass.async_add_executor_job(installer.entiteter_i_kanal, self.d["kanal"], self.d["prefix"], self.d.get("ekstra"))
         mangler = [e for e in alle if hass.states.get(e) is None and not e.endswith("_microinverter_power")] if self.d["kanal"] not in EGNE else []
         if mangler:

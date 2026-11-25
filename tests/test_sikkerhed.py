@@ -75,6 +75,8 @@ async def main():
     anlaeg()
     sæt('sensor.emhass_m_external_ct_w_l2', 'unavailable')
     assert regn('fase_ok') is False
+    hass.states.async_remove('sensor.emhass_m_external_ct_w_l2')  # findes slet ikke: også nej – ikke en fejl, der stopper reguleringen
+    assert regn('fase_ok') is False
     print('faseloft og ladestrøm: OK')
 
     # Huawei: et omvendt fortegn må aldrig få regnestykket til at gå op (ellers er fasegrænsen sat ud af kraft)
@@ -460,6 +462,61 @@ async def main():
     sæt('sensor.min_sonnen_status', '4000', {**hass.states.get('sensor.min_sonnen_status').attributes, 'SystemStatus': 'OffGrid'})
     assert sample('sonnen')['values']['inverter_status'] == 'OffGrid'
     print('Sonnen: fasegrænse (enfaset), fortegn og status: OK')
+
+    # planens grænser: EMHASS' egne standarder (90 % batteri, 9000 W salg) må aldrig gælde
+    F = yaml.safe_load((REPO / 'packages/wattlas/emhass_forbindelse.yaml').read_text(encoding='utf-8'))
+    BB = find(F, 'beregning_basis')['beregning_basis']
+    MAKS = find(F, 'maks_soc')['maks_soc']
+    basis = lambda navn, soc=50, **v: Template(BB[navn], hass).async_render({'soc': soc, 'maks_soc': Template(MAKS, hass).async_render(), **v})  # noqa: E731
+    for maks, slut, soc, v_maks, v_slut in ((0, 30, 50, 1, .3), (100, 30, 50, 1, .3), (90, 100, 50, .9, .9), (80, 30, 95, .95, .3), (20, 30, 40, .5, .3)):
+        sæt('input_number.wattlas_maks_soc', str(maks)); sæt('input_number.wattlas_slut_soc', str(slut)); sæt('input_number.wattlas_reserve', '15')
+        assert (basis('battery_maximum_state_of_charge', soc), basis('soc_final', soc)) == (v_maks, v_slut), (maks, slut, soc)
+    sæt('input_number.wattlas_maks_soc', '50'); sæt('input_number.wattlas_reserve', '80')  # loftet kan ikke ligge under reserven
+    assert basis('battery_maximum_state_of_charge', 60) == .8
+    for eksport, sol, nedreguler in ((6000, 5000, False), (6000, 6001, True), (1, 0, False), (1, 500, True)):
+        sæt('input_number.wattlas_maks_eksport_w', str(eksport))
+        assert (basis('maximum_power_to_grid'), basis('compute_curtailment', prognose={'pv': [0, sol, 0]})) == (eksport, nedreguler)
+    print('Planens grænser (SOC, salg): OK')
+
+    # planens længde: med kvarterpriser dækker den sidste pris et kvarter, ikke en hel time
+    from datetime import datetime, timedelta, timezone
+    P = find(F, 'prognose')['prognose']
+    nul = datetime(2026, 11, 25, 12, tzinfo=timezone.utc)
+    for trin, antal, forventet in ((60, 24, 48), (15, 96, 48)):
+        sæt('sensor.sol', '0', {'forecast': [{'datetime': nul + timedelta(minutes=15 * i), 'watts': 100} for i in range(400)]})
+        sæt('input_text.wattlas_solprognose_entitet', 'sensor.sol')
+        sæt('sensor.energi_data_service', '1', {'raw_today': [{'hour': nul + timedelta(minutes=trin * i), 'price': 1 + i / 100} for i in range(antal)], 'raw_tomorrow': []})
+        r = Template(P, hass).async_render({'start_ts': nul.timestamp()})
+        assert r['intervaller'] == forventet and not r['fejl'], (trin, r['intervaller'], r['fejl'])
+    print('Planens længde ved time- og kvarterpriser: OK')
+
+    # startspærren: kræver opsætningen, men falder ikke, fordi vejr, udetemperatur eller Workday er utilgængelig et øjeblik
+    I = yaml.safe_load((REPO / 'packages/wattlas/wattlas_indstillinger.yaml').read_text(encoding='utf-8'))
+    K = next(s for b in I['template'] for s in b.get('binary_sensor', []) if s['unique_id'] == 'wattlas_konfigureret')
+    spaerre = lambda: (Template(K['state'], hass).async_render(), Template(K['attributes']['mangler'], hass).async_render())  # noqa: E731
+    for k in re.findall(r"'([a-z0-9_]+)'", re.search(r'set tal = \[(.*?)\]', K['state'], re.S).group(1)):
+        sæt(f'input_number.wattlas_{k}', '1')
+    sæt('input_text.wattlas_vejr_entitet', 'weather.test'); sæt('binary_sensor.workday_sensor', 'on')
+    assert spaerre() == (True, []), spaerre()
+    for e in ('weather.test', 'sensor.wattlas_udetemperatur', 'binary_sensor.workday_sensor'):
+        sæt(e, 'unavailable')
+    assert spaerre() == (True, []), spaerre()
+    for e, hvad in (('sensor.energi_data_service', 'energi_data_service'), ('binary_sensor.workday_sensor', 'workday')):
+        gemt = hass.states.get(e); hass.states.async_remove(e)
+        ok, mangler = spaerre()
+        assert ok is False and len(mangler) == 1 and hvad in mangler[0], (e, mangler)
+        hass.states.async_set(e, gemt.state, gemt.attributes)
+    # beskeden om den: kun, når Wattlas styrer inverteren, og spærren er nede
+    O = yaml.safe_load((REPO / 'packages/wattlas/emhass_overblik.yaml').read_text(encoding='utf-8'))
+    A = next(s for b in O['template'] for s in b.get('binary_sensor', []) if s['unique_id'] == 'emhass_ui_spaerre')
+    for styring, overtaget, konf, forventet in (('on', 'on', 'off', True), ('on', 'on', 'on', False), ('off', 'on', 'off', False), ('on', 'off', 'off', False), ('on', 'on', 'unknown', False)):
+        sæt('input_boolean.emhass_styring_aktiv', styring); sæt('input_boolean.emhass_har_overtaget', overtaget)
+        sæt('binary_sensor.wattlas_konfigureret', konf, {'mangler': ['noget']})
+        assert Template(A['state'], hass).async_render() is forventet, (styring, overtaget, konf)
+    assert 'noget' in Template(A['attributes']['forklaring'], hass).async_render()
+    besked = next(a for a in O['automation'] if a['id'] == 'emhass_ui_problem_beskeder')
+    assert all('binary_sensor.emhass_ui_spaerre' in tr['entity_id'] for tr in besked['triggers'])
+    print('Startspærren og beskeden om den: OK')
 
     await hass.async_stop(force=True)
 

@@ -231,6 +231,10 @@
         }
       }
     },
+    "priser_dobbelt": {
+      "title": "Wattlas får ikke ren spotpris fra Energi Data Service",
+      "description": "Tariffer (eller visning i øre/MWh) er slået til i Energi Data Service. Wattlas lægger selv nettarif og elafgift på, så de tælles to gange, og salgsprisen bliver forkert. Slå dem fra i Energi Data Service, og genstart Home Assistant."
+    },
     "noegle_mangler": {
       "title": "Wattlas mangler EMHASS-adressen eller API-nøglen",
       "description": "Wattlas kan ikke lave en plan uden. Skriv dem under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* → Forbindelser og prognoser."

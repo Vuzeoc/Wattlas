@@ -61,6 +61,13 @@ input_number:
     step: 1
     mode: box
     unit_of_measurement: A
+  wattlas_maks_soc:
+    name: Wattlas · højeste batteriniveau i planen (0 = 100 %)
+    min: 0
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    icon: mdi:battery-high
   wattlas_kulde_w_pr_grad:
     name: Wattlas · ekstra husforbrug pr. grad koldere (valgfri)
     min: 0
@@ -198,9 +205,8 @@ template:
           {% for k in tal %}{% if not (states('input_number.wattlas_' ~ k) | float(0) > 0) %}{% set ns.m = ns.m + ['input_number.wattlas_' ~ k] %}{% endif %}{% endfor %}
           {% if state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') is none %}{% set ns.m = ns.m + ['input_text.wattlas_solprognose_entitet'] %}{% endif %}
           {% if not states('input_text.wattlas_vejr_entitet').startswith('weather.') %}{% set ns.m = ns.m + ['input_text.wattlas_vejr_entitet'] %}{% endif %}
-          {% if not has_value('sensor.wattlas_udetemperatur') %}{% set ns.m = ns.m + ['input_text.wattlas_udetemperatur_entitet'] %}{% endif %}
           {% if not has_value('sensor.energi_data_service') %}{% set ns.m = ns.m + ['sensor.energi_data_service (integrationen Energi Data Service)'] %}{% endif %}
-          {% if not has_value('binary_sensor.workday_sensor') %}{% set ns.m = ns.m + ['binary_sensor.workday_sensor (integrationen Workday)'] %}{% endif %}
+          {% if states.binary_sensor.workday_sensor is none %}{% set ns.m = ns.m + ['binary_sensor.workday_sensor (integrationen Workday)'] %}{% endif %}
           {{ ns.m | count == 0 }}
         attributes:
           mangler: >-
@@ -211,9 +217,8 @@ template:
             {% for k in tal %}{% if not (states('input_number.wattlas_' ~ k) | float(0) > 0) %}{% set ns.m = ns.m + ['input_number.wattlas_' ~ k] %}{% endif %}{% endfor %}
             {% if state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') is none %}{% set ns.m = ns.m + ['input_text.wattlas_solprognose_entitet'] %}{% endif %}
             {% if not states('input_text.wattlas_vejr_entitet').startswith('weather.') %}{% set ns.m = ns.m + ['input_text.wattlas_vejr_entitet'] %}{% endif %}
-            {% if not has_value('sensor.wattlas_udetemperatur') %}{% set ns.m = ns.m + ['input_text.wattlas_udetemperatur_entitet'] %}{% endif %}
             {% if not has_value('sensor.energi_data_service') %}{% set ns.m = ns.m + ['sensor.energi_data_service (integrationen Energi Data Service)'] %}{% endif %}
-            {% if not has_value('binary_sensor.workday_sensor') %}{% set ns.m = ns.m + ['binary_sensor.workday_sensor (integrationen Workday)'] %}{% endif %}
+            {% if states.binary_sensor.workday_sensor is none %}{% set ns.m = ns.m + ['binary_sensor.workday_sensor (integrationen Workday)'] %}{% endif %}
             {{ ns.m }}
 
 script:
@@ -244,3 +249,23 @@ script:
               title: "{{ title | default('Wattlas') }}"
               message: "{{ message | default('') }}"
               data: "{{ data | default({}) }}"
+
+automation:
+  # netselskaberne skifter tariffer ved sommer, vinter og nytår – indtastede tal bliver stille forkerte
+  - id: wattlas_tarif_paamindelse
+    alias: Wattlas · tjek nettarifferne
+    triggers:
+      - trigger: time
+        at: "09:00:00"
+    conditions:
+      - condition: template
+        value_template: "{{ now().day == 1 and now().month in [1, 4, 10] }}"
+    actions:
+      - action: script.wattlas_besked
+        data:
+          title: Wattlas · tjek nettarifferne
+          message: >-
+            Netselskaberne skifter typisk tariffer i dag. Sammenlign dine tal med netselskabets og Energinets, og ret dem under
+            Indstillinger → Enheder og tjenester → Wattlas → Konfigurer → Priser. Planen regner med de tal, der står der.
+          data:
+            tag: wattlas_tarif
