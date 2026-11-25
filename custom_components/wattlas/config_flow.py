@@ -21,7 +21,7 @@ from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.loader import async_get_integration
 
 from . import installer
-from .const import DOMAIN, EMHASS_SLUG, GAMMEL_NOEGLE, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TEKST, TRIN
+from .const import DOMAIN, EMHASS_SLUG, GAMLE, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TEKST, TRIN
 
 VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
 SUFFIX = {"deye": ("sensor", "_pv_power"), "sunmate": ("number", "_timepoint_1_power"), "huawei": ("sensor", "_input_power"),
@@ -132,7 +132,10 @@ async def _sa_svarer(hass) -> str | None:
     af = []
     try:
         for emne, e in set_.items():
-            af.append(await mqtt.async_subscribe(hass, f"solar_assistant/{emne}/state", lambda _b, e=e: e.set()))
+            @callback  # i HA's egen tråd: asyncio.Event må ikke sættes fra en anden
+            def kom(_besked, e=e) -> None:
+                e.set()
+            af.append(await mqtt.async_subscribe(hass, f"solar_assistant/{emne}/state", kom))
         async with asyncio.timeout(SA_VENT_S):
             await asyncio.gather(*(e.wait() for e in set_.values()))
     except (TimeoutError, HomeAssistantError):
@@ -497,13 +500,15 @@ class WattlasOptionsFlow(OptionsFlow):
                 for k, h in TEKST.items():
                     await self.hass.services.async_call("input_text", "set_value",
                                                         {"entity_id": f"input_text.wattlas_{h}", "value": user_input.get(k) or ""}, blocking=True)
-                if noegle := user_input.get("emhass_noegle"):  # tom = behold den nuværende nøgle
-                    self.hass.config_entries.async_update_entry(self.config_entry, data={**self.config_entry.data, "emhass_noegle": noegle})
+                ny = {k: user_input[k] for k in GAMLE if user_input.get(k)}  # tom = behold den nuværende nøgle
+                self.hass.config_entries.async_update_entry(self.config_entry, data={**self.config_entry.data, **ny})
+                if self.config_entry.data.get("emhass_noegle"):
                     ir.async_delete_issue(self.hass, DOMAIN, "noegle_mangler")
-                    if self.hass.states.get(GAMMEL_NOEGLE):  # pakker fra før 0.4.2 kører endnu (genstart mangler) og læser nøglen her
-                        await self.hass.services.async_call("input_text", "set_value", {"entity_id": GAMMEL_NOEGLE, "value": noegle}, blocking=True)
+                for k, v in ny.items():  # pakker fra før 0.4.2 kører endnu (genstart mangler) og læser værdierne her
+                    if self.hass.states.get(GAMLE[k]):
+                        await self.hass.services.async_call("input_text", "set_value", {"entity_id": GAMLE[k], "value": v}, blocking=True)
                 return self.async_create_entry(data={})
-        nu = {k: self._hjaelper("input_text", h) for k, h in TEKST.items()}
+        nu = {**{k: self._hjaelper("input_text", h) for k, h in TEKST.items()}, "emhass_adresse": self.config_entry.data.get("emhass_adresse")}
         d = lambda k: {"default": nu[k]} if nu.get(k) else {}  # noqa: E731
         return self.async_show_form(step_id="forbindelser", errors=fejl, data_schema=vol.Schema({
             vol.Required("emhass_adresse", **d("emhass_adresse")): sel.TextSelector(),

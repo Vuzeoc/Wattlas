@@ -20,12 +20,15 @@ Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet
   allerede advarslen, så vælg *Ryd disse statistikker* én gang
 - **Sikkerhed – EMHASS API-nøglen er ikke længere en tilstand.** Til og med 0.4.1 lå den i `input_text.wattlas_emhass_noegle`. Feltet var
   skjult på skærmen, men alle med adgang til din Home Assistant (også skabeloner og API) kunne læse nøglen. Nu ligger den kun i
-  integrationens opsætning, og integrationen laver selv kaldene til EMHASS. Nøglen flyttes af sig selv ved opdateringen.
+  integrationens opsætning sammen med EMHASS-adressen, og integrationen laver selv kaldene. Begge flyttes af sig selv ved opdateringen.
   **Lav gerne en ny nøgle bagefter:** skriv en ny kode i EMHASS-app'ens *emhass_api_token*, genstart app'en, og skriv samme kode under
   Wattlas → *Konfigurer* → Forbindelser og prognoser. Den gamle kan stadig ligge i Home Assistants backupper
-- **Ændret:** `rest_command.emhass_…` og `input_text.wattlas_emhass_noegle` findes ikke mere. Bruger du dem i egne automationer, så kald
+- **Ændret:** `rest_command.emhass_…`, `input_text.wattlas_emhass_noegle` og `input_text.wattlas_emhass_adresse` findes ikke mere. Bruger du dem i egne automationer, så kald
   `wattlas.emhass` (*handling* og *data*) i stedet
 - **Nyt logo:** en halv sol med et W over et batteri. Skærmbillederne i dokumentationen viser stadig det gamle
+- **Rettet (alle invertere): startspærren kunne forhindre stop.** Forsvandt noget påkrævet (fx elprisen eller vejret), mens Wattlas
+  netladede, stoppede reguleringen, og netladningen kunne hverken stoppes eller gives tilbage – heller ikke efter en genstart. Har
+  Wattlas overtaget, giver den nu inverteren tilbage (selvforbrug) og genoptager selv, når alt er på plads igen
 - Ingen andre ændringer i kernens styring
 
 ## 0.4.1

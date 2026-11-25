@@ -26,10 +26,10 @@ TRIN = {
                "solcelle_slid", "slid", "kulde_w_pr_grad"],
 }
 # opsætningens tekstfelter → input_text.wattlas_<navn>
-TEKST = {"emhass_adresse": "emhass_adresse", "solprognose": "solprognose_entitet",
-         "vejr": "vejr_entitet", "udetemperatur": "udetemperatur_entitet"}
-NOEGLE_SAT = "binary_sensor.wattlas_emhass_noegle_sat"
-GAMMEL_NOEGLE = "input_text.wattlas_emhass_noegle"  # til og med 0.4.1 lå EMHASS-nøglen her – læsbar som tilstand
+TEKST = {"solprognose": "solprognose_entitet", "vejr": "vejr_entitet", "udetemperatur": "udetemperatur_entitet"}
+# til og med 0.4.1 lå EMHASS' adresse og nøgle i hjælpere: nøglen kunne læses, og adressen (hvor nøglen sendes hen) rettes, af alle
+GAMLE = {"emhass_adresse": "input_text.wattlas_emhass_adresse", "emhass_noegle": "input_text.wattlas_emhass_noegle"}
+GYLDIG = {"emhass_adresse": re.compile(r"https?://.+"), "emhass_noegle": re.compile(r"(?!unavailable$).{8,}")}
 STANDARD = {"slid": 0.25}  # forudfyldt i opsætningen: uden en slidpris regner planen batteriet som gratis at bruge
 NAVN_RE = r"[A-Za-z0-9 ._æøåÆØÅ-]*"  # navnet skrives ind i dashboardets YAML
 

@@ -119,11 +119,10 @@ async def main():
     assert ('input_number', 'set_value', 'input_number.wattlas_batteri_kwh', 20) in kald
     assert ('input_number', 'set_value', 'input_number.wattlas_slid', 0.25) in kald
     assert not any(k[2] == 'input_number.wattlas_fase_graense_a' for k in kald)
-    assert not any('noegle' in str(k[2]) or 'hemmelig123' in str(k[3]) for k in kald), 'nøglen må ikke sættes som tilstand'
+    assert not any('wattlas_emhass_' in str(k[2]) or 'hemmelig123' in str(k[3]) for k in kald), 'nøgle og adresse må ikke sættes som tilstand'
     assert ('input_boolean', 'turn_on', 'input_boolean.emhass_fuld_opladning', None) in kald
     assert issue(hass, 'genstart') is None
     assert entry.data['emhass_noegle'] == 'hemmelig123' and 'slid' in entry.data['overfoert'], 'nøglen ligger kun i integrationens opsætning'
-    assert hass.states.get('binary_sensor.wattlas_emhass_noegle_sat').state == 'on'
     assert 'hemmelig123' not in alle_tilstande(hass)
     kald.clear()
     await genindlaes(hass, genstart=True)
@@ -455,15 +454,17 @@ async def main():
     reg.async_get_or_create('sensor', 'template', 'wattlas_i_dag_ladet', suggested_object_id='wattlas_i_dag_ladet')  # står i filerne
     reg.async_get_or_create('sensor', 'template', 'helt_anden', suggested_object_id='helt_anden')  # ikke Wattlas'
     reg.async_get_or_create('sensor', 'template', 'emhass_min_egen', suggested_object_id='emhass_min_egen')  # brugerens egen EMHASS-sensor
+    for uid in ('min_spf_soc', 'min_spf_egen'):  # SPF-kanalens mqtt-sensorer, og brugerens egen med samme forstavelse
+        reg.async_get_or_create('sensor', 'mqtt', uid, suggested_object_id=uid)
     for e in ('sensor.wattlas_total_koebt', 'automation.wattlas_huawei_netladning', 'sensor.wattlas_i_dag_ladet', 'sensor.helt_anden',
-              'sensor.emhass_min_egen'):
+              'sensor.emhass_min_egen', 'sensor.min_spf_soc', 'sensor.min_spf_egen'):
         hass.states.async_set(e, 'unavailable', {'restored': True})  # sådan står efterladte registreringer efter en genstart
     kendt = sys.modules['custom_components.wattlas.installer'].kendt_tekst()
     assert 'wattlas_huawei_netladning' in kendt and 'emhass_min_egen' not in kendt
     ryddet = W._ryd_efterladte(hass, 'unique_id: wattlas_i_dag_ladet\nunique_id: wattlas_total_koebt\n', kendt)
-    assert sorted(ryddet) == ['automation.wattlas_huawei_netladning', 'sensor.wattlas_total_koebt'], ryddet
+    assert sorted(ryddet) == ['automation.wattlas_huawei_netladning', 'sensor.min_spf_soc', 'sensor.wattlas_total_koebt'], ryddet
     assert reg.async_get_entity_id('sensor', 'integration', 'wattlas_total_koebt') == 'sensor.wattlas_total_koebt'
-    behold = ('sensor.wattlas_i_dag_ladet', 'sensor.helt_anden', 'automation.wattlas_min_egen', 'sensor.emhass_min_egen')
+    behold = ('sensor.wattlas_i_dag_ladet', 'sensor.helt_anden', 'automation.wattlas_min_egen', 'sensor.emhass_min_egen', 'sensor.min_spf_egen')
     assert all(reg.async_get(e) for e in behold), [e for e in behold if not reg.async_get(e)]
     assert W._ryd_efterladte(hass, '', kendt) == [], 'uden filer (fx midlertidig fejl) må kun tvillinger ryddes'
     print('R kanalskift rydder efterladte registreringer: OK')
@@ -572,7 +573,6 @@ async def main():
     await opsaet(hass, 'deye', 'sensor.min_inverter_pv_power')
     kald = fang_kald(hass)
     hass.states.async_set('input_number.wattlas_fase_graense_a', '16')
-    hass.states.async_set('input_text.wattlas_emhass_adresse', 'http://emhass:5000')
     hass.states.async_set('input_text.wattlas_solprognose_entitet', 'sensor.helios_power_now')
     hass.states.async_set('input_text.wattlas_vejr_entitet', 'weather.test')
     entry = hass.config_entries.async_entries('wattlas')[0]
@@ -594,21 +594,30 @@ async def main():
     r = await om.async_configure(r['flow_id'], {'next_step_id': 'forbindelser'})
     r = await om.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5001', 'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
     assert r['type'] == 'create_entry', r
-    assert ('input_text', 'set_value', 'input_text.wattlas_emhass_adresse', 'http://emhass:5001') in kald
     data = lambda: hass.config_entries.async_entries('wattlas')[0].data  # noqa: E731
-    assert data()['emhass_noegle'] == 'hemmelig123' and not [k for k in kald if 'noegle' in k[2]], kald
+    assert data()['emhass_noegle'] == 'hemmelig123' and data()['emhass_adresse'] == 'http://emhass:5001'
+    assert not [k for k in kald if 'wattlas_emhass_' in k[2]], kald
     # ny nøgle: gemmes i opsætningen – og kun i den gamle hjælper, hvis pakker fra før 0.4.2 stadig kører
     async def skift(noegle):
         r = await om.async_init(entry.entry_id)
         r = await om.async_configure(r['flow_id'], {'next_step_id': 'forbindelser'})
+        udfyldt = {str(k): k.default() for k in r['data_schema'].schema if callable(getattr(k, 'default', None))}
+        assert udfyldt['emhass_adresse'] == 'http://emhass:5001', 'adressen skal komme fra opsætningen, ikke fra en tilstand'
         return await om.async_configure(r['flow_id'], {'emhass_adresse': 'http://emhass:5001', 'emhass_noegle': noegle,
                                                        'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    hass.states.async_set('input_text.wattlas_emhass_adresse', 'http://fremmed:1')
     for daarlig in ('kort', 'to linjer\nX-Andet: 1'):
         assert (await skift(daarlig))['errors'] == {'emhass_noegle': 'noegle'}
+    hass.states.async_remove('input_text.wattlas_emhass_adresse')
     assert (await skift('ny-noegle-{{ 1 }}"'))['type'] == 'create_entry'
     assert data()['emhass_noegle'] == 'ny-noegle-{{ 1 }}"' and not [k for k in kald if 'noegle' in k[2]], kald
     hass.states.async_set('input_text.wattlas_emhass_noegle', 'ny-noegle-{{ 1 }}"')
     assert (await skift('nyeste-noegle'))['type'] == 'create_entry'
+    await genindlaes(hass)
+    assert data()['emhass_noegle'] == 'ny-noegle-{{ 1 }}"', 'de gamle pakker kører stadig: deres hjælper er den rigtige (kaldet er kun fanget her)'
+    hass.states.async_set('input_text.wattlas_emhass_noegle', 'nyeste-noegle')  # som den rigtige tjeneste ville gøre
+    await genindlaes(hass)
+    assert data()['emhass_noegle'] == 'nyeste-noegle', 'en nøgle fra Konfigurer mellem de to genstarter skal overleve'
     assert ('input_text', 'set_value', 'input_text.wattlas_emhass_noegle', 'nyeste-noegle') in kald
     hass.states.async_remove('input_text.wattlas_emhass_noegle')
     print('K Konfigurer: OK')
@@ -624,16 +633,19 @@ async def main():
     await opsaet(hass, 'deye', 'sensor.deye_x_pv_power')
     W = sys.modules['custom_components.wattlas']
     W.TJEK_S = 10 ** 6
-    GL, SAT = 'input_text.wattlas_emhass_noegle', 'binary_sensor.wattlas_emhass_noegle_sat'
+    GL, GLA = 'input_text.wattlas_emhass_noegle', 'input_text.wattlas_emhass_adresse'
     fang_kald(hass)
     hass.states.async_set('binary_sensor.wattlas_konfigureret', 'off')
     entry = hass.config_entries.async_entries('wattlas')[0]
     reg = er.async_get(hass)
 
-    def som_041(tilstand, **attr):
-        hass.config_entries.async_update_entry(entry, data={**{k: v for k, v in entry.data.items() if k != 'emhass_noegle'}, 'overfoert': ['emhass_noegle', 'slid']})
+    def som_041(tilstand, adresse='http://rettet-i-041:5000', **attr):
+        # 0.4.1: nøglen kun i hjælperen, adressen i opsætningen er den fra dengang (0.4.1's Konfigurer rettede kun hjælperen)
+        hass.config_entries.async_update_entry(entry, data={**{k: v for k, v in entry.data.items() if k != 'emhass_noegle'},
+                                                            'emhass_adresse': 'http://gammel:5000', 'overfoert': ['emhass_adresse', 'emhass_noegle', 'slid']})
         hass.states.async_set(GL, tilstand, attr)
-    # 1) gyldig nøgle i den levende hjælper: flyttes (også før de nye filer lægges på plads)
+        hass.states.async_set(GLA, adresse, attr)
+    # 1) gyldige værdier i de levende hjælpere: flyttes (også før de nye filer lægges på plads)
     som_041('gammel "nøgle" {{x}} 1')
     hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.4.1'})
     rigtig_opdater, set_ved_install = W.installer.opdater, []
@@ -641,25 +653,38 @@ async def main():
     entry = await genindlaes(hass)
     W.installer.opdater = rigtig_opdater
     assert set_ved_install == ['gammel "nøgle" {{x}} 1'], 'nøglen skal være gemt, før de nye filer lægges på plads'
-    assert entry.data['emhass_noegle'] == 'gammel "nøgle" {{x}} 1' and 'emhass_noegle' not in entry.data['overfoert'] and hass.states.get(SAT).state == 'on'
-    # ... og den gamle, døde registrering ryddes efter genstarten, en levende røres ikke
-    hass.states.async_remove(GL)
-    reg.async_get_or_create('input_text', 'input_text', 'wattlas_emhass_noegle', suggested_object_id='wattlas_emhass_noegle')
-    assert reg.async_get(GL) is not None
+    assert entry.data['emhass_noegle'] == 'gammel "nøgle" {{x}} 1' and entry.data['emhass_adresse'] == 'http://rettet-i-041:5000'
+    assert entry.data['overfoert'] == ['slid'], entry.data['overfoert']
+    # rettes hjælperen mellem de to genstarter, er den nye værdi den rigtige
+    hass.states.async_set(GL, 'rettet mellem genstarterne')
+    entry = await genindlaes(hass)
+    assert entry.data['emhass_noegle'] == 'rettet mellem genstarterne'
+    # ... og de gamle, døde registreringer ryddes efter genstarten, en levende røres ikke
+    for e, uid in ((GL, 'wattlas_emhass_noegle'), (GLA, 'wattlas_emhass_adresse')):
+        hass.states.async_remove(e)
+        reg.async_get_or_create('input_text', 'input_text', uid, suggested_object_id=uid)
+        assert reg.async_get(e) is not None
     hass.states.async_set(GL, 'levende')
+    hass.states.async_set(GLA, 'unavailable', {'restored': True})
     entry = await genindlaes(hass, genstart=True)
-    assert reg.async_get(GL) is not None, 'en levende hjælper må ikke fjernes'
+    assert reg.async_get(GL) is not None and reg.async_get(GLA) is None, 'kun den døde hjælper må fjernes'
     hass.states.async_set(GL, 'unavailable', {'restored': True})
     entry = await genindlaes(hass, genstart=True)
     assert reg.async_get(GL) is None and issue(hass, 'noegle_mangler') is None
-    assert 'gammel "nøgle"' not in ''.join(f.read_text(encoding='utf-8') for f in cfg.rglob('*.yaml')), 'nøglen må ikke stå i filerne'
-    # 2) ingen brugbar nøgle: intet flyttes, startspærrens sensor er off, og brugeren får besked
-    for tilstand, attr in (('', {}), ('unknown', {}), ('unavailable', {'restored': True}), ('langnok-men-gendannet', {'restored': True})):
-        som_041(tilstand, **attr)
+    assert 'mellem genstarterne' not in ''.join(f.read_text(encoding='utf-8') for f in cfg.rglob('*.yaml')), 'nøglen må ikke stå i filerne'
+    # 2) ingen brugbar nøgle: intet flyttes, og brugeren får besked
+    for tilstand, attr in (('', {}), ('unknown', {}), ('unavailable', {}), ('langnok-men-gendannet', {'restored': True})):
+        som_041(tilstand, adresse='', **attr)
         entry = await genindlaes(hass, genstart=True)
-        assert 'emhass_noegle' not in entry.data and hass.states.get(SAT).state == 'off', tilstand
+        assert 'emhass_noegle' not in entry.data and entry.data['emhass_adresse'] == 'http://gammel:5000', tilstand
         assert issue(hass, 'noegle_mangler') is not None
-    hass.states.async_remove(GL)
+    for e in (GL, GLA):
+        hass.states.async_remove(e)
+    # kommer nøglen til senere, forsvinder beskeden igen
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'emhass_noegle': 'kom-til-senere'})
+    entry = await genindlaes(hass, genstart=True)
+    assert issue(hass, 'noegle_mangler') is None
+    hass.config_entries.async_update_entry(entry, data={k: v for k, v in entry.data.items() if k != 'emhass_noegle'})
     # 3) kaldet: nøglen sendes i headeren, svaret er som rest_command's – også ved 401 – og fejl viser aldrig nøglen
     set_, status = [], [200]
 
@@ -672,7 +697,6 @@ async def main():
     port = site._server.sockets[0].getsockname()[1]
     sess = ClientSession()  # HA's egen kræver zeroconf og netværk, som denne minimale HA ikke har
     W.emhass.async_get_clientsession = lambda _hass: sess
-    adr = lambda p: hass.states.async_set('input_text.wattlas_emhass_adresse', f'http://127.0.0.1:{p}/')  # noqa: E731
     kald_emhass = lambda h='publish-data', **d: hass.services.async_call('wattlas', 'emhass', {'handling': h, 'data': d}, blocking=True, return_response=True)  # noqa: E731
 
     async def afvist(hvad):
@@ -682,11 +706,10 @@ async def main():
             assert 'hemmelig-9' not in str(e) and e.__cause__ is None
             return str(e)
         raise AssertionError('skulle være afvist')
-    adr(port)
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'emhass_adresse': f'http://127.0.0.1:{port}/'})
     assert 'mangler' in await afvist(kald_emhass())
     hass.config_entries.async_update_entry(entry, data={**entry.data, 'emhass_noegle': 'hemmelig-9'})
-    await hass.async_block_till_done()
-    assert hass.states.get(SAT).state == 'on'
+    hass.states.async_set(GLA, 'http://fremmed.invalid:1')  # en tilstand må ikke kunne sende nøglen et andet sted hen
     assert await kald_emhass('naive-mpc-optim', a=[1.5], b=False) == {'status': 200, 'content': 'svaret'}
     assert set_ == [('/action/naive-mpc-optim', 'Bearer hemmelig-9', {'a': [1.5], 'b': False})], set_
     status[0] = 401
@@ -719,6 +742,10 @@ async def main():
         assert Template(t['data'], hass).async_render({'fb_ekstra': {'x': 1}}) == {**base, **ekstra, **forbr}
     r = Template(trin[0]['data'], hass).async_render({'hus': {'ok': True, 'liste': [1, 2]}, 'beregning_basis': {'a': True}, 'fb_ekstra': {'b': 1}, 'hh_ekstra': {}})
     assert r == {'a': True, 'load_forecast_method': 'list', 'load_power_forecast': [1, 2], 'b': 1}, r
+    # startspærren og stop må ikke afhænge af noget, integrationen selv laver: det forsvinder, før inverteren gives tilbage ved fjernelse
+    pakker = ''.join(f.read_text(encoding='utf-8') for f in (REPO / 'packages').rglob('*.yaml'))
+    egne = [e.entity_id for e in reg.entities.values() if e.platform == 'wattlas']
+    assert not [e for e in egne if e in pakker] and not (REPO / 'custom_components/wattlas/binary_sensor.py').exists(), egne
     # 5) fjernelse: nøglen forsvinder med opsætningen
     await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()

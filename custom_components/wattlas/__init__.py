@@ -24,7 +24,7 @@ from homeassistant.helpers.start import async_at_started
 
 from . import emhass, installer
 from .config_flow import VERSION
-from .const import DOMAIN, GAMMEL_NOEGLE, GENSTART, STANDARD, TEKST
+from .const import DOMAIN, GAMLE, GENSTART, GYLDIG, STANDARD, TEKST
 
 _LOGGER = logging.getLogger(__name__)
 STYRING = "input_boolean.emhass_styring_aktiv"
@@ -36,7 +36,7 @@ FORSOEGT = f"{DOMAIN}_forsoegt"  # hass.data: den version på disken, der er for
 TJEK_S = 15  # så tit ses der efter en nyere version på disken
 RO_S = 20    # så længe skal integrationens filer have ligget urørt (Markedspladsen skriver dem én ad gangen)
 YAML_PLATFORME = {"template", "integration", "utility_meter", "automation", "script", "input_boolean", "input_number",
-                  "input_datetime", "input_text", "input_select"}
+                  "input_datetime", "input_text", "input_select", "mqtt"}
 
 
 def _lever(hass: HomeAssistant, entity_id: str) -> bool:
@@ -55,7 +55,7 @@ def _ryd_efterladte(hass: HomeAssistant, tekst: str, kendt: str) -> list[str]:
     reg = er.async_get(hass)
     lever = lambda e: _lever(hass, e.entity_id)  # noqa: E731
     wattlas = [e for e in reg.entities.values()
-               if e.platform in YAML_PLATFORME and str(e.unique_id).startswith(("wattlas_", "emhass_"))]
+               if e.platform in YAML_PLATFORME and str(e.unique_id).startswith(("wattlas_", "emhass_", "min_spf_", "min_sonnen_"))]
     står_i = lambda t, uid: re.search(rf"\b{re.escape(uid)}\b", t) is not None  # noqa: E731
     ryddet = []
     for e in wattlas:
@@ -128,22 +128,22 @@ async def _forbered_opdatering(hass: HomeAssistant, entry: ConfigEntry) -> None:
                           severity=ir.IssueSeverity.WARNING, translation_key="genstart")
 
 
-def _overtag_noegle(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Fra 0.4.1 og ældre: EMHASS-nøglen flyttes fra hjælperen til integrationens opsætning, mens de gamle pakker endnu kører.
-    Navnet fjernes fra "overfoert", så en nedgradering lægger nøglen tilbage i hjælperen."""
-    s = hass.states.get(GAMMEL_NOEGLE)
-    if entry.data.get("emhass_noegle") or s is None or s.attributes.get("restored") or len(s.state) < 8 or s.state in ("unknown", "unavailable"):
+def _overtag_emhass(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Fra 0.4.1 og ældre: EMHASS' adresse og nøgle flyttes fra hjælperne til integrationens opsætning, mens de gamle pakker endnu
+    kører. Så længe de gør, er hjælperne det rigtige (0.4.1's Konfigurer skrev kun dér). Navnene fjernes fra "overfoert", så en
+    nedgradering lægger dem tilbage."""
+    ny = {k: s.state for k, e in GAMLE.items() if (s := hass.states.get(e)) and _lever(hass, e) and GYLDIG[k].fullmatch(s.state)}
+    if not ny:
         return
-    ny = {**entry.data, "emhass_noegle": s.state}
+    ny = {**entry.data, **ny}
     if isinstance(ny.get("overfoert"), list):
-        ny["overfoert"] = [k for k in ny["overfoert"] if k != "emhass_noegle"]
+        ny["overfoert"] = [k for k in ny["overfoert"] if k not in GAMLE]
     hass.config_entries.async_update_entry(entry, data=ny)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    _overtag_noegle(hass, entry)  # før de nye filer lægges på plads: efter næste genstart findes hjælperen ikke mere
+    _overtag_emhass(hass, entry)  # før de nye filer lægges på plads: efter næste genstart findes hjælperne ikke mere
     emhass.opret(hass)
-    await hass.config_entries.async_forward_entry_setups(entry, ["binary_sensor"])
     d = entry.data
     # ny version fra markedspladsen: læg de nye filer på plads. Kun når koden, der kører, er den på disken – er der hentet en
     # endnu nyere, som først indlæses ved genstart, er dens filer allerede lagt på plads (eller bliver det efter genstarten).
@@ -155,7 +155,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await hass.async_add_executor_job(installer.rul_tilbage, kvit)
                 raise RuntimeError("; ".join(str(e.message) for e in res.errors[:3]))
             await hass.async_add_executor_job(installer.skjul_token, kvit["backup"])
-            hass.config_entries.async_update_entry(entry, data={**d, "version": VERSION})
+            hass.config_entries.async_update_entry(entry, data={**entry.data, "version": VERSION})
             ir.async_delete_issue(hass, DOMAIN, "opdatering_fejlede")
             hass.data[GENSTART] = True
             ir.async_create_issue(hass, DOMAIN, "genstart", is_fixable=True, is_persistent=True,
@@ -169,7 +169,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def overfoer(_hass: HomeAssistant) -> None:
         """Sætter indstillingerne fra opsætningen i hjælperne – hver indstilling én gang, og kun hvis den står tom (0/tekst mangler)."""
-        _overtag_noegle(hass, entry)  # hjælperen kan være kommet til, efter integrationen blev indlæst
+        _overtag_emhass(hass, entry)  # hjælperne kan være kommet til, efter integrationen blev indlæst
         s = hass.states.get("binary_sensor.wattlas_konfigureret")
         if s is None or s.state in ("unavailable", "unknown"):
             return  # pakkerne er ikke indlæst endnu (genstart mangler); efter en afinstallation står den som "unavailable"
@@ -181,9 +181,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if ryddet := _ryd_efterladte(hass, tekst, kendt):
             _LOGGER.info("Wattlas: fjernede %d efterladte registreringer fra en tidligere styrekanal: %s", len(ryddet), ", ".join(ryddet))
         reg = er.async_get(hass)
-        if (e := reg.async_get(GAMMEL_NOEGLE)) and e.platform == "input_text" and not _lever(hass, e.entity_id):
-            reg.async_remove(e.entity_id)  # den gamle nøgle-hjælper; en levende (brugerens egen) røres ikke
-        if not entry.data.get("emhass_noegle"):
+        for gl in GAMLE.values():  # de gamle hjælpere; en levende (brugerens egen) røres ikke
+            if (e := reg.async_get(gl)) and e.platform == "input_text" and not _lever(hass, gl):
+                reg.async_remove(gl)
+        if all(entry.data.get(k) for k in GAMLE):
+            ir.async_delete_issue(hass, DOMAIN, "noegle_mangler")
+        else:
             ir.async_create_issue(hass, DOMAIN, "noegle_mangler", is_fixable=False, is_persistent=False,
                                   severity=ir.IssueSeverity.ERROR, translation_key="noegle_mangler")
         d = entry.data  # frisk: opdateringen ovenfor kan have skrevet en ny version
@@ -225,9 +228,8 @@ def _tal(v: str) -> float:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    if ok := await hass.config_entries.async_unload_platforms(entry, ["binary_sensor"]):
-        hass.services.async_remove(DOMAIN, "emhass")
-    return ok
+    hass.services.async_remove(DOMAIN, "emhass")
+    return True
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

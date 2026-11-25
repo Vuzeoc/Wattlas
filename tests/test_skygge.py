@@ -95,7 +95,16 @@ async def main():
     sæt('binary_sensor.emhass_ui_data_frisk', 'off')
     await kør('emhass_start')
     assert hass.states.get(OVERTAGET).state == 'on', 'uden skygge overtager Wattlas som før'
-    print('Skygge fra: skriver og overtager som før: OK')
+    sæt('switch.wattlas_solsalg', 'on'); sæt('sensor.emhass_ui_salgspris', 'unavailable'); sæt('binary_sensor.wattlas_konfigureret', 'off')
+    kald.clear()
+    await hass.services.async_call('automation', 'trigger', {'entity_id': 'automation.emhass_solsalg_ved_positiv_salgspris', 'skip_condition': False}, blocking=True)
+    assert ('switch', 'turn_off', ['switch.wattlas_solsalg'], None) in kald, kald
+    await boolsk(OVERTAGET, False)
+    kald.clear()
+    await hass.services.async_call('automation', 'trigger', {'entity_id': 'automation.emhass_solsalg_ved_positiv_salgspris', 'skip_condition': False}, blocking=True)
+    assert kald == [], f'spærren nede og ikke overtaget: {kald}'
+    sæt('binary_sensor.wattlas_konfigureret', 'on')
+    print('Skygge fra: skriver og overtager som før; ukendt pris blokerer salg, også med spærren nede: OK')
 
     # 4) "batteriet rækker til": planens SOC gælder ved slutningen af halvtimen; bunden er reserven (25 %)
     nu = dt_util.now()
@@ -184,10 +193,10 @@ async def main():
                       'script': f['script'], 'automation': auto}.items():
         assert await async_setup_component(hass, dom, {dom: conf}), dom
     svarer = {'ja': False}
-    kald = []
+    skrevet = []  # ikke "kald": den første HA kører stadig og ville skrive i samme liste hvert 30. sekund
 
     async def inverter(call):  # en Deye-agtig inverter: skrivninger slår kun igennem, når den svarer
-        kald.append((call.service, call.data.get('entity_id')))
+        skrevet.append((call.service, call.data.get('entity_id')))
         for e in call.data.get('entity_id') or [] if svarer['ja'] else []:
             if call.domain == 'switch':
                 hass.states.async_set(e, 'on' if call.service == 'turn_on' else 'off')
@@ -257,10 +266,82 @@ async def main():
     await boolsk(SKYGGE, True)
     assert await vent(OVERTAGET, 'off', 10) and await vent(STYRING, 'on', 5), 'skiftet til skygge blev ikke gennemført'
     assert hass.states.get('switch.wattlas_netladning').state == 'off'
-    kald.clear()
+    skrevet.clear()
     await asyncio.sleep(2)
-    assert not kald, f'i skygge skrives der ikke til inverteren: {kald}'
+    assert not skrevet, f'i skygge skrives der ikke til inverteren: {skrevet}'
     print('Skygge-skift: tilbagelevering først, ellers stoppes styringen: OK')
+    # e) startspærren falder (fx elprisen forsvinder), mens Wattlas netlader: reguleringen giver inverteren tilbage, men overtagelsen
+    #    huskes, så styringen kan fortsætte, når spærren er oppe igen
+    KONF = 'binary_sensor.wattlas_konfigureret'
+
+    async def ladning():
+        # alt i ro først: ingen skygge-skift, genoptagelse eller stop fra trinnet før må køre videre ind i dette
+        hass.states.async_set(KONF, 'on')
+        for e in (OVERTAGET, STYRING, SKYGGE):
+            await boolsk(e, False)
+        await asyncio.sleep(1)
+        lader()
+        for e in (OVERTAGET, STYRING):
+            await boolsk(e, True)
+        await asyncio.sleep(0.5)
+        await hass.services.async_call('script', 'turn_off', {'entity_id': 'script.emhass_genoptag'}, blocking=True)
+        lader()  # genoptagelsen stoppede ladningen, da styringen blev slået til; nu netlader Wattlas igen
+        t = dt_util.utcnow().timestamp()
+        hass.states.async_set('sensor.emhass_gemt_plan', dt_util.utcnow().isoformat(), {'schema': 1, 'rows': [[(t // 1800) * 1800, 0, 0, 50]]}, force_update=True)
+        for e in ('binary_sensor.emhass_ui_data_frisk', 'binary_sensor.emhass_styrekanal_ok', 'binary_sensor.wattlas_tidsprogram_aktiv'):
+            hass.states.async_set(e, 'on')
+        for e, v in (('sensor.emhass_m_battery_soc', 60), ('input_number.wattlas_maks_ladeeffekt_w', 10000), ('input_number.wattlas_maks_afladeeffekt_w', 10000),
+                     ('input_number.wattlas_maks_eksport_w', 10000), ('input_number.wattlas_maks_netimport_w', 10000), ('input_number.wattlas_import_graense_w', 11000)):
+            hass.states.async_set(e, str(v))
+        for i in range(1, 7):
+            hass.states.async_set(f'number.wattlas_program_{i}_power', '5000', {'min': 0, 'max': 10000})
+        await asyncio.sleep(0.2)
+    ladet = lambda: hass.states.get('switch.wattlas_netladning').state == 'on'  # noqa: E731
+    await ladning()
+    try:  # kontrol: med spærren oppe er planen brugbar, så det er ikke noget andet, der stopper ladningen nedenfor
+        await hass.services.async_call('script', 'emhass_reguler', blocking=True)
+    except Exception:  # noqa: BLE001 – resten af reguleringen mangler sensorer her
+        pass
+    assert hass.states.get('input_boolean.emhass_plan_gyldig').state == 'on'
+    await ladning()
+    hass.states.async_set(KONF, 'off')
+    await hass.services.async_call('script', 'emhass_reguler', blocking=True)
+    assert not ladet() and float(hass.states.get('number.wattlas_program_1_soc').state) == 15, 'ladningen fortsatte uden regulering'
+    assert hass.states.get(OVERTAGET).state == 'on'
+    # f) efter en genstart (opstart ikke klar) med spærren nede: genoptagelsen stopper ladningen med det samme
+    await ladning()
+    hass.states.async_set(KONF, 'off')
+    await hass.services.async_call('script', 'turn_on', {'entity_id': 'script.emhass_genoptag'}, blocking=True)
+    for _ in range(50):
+        if not ladet(): break
+        await asyncio.sleep(0.1)
+    assert not ladet(), 'efter genstart blev ladningen ikke stoppet'
+    assert hass.states.get('script.emhass_genoptag').state == 'on', 'genoptagelsen skal vente på spærren'
+    await hass.services.async_call('script', 'turn_off', {'entity_id': 'script.emhass_genoptag'}, blocking=True)
+    # g) styringen slås fra (eller Wattlas fjernes) med spærren nede: inverteren gives tilbage
+    await ladning()
+    hass.states.async_set(KONF, 'off')
+    await boolsk(STYRING, False)
+    assert await vent(OVERTAGET, 'off', 10) and not ladet(), 'med spærren nede blev inverteren ikke givet tilbage'
+    # i) skygge slås til, mens spærren er nede: inverteren gives tilbage (ellers ville Wattlas styre videre i "skygge", når den er oppe igen)
+    await ladning()
+    hass.states.async_set(KONF, 'off')
+    await boolsk(SKYGGE, True)
+    assert await vent(OVERTAGET, 'off', 10) and not ladet(), 'skygge med spærren nede gav ikke inverteren tilbage'
+    # h) men før Wattlas har overtaget, skrives der intet, når spærren er nede – en andens netladning røres ikke
+    await ladning()
+    await boolsk(STYRING, False)
+    assert await vent(OVERTAGET, 'off', 10)
+    lader()
+    hass.states.async_set(KONF, 'off')
+    await boolsk(STYRING, True)
+    await asyncio.sleep(0.5)
+    skrevet.clear()
+    for s in ('emhass_netopladning_fra', 'emhass_reguler', 'emhass_genoptag'):
+        await hass.services.async_call('script', s, blocking=True)
+    await hass.services.async_call('script', 'emhass_skriv_tal', {'entitet': 'number.wattlas_program_1_soc', 'vaerdi': 30}, blocking=True)
+    assert not skrevet and ladet(), f'Wattlas skrev, før den havde overtaget: {skrevet}'
+    print('Startspærren nede: stop og tilbagelevering virker, og intet skrives før overtagelse: OK')
     await hass.async_stop(force=True)
 
 

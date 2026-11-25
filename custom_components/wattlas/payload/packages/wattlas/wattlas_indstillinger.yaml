@@ -155,9 +155,6 @@ input_number:
     icon: mdi:battery-sync
 
 input_text:
-  wattlas_emhass_adresse:
-    name: Wattlas · EMHASS-adresse (fx http://homeassistant.local:5000)
-    max: 255
   wattlas_solprognose_entitet:
     name: Wattlas · solprognose-sensor (med attribut forecast)
     max: 255
@@ -199,8 +196,6 @@ template:
                       'maks_eksport_w','nettarif_lav','nettarif_hoej','nettarif_spids','elafgift'] %}
           {% set ns = namespace(m=[]) %}
           {% for k in tal %}{% if not (states('input_number.wattlas_' ~ k) | float(0) > 0) %}{% set ns.m = ns.m + ['input_number.wattlas_' ~ k] %}{% endif %}{% endfor %}
-          {% if not states('input_text.wattlas_emhass_adresse') is match('https?://') %}{% set ns.m = ns.m + ['input_text.wattlas_emhass_adresse'] %}{% endif %}
-          {% if not is_state('binary_sensor.wattlas_emhass_noegle_sat', 'on') %}{% set ns.m = ns.m + ['EMHASS API-nøglen (Enheder og tjenester → Wattlas → Konfigurer)'] %}{% endif %}
           {% if state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') is none %}{% set ns.m = ns.m + ['input_text.wattlas_solprognose_entitet'] %}{% endif %}
           {% if not states('input_text.wattlas_vejr_entitet').startswith('weather.') %}{% set ns.m = ns.m + ['input_text.wattlas_vejr_entitet'] %}{% endif %}
           {% if not has_value('sensor.wattlas_udetemperatur') %}{% set ns.m = ns.m + ['input_text.wattlas_udetemperatur_entitet'] %}{% endif %}
@@ -214,8 +209,6 @@ template:
                           'maks_eksport_w','nettarif_lav','nettarif_hoej','nettarif_spids','elafgift'] %}
             {% set ns = namespace(m=[]) %}
             {% for k in tal %}{% if not (states('input_number.wattlas_' ~ k) | float(0) > 0) %}{% set ns.m = ns.m + ['input_number.wattlas_' ~ k] %}{% endif %}{% endfor %}
-            {% if not states('input_text.wattlas_emhass_adresse') is match('https?://') %}{% set ns.m = ns.m + ['input_text.wattlas_emhass_adresse'] %}{% endif %}
-            {% if not is_state('binary_sensor.wattlas_emhass_noegle_sat', 'on') %}{% set ns.m = ns.m + ['EMHASS API-nøglen (Enheder og tjenester → Wattlas → Konfigurer)'] %}{% endif %}
             {% if state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') is none %}{% set ns.m = ns.m + ['input_text.wattlas_solprognose_entitet'] %}{% endif %}
             {% if not states('input_text.wattlas_vejr_entitet').startswith('weather.') %}{% set ns.m = ns.m + ['input_text.wattlas_vejr_entitet'] %}{% endif %}
             {% if not has_value('sensor.wattlas_udetemperatur') %}{% set ns.m = ns.m + ['input_text.wattlas_udetemperatur_entitet'] %}{% endif %}

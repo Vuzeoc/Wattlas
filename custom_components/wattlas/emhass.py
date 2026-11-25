@@ -10,17 +10,16 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
 
-ADRESSE = "input_text.wattlas_emhass_adresse"
 TIMEOUT_S = {"naive-mpc-optim": 120, "publish-data": 60}  # de eneste kald, tjenesten kan lave
 
 
 async def _kald(call: ServiceCall) -> dict:
     """Samme svar som rest_command: status og content – også ved 401 og andre fejlkoder."""
     hass = call.hass
-    noegle = next((e.data.get("emhass_noegle") for e in hass.config_entries.async_entries(DOMAIN)), None)
-    s = hass.states.get(ADRESSE)
-    adresse = s.state.strip().rstrip("/") if s else ""
-    if not noegle or not adresse.startswith(("http://", "https://")):
+    # begge fra opsætningen: en adresse i en hjælper kunne enhver bruger rette og få nøglen sendt til sin egen server
+    d = next((e.data for e in hass.config_entries.async_entries(DOMAIN)), {})
+    noegle, adresse = d.get("emhass_noegle"), (d.get("emhass_adresse") or "").strip().rstrip("/")
+    if not noegle or not adresse:
         raise HomeAssistantError("Wattlas: EMHASS-nøglen eller -adressen mangler (Enheder og tjenester → Wattlas → Konfigurer)")
     handling = call.data["handling"]
     try:

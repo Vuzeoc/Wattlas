@@ -18,14 +18,14 @@
 # Off-grid: intet salg til nettet. Solsalg-kontakten huskes kun.
 mqtt:
   - sensor:
-      - {name: min_spf soc, unique_id: min_spf_soc, default_entity_id: sensor.min_spf_soc, state_topic: solar_assistant/total/battery_state_of_charge/state, unit_of_measurement: "%", device_class: battery, state_class: measurement, force_update: true}
-      - {name: min_spf batteri, unique_id: min_spf_batteri, default_entity_id: sensor.min_spf_batteri, state_topic: solar_assistant/total/battery_power/state, unit_of_measurement: W, device_class: power, state_class: measurement, force_update: true}
-      - {name: min_spf sol, unique_id: min_spf_sol, default_entity_id: sensor.min_spf_sol, state_topic: solar_assistant/inverter_1/pv_power/state, unit_of_measurement: W, device_class: power, state_class: measurement, force_update: true}
-      - {name: min_spf forbrug, unique_id: min_spf_forbrug, default_entity_id: sensor.min_spf_forbrug, state_topic: solar_assistant/inverter_1/load_power/state, unit_of_measurement: W, device_class: power, state_class: measurement, force_update: true}
-      - {name: min_spf net, unique_id: min_spf_net, default_entity_id: sensor.min_spf_net, state_topic: solar_assistant/inverter_1/grid_power/state, unit_of_measurement: W, device_class: power, state_class: measurement, force_update: true}
-      - {name: min_spf netspaending, unique_id: min_spf_netspaending, default_entity_id: sensor.min_spf_netspaending, state_topic: solar_assistant/inverter_1/grid_voltage/state, unit_of_measurement: V, device_class: voltage, state_class: measurement, force_update: true}
-      - {name: min_spf batterispaending, unique_id: min_spf_batterispaending, default_entity_id: sensor.min_spf_batterispaending, state_topic: solar_assistant/inverter_1/battery_voltage/state, unit_of_measurement: V, device_class: voltage, state_class: measurement, force_update: true}
-      - {name: min_spf temperatur, unique_id: min_spf_temperatur, default_entity_id: sensor.min_spf_temperatur, state_topic: solar_assistant/inverter_1/temperature/state, device_class: temperature, unit_of_measurement: "°C", state_class: measurement, force_update: true}
+      - {name: min_spf soc, unique_id: min_spf_soc, default_entity_id: sensor.min_spf_soc, state_topic: solar_assistant/total/battery_state_of_charge/state, unit_of_measurement: "%", device_class: battery, state_class: measurement}
+      - {name: min_spf batteri, unique_id: min_spf_batteri, default_entity_id: sensor.min_spf_batteri, state_topic: solar_assistant/total/battery_power/state, unit_of_measurement: W, device_class: power, state_class: measurement}
+      - {name: min_spf sol, unique_id: min_spf_sol, default_entity_id: sensor.min_spf_sol, state_topic: solar_assistant/inverter_1/pv_power/state, unit_of_measurement: W, device_class: power, state_class: measurement}
+      - {name: min_spf forbrug, unique_id: min_spf_forbrug, default_entity_id: sensor.min_spf_forbrug, state_topic: solar_assistant/inverter_1/load_power/state, unit_of_measurement: W, device_class: power, state_class: measurement}
+      - {name: min_spf net, unique_id: min_spf_net, default_entity_id: sensor.min_spf_net, state_topic: solar_assistant/inverter_1/grid_power/state, unit_of_measurement: W, device_class: power, state_class: measurement}
+      - {name: min_spf netspaending, unique_id: min_spf_netspaending, default_entity_id: sensor.min_spf_netspaending, state_topic: solar_assistant/inverter_1/grid_voltage/state, unit_of_measurement: V, device_class: voltage, state_class: measurement}
+      - {name: min_spf batterispaending, unique_id: min_spf_batterispaending, default_entity_id: sensor.min_spf_batterispaending, state_topic: solar_assistant/inverter_1/battery_voltage/state, unit_of_measurement: V, device_class: voltage, state_class: measurement}
+      - {name: min_spf temperatur, unique_id: min_spf_temperatur, default_entity_id: sensor.min_spf_temperatur, state_topic: solar_assistant/inverter_1/temperature/state, device_class: temperature, unit_of_measurement: "°C", state_class: measurement}
       - {name: min_spf tilstand, unique_id: min_spf_tilstand, default_entity_id: sensor.min_spf_tilstand, state_topic: solar_assistant/inverter_1/device_mode/state}
       - {name: min_spf output, unique_id: min_spf_output, default_entity_id: sensor.min_spf_output, state_topic: solar_assistant/inverter_1/output_source_priority/state}
       - {name: min_spf lader, unique_id: min_spf_lader, default_entity_id: sensor.min_spf_lader, state_topic: solar_assistant/inverter_1/charger_source_priority/state}
@@ -63,6 +63,11 @@ input_text:
   wattlas_spf_egen_lader:
     name: Wattlas SPF – din egen charger source priority (husket)
     max: 60
+input_datetime:
+  wattlas_spf_skrivninger_dato:
+    name: Wattlas SPF skrivninger nulstillet
+    has_date: true
+    has_time: false
 input_number:
   wattlas_spf_netladestroem:
     name: Wattlas SPF netladestrøm (husket)
@@ -400,8 +405,10 @@ template:
         default_entity_id: binary_sensor.wattlas_forbindelse
         device_class: connectivity
         state: >-
-          {% set s = states.sensor.min_spf_forbrug %}
-          {{ s is not none and s.state not in ['unknown', 'unavailable'] and (now() - s.last_reported).total_seconds() < 300 }}
+          {% set ns = namespace(nyest=0) %}
+          {% for s in [states.sensor.min_spf_forbrug, states.sensor.min_spf_net, states.sensor.min_spf_batteri, states.sensor.min_spf_netspaending, states.sensor.min_spf_batterispaending] if s is not none and is_number(s.state) %}
+          {% set ns.nyest = [ns.nyest, as_timestamp(s.last_changed)] | max %}{% endfor %}
+          {{ as_timestamp(now()) - ns.nyest < 300 }}
       - name: Wattlas PV-måling OK
         unique_id: wattlas_pv_maaling_ok
         default_entity_id: binary_sensor.wattlas_pv_maaling_ok
@@ -554,7 +561,13 @@ automation:
     triggers:
       - trigger: time
         at: "00:00:00"
+      - trigger: homeassistant
+        event: start  # HA var slukket ved midnat
+    conditions: "{{ states('input_datetime.wattlas_spf_skrivninger_dato') != now().date() | string }}"
     actions:
       - action: input_number.set_value
         target: {entity_id: input_number.wattlas_spf_skrivninger}
         data: {value: 0}
+      - action: input_datetime.set_datetime
+        target: {entity_id: input_datetime.wattlas_spf_skrivninger_dato}
+        data: {date: "{{ now().date() }}"}

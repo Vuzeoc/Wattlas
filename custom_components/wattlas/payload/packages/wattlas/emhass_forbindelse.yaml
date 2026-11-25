@@ -409,9 +409,8 @@ script:
     mode: queued
     max: 30
     sequence:
-    - condition: state
-      entity_id: binary_sensor.wattlas_konfigureret
-      state: 'on'
+    - condition: template
+      value_template: "{{ is_state('binary_sensor.wattlas_konfigureret', 'on') or is_state('input_boolean.emhass_har_overtaget', 'on') }}"
     - if:
       - condition: template
         value_template: '{{ not is_number(states(entitet)) }}'
@@ -454,9 +453,8 @@ script:
     alias: EMHASS – stop netopladning
     mode: queued
     sequence:
-    - condition: state
-      entity_id: binary_sensor.wattlas_konfigureret
-      state: 'on'
+    - condition: template
+      value_template: "{{ is_state('binary_sensor.wattlas_konfigureret', 'on') or is_state('input_boolean.emhass_har_overtaget', 'on') }}"
     - if:
       - condition: template
         value_template: "{{ is_state('input_boolean.wattlas_skygge', 'on') and not is_state('input_boolean.emhass_har_overtaget', 'on') }}"
@@ -523,9 +521,8 @@ script:
     alias: EMHASS – reguler aktiv periode
     mode: single
     sequence:
-    - condition: state
-      entity_id: binary_sensor.wattlas_konfigureret
-      state: 'on'
+    - condition: template
+      value_template: "{{ is_state('binary_sensor.wattlas_konfigureret', 'on') or is_state('input_boolean.emhass_har_overtaget', 'on') }}"
     - condition: state
       entity_id: input_boolean.emhass_styring_aktiv
       state: 'on'
@@ -557,7 +554,7 @@ script:
         p_batt: '{{ selected.row[1] if selected.valid else 0 }}'
         p_net: '{{ selected.row[2] if selected.valid else 0 }}'
         maal: '{{ selected.row[3] if selected.valid else 15 }}'
-        drift_ok: '{{ selected.valid and is_state(''binary_sensor.emhass_ui_data_frisk'',''on'') and is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
+        drift_ok: '{{ is_state(''binary_sensor.wattlas_konfigureret'',''on'') and selected.valid and is_state(''binary_sensor.emhass_ui_data_frisk'',''on'') and is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
           and 15<=soc<=100 }}'
     # Har batteriet ikke stået fuldt i 1 time i 7 dage: lad op om natten og hvil 1 time i toppen (emhass_fuldladning.yaml)
     - variables:
@@ -771,9 +768,8 @@ script:
     mode: single
     max_exceeded: silent
     sequence:
-    - condition: state
-      entity_id: binary_sensor.wattlas_konfigureret
-      state: 'on'
+    - condition: template
+      value_template: "{{ is_state('binary_sensor.wattlas_konfigureret', 'on') or is_state('input_boolean.emhass_har_overtaget', 'on') }}"
     - condition: state
       entity_id: input_boolean.emhass_styring_aktiv
       state: 'on'
@@ -783,7 +779,7 @@ script:
     - action: script.emhass_netopladning_fra
       continue_on_error: true
     - wait_template: |-
-        {% set ns=namespace(ok=is_state('binary_sensor.emhass_ui_data_frisk','on')) %}
+        {% set ns=namespace(ok=is_state('binary_sensor.emhass_ui_data_frisk','on') and is_state('binary_sensor.wattlas_konfigureret','on')) %}
         {% for i in range(1,7) %}
          {% if not is_number(states('number.wattlas_program_' ~ i ~ '_soc'))
             or not is_number(states('number.wattlas_program_' ~ i ~ '_power'))
@@ -1047,9 +1043,8 @@ automation:
     - binary_sensor.wattlas_solsalg_stoppet
     - sensor.wattlas_aktiv_regel
   conditions:
-  - condition: state
-    entity_id: binary_sensor.wattlas_konfigureret
-    state: 'on'
+  - condition: template
+    value_template: "{{ is_state('binary_sensor.wattlas_konfigureret', 'on') or is_state('input_boolean.emhass_har_overtaget', 'on') }}"
   - condition: state
     entity_id: input_boolean.emhass_styring_aktiv
     state: 'on'

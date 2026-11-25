@@ -24,7 +24,8 @@ async def ny_hass(kanal, svartid=0):
     styring = next(a for a in k['automation'] if a['id'] == f'wattlas_{kanal}_styring')
     styring['triggers'] = [t for t in styring['triggers'] if t['trigger'] != 'time_pattern']  # testen starter selv minut-kørslerne
     for dom, conf in {'input_boolean': k['input_boolean'], 'input_number': k['input_number'],
-                      'input_text': k.get('input_text') or {}, 'automation': [styring]}.items():
+                      'input_text': k.get('input_text') or {}, 'input_datetime': k.get('input_datetime') or {},
+                      'automation': [styring] + [a for a in k['automation'] if a['id'].endswith('_nulstil')]}.items():
         assert await async_setup_component(hass, dom, {dom: conf}), dom
     await hass.async_block_till_done()
     kald = []
@@ -318,9 +319,18 @@ async def spf():
     assert ('charger_source_priority', LAD) in ordrer, ordrer
     o = hass.states.get('input_text.wattlas_spf_oensket')
     hass.states._states['input_text.wattlas_spf_oensket'] = type(o)(o.entity_id, o.state, o.attributes, last_changed=o.last_changed - timedelta(seconds=400))
-    k = await skub()
-    if datetime.now().minute % 10:
+    foer, k = datetime.now().minute, await skub()  # klokken læses også før: et minutskift undervejs må ikke vildlede testen
+    if foer % 10 and datetime.now().minute % 10:
         assert k == [], k
+    # døgntælleren nulstilles én gang pr. dato – også når HA var slukket ved midnat
+    n, D = 'input_number.wattlas_spf_skrivninger', 'input_datetime.wattlas_spf_skrivninger_dato'
+    for dato, venter in (('2020-01-01', 0), (None, 40)):
+        if dato:
+            await hass.services.async_call('input_datetime', 'set_datetime', {'entity_id': D, 'date': dato}, blocking=True)
+        await hass.services.async_call('input_number', 'set_value', {'entity_id': n, 'value': 40}, blocking=True)
+        await hass.services.async_call('automation', 'trigger', {'entity_id': 'automation.wattlas_spf_nulstil_dagens_skrivninger', 'skip_condition': False}, blocking=True)
+        await hass.async_block_till_done()
+        assert float(hass.states.get(n).state) == venter, (dato, hass.states.get(n).state, hass.states.get(D).state)
     await hass.async_stop(force=True)
     print('SPF: overtagelse, sjældne skrivninger, døgnloft, stop og tilbagelevering: OK')
 

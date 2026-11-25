@@ -423,7 +423,15 @@ async def main():
         hass.states._states[n.entity_id] = type(n)(n.entity_id, n.state, n.attributes, last_changed=n.last_changed - timedelta(seconds=alder))
         assert spf(3200, 2600, 600, styret='on', tilstand='lad', lader='Solar and utility simultaneously')['balance_ok'] is ok, alder
     assert spf(0, 0, 0, mode='Fault mode')['values']['inverter_status'] == 'Fault mode'
-    print('SPF fortegn, enfaset og regnestykke-tjek: OK')
+    # trækkes kablet, gentager Solar Assistant de sidste tal: de meldes stadig, men ændrer sig ikke – så tæller de ikke som friske
+    from homeassistant.util import dt as dt_util
+    for sek, kilde in ((60, 'SPF'), (200, 'Ingen')):
+        spf(3700, 3000, 600)
+        gl = dt_util.utcnow() - timedelta(seconds=sek)
+        for s in [s for s in hass.states.async_all('sensor') if s.entity_id.startswith('sensor.min_spf_')]:
+            hass.states._states[s.entity_id] = type(s)(s.entity_id, s.state, s.attributes, last_changed=gl, last_updated=gl, last_reported=dt_util.utcnow())
+        assert sample('growatt_spf')['source'] == kilde, sek
+    print('SPF fortegn, enfaset, regnestykke-tjek og frosne tal: OK')
 
     # Sonnen: kun husets forbrug pr. fase kendes, og batteriet er enfaset. Kernens fasebudget regner med 3 faser, så kanalen
     # holder selv grænsen: netladestrømmens maks. = den værste fases plads. Hver runde af kernen skal holde sig under den.

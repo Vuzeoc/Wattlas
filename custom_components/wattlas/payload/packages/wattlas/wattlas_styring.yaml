@@ -302,9 +302,6 @@ automation:
         seconds: /30
     conditions:
       - condition: state
-        entity_id: binary_sensor.wattlas_konfigureret
-        state: 'on'
-      - condition: state
         entity_id: input_boolean.wattlas_forbruger1_aktiv
         state: "on"
       - condition: template

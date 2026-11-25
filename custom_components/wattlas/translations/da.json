@@ -232,8 +232,8 @@
       }
     },
     "noegle_mangler": {
-      "title": "Wattlas mangler EMHASS API-nøglen",
-      "description": "Wattlas kan ikke lave en plan uden nøglen. Skriv den under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* → Forbindelser og prognoser."
+      "title": "Wattlas mangler EMHASS-adressen eller API-nøglen",
+      "description": "Wattlas kan ikke lave en plan uden. Skriv dem under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* → Forbindelser og prognoser."
     },
     "opdatering_fejlede": {
       "title": "Wattlas-opdateringen til {version} blev ikke gennemført",

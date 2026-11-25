@@ -34,12 +34,12 @@ template:
           grid_current_v_l1 = v, grid_current_v_l2 = v, grid_current_v_l3 = v) %}
         {% set kilder = ['sensor.min_spf_net', 'sensor.min_spf_forbrug', 'sensor.min_spf_batteri', 'sensor.min_spf_soc', 'sensor.min_spf_sol',
                          'sensor.min_spf_netspaending', 'sensor.min_spf_batterispaending'] %}
-        {# Solar Assistant behøver ikke gentage uændrede tal (fx 0 W sol om natten): det nyeste af dem viser, at forbindelsen lever #}
+        {# Forbindelsen lever, når mindst ét af tallene ÆNDRER sig: trækkes kablet, gentager Solar Assistant de sidste værdier #}
         {% set ns = namespace(ok=has_value('sensor.min_spf_tilstand'), nyest=0) %}
         {% for e in kilder %}
           {% set s = states[e] %}
           {% if s is none or not is_number(s.state) %}{% set ns.ok = false %}
-          {% else %}{% set ns.nyest = [ns.nyest, as_timestamp(s.last_reported, 0)] | max %}{% endif %}
+          {% else %}{% set ns.nyest = [ns.nyest, as_timestamp(s.last_changed, 0)] | max %}{% endif %}
         {% endfor %}
         {% set afvig = (pv + net - ladning - load) | abs %}
         {% set o = states.input_text.wattlas_spf_oensket %}
