@@ -356,6 +356,7 @@ async def main():
     await ny(strom=None, maks_a=16); await saet('input_number', 'input_number.wattlas_lader_maks_a', value=10); await til('lad_nu')
     st = await trin(2, hus=2600)  # plads til 10 A, men ikke til de 16 A, laderen trækker
     assert not fysik['til'] and st.attributes['fast_a'] is True, st
+    assert st.attributes['hold_kan'] is True, 'kontakten "Kun fra elnettet" vises'
     await saet('input_number', 'input_number.wattlas_lader_maks_a', value=16)
     # aldrig over opsætningens højeste, selv om appens tal står højere
     await ny(maks_a=13); await saet('input_number', 'input_number.wattlas_lader_maks_a', value=20); await til('lad_nu'); await trin(2)
@@ -423,6 +424,8 @@ async def main():
     await s.luk(object()); kald.clear()
     await trin(3)
     assert not fysik['til'] and not any(k[1] == 'turn_on' for k in kald), ('intet efter luk', kald)
+    await M.aktiver(hass, types.SimpleNamespace(data={'lader': {**KONF}, 'kanal': 'sonnen'})); ur[0] += 1000
+    assert (await trin()).attributes['hold_kan'] is False, 'Sonnen kan ikke holde batteriet: kontakten skjules'
     print('Egen strøm tilbage, luk og afslut: OK')
     await hass.async_stop(force=True)
 

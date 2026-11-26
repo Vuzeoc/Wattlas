@@ -2,6 +2,10 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.5.1
+- **Ny kontakt på fanen Elbil: *Kun fra elnettet*.** Så aflader husbatteriet ikke, mens bilen lader; bilen får strøm fra nettet (og solen), og batteriet må stadig
+  lades. Det er den samme indstilling som *Elbil: hold batteriet* under Konfigurer, nu lige ved hånden. Vises ikke for SonnenBatterie, som ikke kan holdes
+
 ## 0.5.0
 - **Ny, eksperimentel: styring af elbil-laderen.** Vælg din lader under Konfigurer, lad Wattlas prøve den af, og brug den nye fane *Elbil*: lad nu, klar til
   et klokkeslæt, kun sol, stop. Bilen behøver ikke være i Home Assistant. Se [docs/ELBIL.md](docs/ELBIL.md)

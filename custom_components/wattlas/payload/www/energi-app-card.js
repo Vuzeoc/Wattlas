@@ -497,6 +497,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         ${til === 'klar' ? `<div class="set"><div><b>Klar kl.</b><span>${plan.length ? 'planlagt: ' + plan.map(kl).join(', ') : 'ingen timer i planen lige nu'}</span></div><input class="inp" type="time" data-set="time|input_datetime.wattlas_lader_klar" value="${tid}"></div>${bilSoc !== null ? '' : `
         <div class="set"><div><b>Energi</b><span>så meget skal bilen have · mangler ${nf(x.rest_kwh || 0, 1)} kWh</span></div>${trin('wattlas_lader_kwh', 5, nf(tal('input_number.wattlas_lader_kwh')) + ' kWh')}</div>`}` : ''}
         ${x.fast_a ? '' : `<div class="set"><div><b>Højeste strøm</b><span>aldrig mere end laderens gruppe tåler</span></div>${trin('wattlas_lader_maks_a', 1, nf(tal('input_number.wattlas_lader_maks_a')) + ' A')}</div>`}
+        ${x.hold_kan === false ? '' : `<div class="set"><div><b>Kun fra elnettet</b><span>husbatteriet aflader ikke, mens bilen lader – huset køber fra nettet imens, også i dyre timer. Batteriet må stadig lades</span></div><button class="sw ${this.st('input_boolean.wattlas_elbil_hold')?.state === 'on' ? 'on' : ''}" data-a="tog" data-v="input_boolean.wattlas_elbil_hold"><i></i></button></div>`}
         <div class="set"><div><b>Ladet siden tilslutning</b><span>nulstilles af sig selv, når stikket tages ud</span></div><button class="act" data-a="ln">Nulstil</button></div>`, {icon: 'mdi:ev-station'});
     }
 

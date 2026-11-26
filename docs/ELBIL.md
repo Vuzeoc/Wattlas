@@ -29,13 +29,16 @@ gamle, regner Wattlas det ladede med.
 | **Stop** | Wattlas holder laderen stoppet – også hvis den startes et andet sted |
 | **Fra** | Wattlas slipper laderen. Brug dens egen app |
 
+**Kun fra elnettet** (kontakt på fanen Elbil): husbatteriet aflader ikke, mens bilen lader. Bilen får strøm fra nettet og solen, og batteriet må stadig lades.
+Imens køber hele huset fra nettet, også i dyre timer. Slået fra følger batteriet planen som ellers og kan også dække bilen.
+
 Wattlas lader med **fuld strøm eller slet ikke**. Strømmen skrues kun ned, når faserne eller importloftet kræver det (eller solen i *Kun sol*). Lader batteriet
 fra nettet, viger det for bilen.
 
 ## Hvad skal laderen kunne?
 | Laderen kan | Wattlas kan |
 |---|---|
-| kun vise sin effekt | holde husbatteriet, mens bilen lader (*Elbil: hold batteriet*) |
+| kun vise sin effekt | holde husbatteriet, mens bilen lader (*Kun fra elnettet*, også under Konfigurer → *Elbil: hold batteriet*) |
 | starte og stoppe | alle tilstande, men ikke skrue ned: der skal være plads til laderens fulde strøm |
 | starte, stoppe og få en strøm i ampere | det hele |
 

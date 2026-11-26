@@ -82,4 +82,5 @@ template:
           skygge: "{{ trigger.event.data.skygge }}"
           fejl: "{{ trigger.event.data.fejl }}"
           fast_a: "{{ trigger.event.data.fast_a }}"
+          hold_kan: "{{ trigger.event.data.hold_kan }}"
           tid: "{{ now().isoformat() }}"

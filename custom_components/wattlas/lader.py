@@ -162,6 +162,7 @@ SLAGS = {"entiteter": Entiteter, "ocpp": Ocpp, "easee": Easee}
 class Styring:
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass, self.d = hass, entry.data["lader"]
+        self.hold_kan = entry.data.get("kanal") != "sonnen"  # Sonnen kan ikke holde batteriet
         self.lader = SLAGS[self.d["slags"]](hass, self.d)
         self.husk, self.vagt, self.laas = logik.Husk(), logik.Vagt(), asyncio.Lock()
         self.sendt: int | None = None       # det, laderen sidst fik besked om (None = Wattlas styrer den ikke)
@@ -304,7 +305,7 @@ class Styring:
         await self._reserve(0 if skygge or ordre is None or grund in ("bilen tager ikke imod", "effekten mangler", "hviler") else logik._oensket(ind), ordre or 0)
         self._meld({"grund": grund, "ordre_a": ordre, "effekt_w": None if effekt is None else round(effekt), "plads_a": None if rum is None else round(rum, 1),
                     "tilsluttet": tilsluttet, "rest_kwh": round(rest, 1), "bil_soc": soc, "bil_km": self._v(self.d.get("bil_km") or "") if soc is not None else None, "klar": klar, "p_maks_w": round(maks * antal_e * volt), "noed": noed and tilstand == "klar",
-                    "skygge": skygge, "fejl": self.fejl, "fast_a": fast})
+                    "skygge": skygge, "fejl": self.fejl, "fast_a": fast, "hold_kan": self.hold_kan})
 
     def _undtagelser(self, nu: float, ordre, grund, effekt, egen, tilsluttet):
         """Laderen trækker uden for husets måling, eller bilen tager ikke imod."""
