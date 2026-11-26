@@ -33,5 +33,6 @@ recorder:
     entities:
       - sensor.emhass_husforbrug_historik
       - sensor.emhass_udetemperatur_historik
+      - sensor.wattlas_solprognose_solcast  # Solcast-oversætterens liste er for stor til databasen
     entity_globs:
       - sensor.hh_*  # hvad-hvis-beregningens resultater – kun de aktuelle tal bruges

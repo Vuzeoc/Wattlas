@@ -21,12 +21,12 @@ LINK = {
 TRIN = {
     "batteri": ["batteri_kwh", "maks_ladeeffekt_w", "maks_afladeeffekt_w", "maks_ladestroem_a", "maks_afladestroem_a",
                 "maks_netladestroem_a", "maks_netladeeffekt_w"],
-    "elnet": ["fase_graense_a", "import_graense_w", "maks_netimport_w", "maks_eksport_w"],
+    "elnet": ["sikring_a", "fase_graense_a", "import_graense_w", "maks_netimport_w", "maks_eksport_w"],
     "priser": ["nettarif_lav", "nettarif_hoej", "nettarif_spids", "elafgift", "tillaeg", "salg_nettarif", "salg_gebyr",
                "solcelle_slid", "slid", "kulde_w_pr_grad"],
 }
 # opsætningens tekstfelter → input_text.wattlas_<navn>
-TEKST = {"solprognose": "solprognose_entitet", "vejr": "vejr_entitet", "udetemperatur": "udetemperatur_entitet"}
+TEKST = {"solprognose": "solprognose_entitet", "vejr": "vejr_entitet", "udetemperatur": "udetemperatur_entitet", "pris": "pris_entitet", "solcast": "solcast_entiteter"}
 # til og med 0.4.1 lå EMHASS' adresse og nøgle i hjælpere: nøglen kunne læses, og adressen (hvor nøglen sendes hen) rettes, af alle
 GAMLE = {"emhass_adresse": "input_text.wattlas_emhass_adresse", "emhass_noegle": "input_text.wattlas_emhass_noegle"}
 GYLDIG = {"emhass_adresse": re.compile(r"https?://.+"), "emhass_noegle": re.compile(r"(?!unavailable$).{8,}")}

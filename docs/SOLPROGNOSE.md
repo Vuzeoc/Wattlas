@@ -30,6 +30,10 @@ Appen bruger også disse søstersensorer, hvis de findes. Styringen virker uden 
 | `sensor.<navn>_energy_today_remaining` | "Dagens prognose" (Sol-fanen og energiflowet) | prognosen viser kun det, der allerede er produceret |
 | `sensor.<navn>_energy_day_2` | "Prognose i morgen", hvis prognoselisten ikke rækker | feltet er tomt |
 
+## Solcast
+Har du **Solcast PV Forecast** (HACS, BJReplay/ha-solcast-solar), så vælg dens *prognose i dag* i opsætningen (Forbindelser og prognoser).
+Wattlas finder selv i morgen og dag 3 og deler Solcasts halve timer op i kvarterer. Planen bruger Solcasts mest sandsynlige tal (`pv_estimate`).
+
 ## Vil du bruge en anden prognose
 
 Sensoren skal have præcis samme format som Helios, ellers laver Wattlas ingen plan:
@@ -45,6 +49,6 @@ forecast:
 - Der skal være **præcis to værdier pr. halve time** (kvarterstal). Mangler en halv time data, stopper beregningen med
   beskeden *"EMHASS – prognosedata mangler"*, og Wattlas kører videre på reserveplanen eller selvforbrug.
 - Listen skal række mindst 2 timer frem. Planen bliver aldrig længere end prognosen.
-- Har din prognose timetal eller halvtimetal (fx Solcast eller Forecast.Solar), skal du selv lave en template-sensor,
-  der deler dem op i kvarterer. Det følger ikke med Wattlas.
+- Har din prognose timetal eller halvtimetal (fx Forecast.Solar), skal du selv lave en template-sensor, der deler dem op i kvarterer.
+  Solcast klarer Wattlas selv (se ovenfor).
 - Har du flere tagflader som hver sin sensor, skal de lægges sammen til én sensor med samme format.

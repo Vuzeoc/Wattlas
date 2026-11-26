@@ -26,12 +26,15 @@ altid den laveste af de to.
 
 | Helper | Betydning | Eksempel |
 |---|---|---|
-| `wattlas_fase_graense_a` | strøm pr. fase, som husets forbrug + netladning ikke må overstige | 3 × 20 A hovedsikring → 16 A |
+| `wattlas_sikring_a` (valgfri) | hovedsikringens størrelse. Er den sat, er fasegrænsen kun *reguleringsgrænsen*; først sikringen stopper noget og giver alarm | 25 A |
+| `wattlas_fase_graense_a` | strøm pr. fase, som Wattlas regulerer netladningen efter (husets forbrug + netladning) | 25 A sikring → 23 A, 20 A → 18 A |
 | `wattlas_import_graense_w` | samlet import under netladning | 3 × 16 A × 230 V ≈ 11 000 W |
 | `wattlas_maks_netimport_w` | højeste import i EMHASS-planen | ≤ importgrænsen, fx 9 000 W |
 | `wattlas_maks_eksport_w` | højeste eksport i EMHASS-planen | din tilladte eksport, fx 6 000 W |
 
-Netladning skrues ned, så **hver fase** holder sig under fasegrænsen, også når komfuret og varmepumpen kører.
+**To grænser:** netladning skrues ned, så hver fase holder sig under *fasegrænsen*, også når komfuret og varmepumpen kører. En sikring tåler
+korte overskridelser, så en fleksibel forbruger slukkes først efter 10 minutter over fasegrænsen – eller efter 1 minut over
+*hovedsikringen*. Er hovedsikringen ikke sat, slukkes den efter 1 minut over fasegrænsen. Sæt den rigtige værdi: for høj = sikringen springer.
 Målingen kommer fra inverterens eksterne CT'er.
 
 ## Priser (påkrævet: de fire første)
@@ -77,7 +80,8 @@ reparation. Vælg samme opløsning (time eller kvarter), som du afregnes efter.
 |---|---|
 | `wattlas_kulde_w_pr_grad` | ekstra husforbrug i W pr. grad, det er koldere end ugens gennemsnit. Har du varmepumpe, er 50–150 W typisk. 0 = ingen justering |
 
-Alarmen *Høj netbelastning* går, når en fase under netladning bruger mere end `wattlas_fase_graense_a` + 25 %.
+Alarmen *Høj netbelastning* går, når en fase under netladning i 5 minutter bruger mere end hovedsikringen (`wattlas_sikring_a`) – er den ikke sat,
+mere end `wattlas_fase_graense_a` + 25 %.
 
 ## Styring (sættes i appen)
 

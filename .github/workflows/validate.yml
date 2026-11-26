@@ -45,3 +45,7 @@ jobs:
       - run: python tests/test_forbruger.py
       - run: python tests/test_tariffer.py
       - run: python tests/test_elbil.py
+      - run: python tests/test_lader.py
+      - run: python tests/test_lader_ha.py
+      - run: python tests/test_lader_flow.py
+      - run: python tests/test_kilder.py

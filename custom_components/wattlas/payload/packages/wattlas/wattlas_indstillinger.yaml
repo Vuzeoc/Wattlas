@@ -61,6 +61,15 @@ input_number:
     step: 1
     mode: box
     unit_of_measurement: A
+  # valgfri (0 = ikke sat): så reguleres der ved fasegrænsen, og først hovedsikringen stopper noget og giver alarm
+  wattlas_sikring_a:
+    name: Wattlas · hovedsikring pr. fase (0 = ikke sat)
+    min: 0
+    max: 100
+    step: 1
+    mode: box
+    unit_of_measurement: A
+    icon: mdi:fuse
   wattlas_maks_soc:
     name: Wattlas · højeste batteriniveau i planen (0 = 100 %)
     min: 0
@@ -209,7 +218,7 @@ template:
           {% for k in tal %}{% if not (states('input_number.wattlas_' ~ k) | float(0) > 0) %}{% set ns.m = ns.m + ['input_number.wattlas_' ~ k] %}{% endif %}{% endfor %}
           {% if state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') is none %}{% set ns.m = ns.m + ['input_text.wattlas_solprognose_entitet'] %}{% endif %}
           {% if not states('input_text.wattlas_vejr_entitet').startswith('weather.') %}{% set ns.m = ns.m + ['input_text.wattlas_vejr_entitet'] %}{% endif %}
-          {% if not has_value('sensor.energi_data_service') %}{% set ns.m = ns.m + ['sensor.energi_data_service (integrationen Energi Data Service)'] %}{% endif %}
+          {% if not has_value('sensor.wattlas_spotpris') %}{% set ns.m = ns.m + ['sensor.wattlas_spotpris (spotpriser fra Energi Data Service eller Nordpool)'] %}{% endif %}
           {% if states.binary_sensor.workday_sensor is none %}{% set ns.m = ns.m + ['binary_sensor.workday_sensor (integrationen Workday)'] %}{% endif %}
           {{ ns.m | count == 0 }}
         attributes:
@@ -221,7 +230,7 @@ template:
             {% for k in tal %}{% if not (states('input_number.wattlas_' ~ k) | float(0) > 0) %}{% set ns.m = ns.m + ['input_number.wattlas_' ~ k] %}{% endif %}{% endfor %}
             {% if state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') is none %}{% set ns.m = ns.m + ['input_text.wattlas_solprognose_entitet'] %}{% endif %}
             {% if not states('input_text.wattlas_vejr_entitet').startswith('weather.') %}{% set ns.m = ns.m + ['input_text.wattlas_vejr_entitet'] %}{% endif %}
-            {% if not has_value('sensor.energi_data_service') %}{% set ns.m = ns.m + ['sensor.energi_data_service (integrationen Energi Data Service)'] %}{% endif %}
+            {% if not has_value('sensor.wattlas_spotpris') %}{% set ns.m = ns.m + ['sensor.wattlas_spotpris (spotpriser fra Energi Data Service eller Nordpool)'] %}{% endif %}
             {% if states.binary_sensor.workday_sensor is none %}{% set ns.m = ns.m + ['binary_sensor.workday_sensor (integrationen Workday)'] %}{% endif %}
             {{ ns.m }}
 

@@ -31,7 +31,7 @@ async def ny_hass(conf):
     hass.config.components.add('repairs')  # rigtig HA har den altid (default_config); her uden http-server
     hass.set_state(core.CoreState.running)
     t0 = datetime.now().astimezone().replace(minute=0, second=0, microsecond=0)
-    hass.states.async_set('sensor.energi_data_service', '1.5', {'raw_today': []})
+    hass.states.async_set('sensor.energi_data_service', '1.5', {'raw_today': []}); hass.states.async_set('sensor.wattlas_spotpris', '1.5', {'raw_today': []})
     hass.states.async_set('binary_sensor.workday_sensor', 'on')
     hass.states.async_set('sensor.helios_power_now', '0', {'forecast': [{'datetime': (t0 + timedelta(minutes=15 * i)).isoformat(), 'watts': 0} for i in range(96)]})
     hass.states.async_set('weather.test', 'sunny', {'temperature': 5})
@@ -579,14 +579,17 @@ async def main():
     entry = hass.config_entries.async_entries('wattlas')[0]
     om = hass.config_entries.options
     r = await om.async_init(entry.entry_id)
-    assert r['type'] == 'menu' and set(r['menu_options']) == {'forbindelser', 'batteri', 'elnet', 'netselskab', 'priser', 'elbil'}, r
+    assert r['type'] == 'menu' and set(r['menu_options']) == {'forbindelser', 'batteri', 'elnet', 'netselskab', 'priser', 'elbil', 'lader'}, r
     r = await om.async_configure(r['flow_id'], {'next_step_id': 'elnet'})
     standard = {str(k): k.default() for k in r['data_schema'].schema if callable(getattr(k, 'default', None))}
     assert standard.get('fase_graense_a') == 16.0, standard  # den nuværende værdi, ikke opsætningens
     fejl = await om.async_configure(r['flow_id'], {'fase_graense_a': 0, 'import_graense_w': 11000, 'maks_netimport_w': 11000, 'maks_eksport_w': 9000})
     assert fejl['errors'] == {'fase_graense_a': 'over_nul'}, fejl
-    r = await om.async_configure(r['flow_id'], {'fase_graense_a': 18, 'import_graense_w': 11000, 'maks_netimport_w': 11000, 'maks_eksport_w': 9000})
+    fejl = await om.async_configure(r['flow_id'], {'sikring_a': 16, 'fase_graense_a': 18, 'import_graense_w': 11000, 'maks_netimport_w': 11000, 'maks_eksport_w': 9000})
+    assert fejl['errors'] == {'sikring_a': 'sikring_lav'}, fejl
+    r = await om.async_configure(r['flow_id'], {'sikring_a': 18, 'fase_graense_a': 18, 'import_graense_w': 11000, 'maks_netimport_w': 11000, 'maks_eksport_w': 9000})
     assert r['type'] == 'create_entry', r
+    assert ('input_number', 'set_value', 'input_number.wattlas_sikring_a', 18) in kald, kald
     assert ('input_number', 'set_value', 'input_number.wattlas_fase_graense_a', 18) in kald, kald
     assert hass.config_entries.async_entries('wattlas')[0].data['tal']['fase_graense_a'] == 18
     # forbindelser: en tom nøgle beholder den nuværende (ingen skrivning til nøgle-hjælperen)
@@ -740,7 +743,7 @@ async def main():
     forbr = {'number_of_deferrable_loads': 1, 'custom_deferrable_forecast_id': [{'entity_id': 'sensor.p_deferrable0', 'unit_of_measurement': 'W', 'friendly_name': 'Wattlas fleksibel forbruger'}]}
     for t, ekstra in zip(trin[2:], ({'publish_prefix': 'hh_'}, {})):
         assert Template(t['data'], hass).async_render({'fb_ekstra': {}}) == {**base, **ekstra}
-        assert Template(t['data'], hass).async_render({'fb_ekstra': {'x': 1}}) == {**base, **ekstra, **forbr}
+        assert Template(t['data'], hass).async_render({'fb_ekstra': {**forbr, 'x': 1}}) == {**base, **ekstra, **forbr}
     r = Template(trin[0]['data'], hass).async_render({'hus': {'ok': True, 'liste': [1, 2]}, 'beregning_basis': {'a': True}, 'fb_ekstra': {'b': 1}, 'hh_ekstra': {}})
     assert r == {'a': True, 'load_forecast_method': 'list', 'load_power_forecast': [1, 2], 'b': 1}, r
     # genforsøget uden den fleksible forbruger (EMHASS svarer 400, når opgaven ikke kan løses)

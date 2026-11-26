@@ -1,0 +1,72 @@
+# Wattlas – priser og solprognose fra flere kilder. Resten af Wattlas læser kun sensor.wattlas_spotpris (Energi Data Service-format:
+# raw_today/raw_tomorrow med hour og price i kr./kWh inkl. moms) og en solprognose i Helios-format (forecast med datetime og watts pr. kvarter).
+# Opsætningen fylder hjælperne ud; tomme hjælpere = Energi Data Service og den valgte prognose direkte, præcis som før.
+input_text:
+  # "sensor.x|faktor" – faktoren gør prisen til kr./kWh inkl. moms (Nordpool: øre, MWh eller uden moms). Tom = sensor.energi_data_service
+  wattlas_pris_entitet:
+    name: Wattlas · spotpris-kilde
+    max: 255
+  # Solcasts dagssensorer (i dag, i morgen, dag 3), kommasepareret
+  wattlas_solcast_entiteter:
+    name: Wattlas · Solcast-sensorer
+    max: 255
+
+template:
+  - sensor:
+      - name: Wattlas spotpris
+        unique_id: wattlas_spotpris
+        default_entity_id: sensor.wattlas_spotpris
+        unit_of_measurement: kr/kWh
+        state_class: measurement
+        icon: mdi:cash
+        availability: >-
+          {% set k = (states('input_text.wattlas_pris_entitet') if states('input_text.wattlas_pris_entitet') not in ['', 'unknown', 'unavailable'] else 'sensor.energi_data_service').split('|') %}
+          {{ is_number(states(k[0])) and (k | count == 1 or is_number(k[1])) }}
+        state: >-
+          {% set k = (states('input_text.wattlas_pris_entitet') if states('input_text.wattlas_pris_entitet') not in ['', 'unknown', 'unavailable'] else 'sensor.energi_data_service').split('|') %}
+          {{ (states(k[0]) | float * (k[1] | float(1) if k | count > 1 else 1)) | round(5) }}
+        attributes:
+          # Energi Data Service: hour/price. Nordpool: start/value. Begge bliver til hour (ISO-tid) og price (kr./kWh inkl. moms)
+          raw_today: >-
+            {% set k = (states('input_text.wattlas_pris_entitet') if states('input_text.wattlas_pris_entitet') not in ['', 'unknown', 'unavailable'] else 'sensor.energi_data_service').split('|') %}
+            {% set f = k[1] | float(1) if k | count > 1 else 1 %}
+            {% set ns = namespace(l=[]) %}
+            {% for r in state_attr(k[0], 'raw_today') or [] if r is mapping and is_number(r.get('price', r.get('value'))) %}
+              {% set ns.l = ns.l + [dict(hour=as_datetime(r.get('hour', r.get('start'))).isoformat(), price=(r.get('price', r.get('value')) | float * f) | round(5))] %}
+            {% endfor %}{{ ns.l }}
+          raw_tomorrow: >-
+            {% set k = (states('input_text.wattlas_pris_entitet') if states('input_text.wattlas_pris_entitet') not in ['', 'unknown', 'unavailable'] else 'sensor.energi_data_service').split('|') %}
+            {% set f = k[1] | float(1) if k | count > 1 else 1 %}
+            {% set ns = namespace(l=[]) %}
+            {% for r in state_attr(k[0], 'raw_tomorrow') or [] if r is mapping and is_number(r.get('price', r.get('value'))) %}
+              {% set ns.l = ns.l + [dict(hour=as_datetime(r.get('hour', r.get('start'))).isoformat(), price=(r.get('price', r.get('value')) | float * f) | round(5))] %}
+            {% endfor %}{{ ns.l }}
+
+      # Solcast giver halve timer i kW; Wattlas skal bruge kvarterer i W. Kun når Solcast er valgt
+      - name: Wattlas solprognose Solcast
+        unique_id: wattlas_solprognose_solcast
+        default_entity_id: sensor.wattlas_solprognose_solcast
+        unit_of_measurement: W
+        device_class: power
+        icon: mdi:solar-power-variant
+        availability: >-
+          {% set e = states('input_text.wattlas_solcast_entiteter').split(',') | map('trim') | reject('eq', '') | list %}
+          {{ e | count > 0 and state_attr(e[0], 'detailedForecast') is list }}
+        state: >-
+          {% set e = states('input_text.wattlas_solcast_entiteter').split(',') | map('trim') | reject('eq', '') | list %}
+          {% set t = as_timestamp(now()) %}
+          {% set ns = namespace(w=0) %}
+          {% for r in state_attr(e[0], 'detailedForecast') or [] if r is mapping and is_number(r.get('pv_estimate')) %}
+            {% set s = as_timestamp(r.get('period_start'), 0) %}{% if s <= t < s + 1800 %}{% set ns.w = r.pv_estimate | float * 1000 %}{% endif %}
+          {% endfor %}{{ ns.w | round(0) }}
+        attributes:
+          forecast: >-
+            {% set e = states('input_text.wattlas_solcast_entiteter').split(',') | map('trim') | reject('eq', '') | list %}
+            {% set ns = namespace(l=[], sidst=0) %}
+            {% for id in e %}
+              {% for r in state_attr(id, 'detailedForecast') or [] if r is mapping and is_number(r.get('pv_estimate')) and as_timestamp(r.get('period_start'), 0) > ns.sidst %}
+                {% set s = as_datetime(r.get('period_start')) %}{% set w = (r.pv_estimate | float * 1000) | round(0) %}
+                {% set ns.l = ns.l + [dict(datetime=s.isoformat(), watts=w), dict(datetime=(s + timedelta(minutes=15)).isoformat(), watts=w)] %}
+                {% set ns.sidst = as_timestamp(s) %}
+              {% endfor %}
+            {% endfor %}{{ ns.l }}

@@ -22,7 +22,7 @@ from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.start import async_at_started
 
-from . import emhass, installer, tariffer
+from . import emhass, installer, lader, tariffer
 from .config_flow import VERSION, priser_fejl
 from .const import DOMAIN, GAMLE, GENSTART, GYLDIG, STANDARD, TEKST
 
@@ -228,6 +228,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(async_at_started(hass, tarif))
     # shortcut: ny dato ses op til en time efter midnat; et fast klokkeslæt ville få alle installationer til at kalde Energinet samtidig
     entry.async_on_unload(async_track_time_interval(hass, tarif, timedelta(hours=1)))
+    await lader.aktiver(hass, entry)
     return True
 
 
@@ -239,6 +240,7 @@ def _tal(v: str) -> float:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    await lader.afslut(hass)
     hass.services.async_remove(DOMAIN, "emhass")
     return True
 

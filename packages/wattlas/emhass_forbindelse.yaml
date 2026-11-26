@@ -64,8 +64,8 @@ script:
         error: true
     - variables:
         prognose: |-
-          {%- set pv = state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') or [] -%} {%- set priser = (state_attr('sensor.energi_data_service', 'raw_today') or [])
-            + (state_attr('sensor.energi_data_service', 'raw_tomorrow') or []) -%}
+          {%- set pv = state_attr(states('input_text.wattlas_solprognose_entitet'), 'forecast') or [] -%} {%- set priser = (state_attr('sensor.wattlas_spotpris', 'raw_today') or [])
+            + (state_attr('sensor.wattlas_spotpris', 'raw_tomorrow') or []) -%}
           {%- set extent = namespace(end=start_ts | float) -%}
           {%- set trin = [3600, [900, as_timestamp(priser[1].hour, 0) - as_timestamp(priser[0].hour, 0)] | max] | min if priser | count > 1 else 3600 -%}
           {%- for p in priser -%}
@@ -249,12 +249,28 @@ script:
           {% set P = states('input_number.wattlas_forbruger1_effekt') | float(0) %}
           {% set rest = ([0, states('input_number.wattlas_forbruger1_timer') | float(0) - states('input_number.wattlas_forbruger1_koert') | float(0)] | max * 2) | round(0) / 2 %}
           {% set dl = today_at(states('input_datetime.wattlas_forbruger1_faerdig')) %}{% if dl <= now() %}{% set dl = dl + timedelta(days=1) %}{% endif %}
-          {% set slut = [1, [((dl - now()).total_seconds() / 1800) | int, prognose.intervaller | int] | min] | max %}
+          {% set slut = [1, [((as_timestamp(dl) - as_timestamp(now())) / 1800) | int, prognose.intervaller | int] | min] | max %}
           {% set rest = [rest, slut / 2] | min %}
-          {% if med and P >= 100 and rest > 0 %}{{ dict(number_of_deferrable_loads=1, nominal_power_of_deferrable_loads=[P], minimum_power_of_deferrable_loads=[0],
-             operating_hours_of_each_deferrable_load=[rest], start_timesteps_of_each_deferrable_load=[0], end_timesteps_of_each_deferrable_load=[slut],
-             treat_deferrable_load_as_semi_cont=[true], set_deferrable_load_single_constant=[false], set_deferrable_startup_penalty=[0],
-             set_deferrable_max_startups=[0]) }}{% else %}{{ {} }}{% endif %}
+          {% set ns = namespace(l=[[P, rest, slut, 'p_deferrable0', 'Wattlas fleksibel forbruger']] if med and P >= 100 and rest > 0 else []) %}
+          {# elbilen, når den skal være klar til et klokkeslæt (wattlas_lader.yaml). Effekten holdes under det, importloftet har plads til oven på husets
+             højeste forbrug: en last, der ikke kan nås, gør hele planen uløselig. Timerne klippes af samme grund til vinduet #}
+          {% set ev = states['sensor.wattlas_lader'] %}
+          {% if is_state('input_select.wattlas_lader_tilstand', 'klar') and ev is not none and (now() - ev.last_reported).total_seconds() < 300
+             and ev.attributes.get('tilsluttet') != false and ev.attributes.get('rest_kwh') | float(0) > 0.1 %}
+            {% set hp = hus.liste | map('float', 0) | max if hus.ok else 3000 %}
+            {% set ep = [ev.attributes.get('p_maks_w') | float(0), beregning_basis.maximum_power_from_grid | float(0) - hp] | min | round(0, 'floor') %}
+            {% set ed = today_at(ev.attributes.get('klar') or '07:00') %}{% if ed <= now() %}{% set ed = ed + timedelta(days=1) %}{% endif %}
+            {% set es = [1, [((as_timestamp(ed) - as_timestamp(now())) / 1800) | int, prognose.intervaller | int] | min] | max %}
+            {% set et = [(ev.attributes.get('rest_kwh') | float(0) * 2000 / ep) | round(0, 'ceil') / 2, es / 2] | min if ep >= 1300 else 0 %}
+            {% if et > 0 %}{% set ns.l = ns.l + [[ep, et, es, 'wattlas_lader_plan', 'Wattlas elbil']] %}{% endif %}
+          {% endif %}
+          {% set n = ns.l | count %}
+          {% if n %}{% set cid = namespace(v=[]) %}{% for x in ns.l %}{% set cid.v = cid.v + [dict(entity_id='sensor.' ~ x[3], unit_of_measurement='W', friendly_name=x[4])] %}{% endfor %}
+          {{ dict(number_of_deferrable_loads=n, nominal_power_of_deferrable_loads=ns.l | map(attribute=0) | list, minimum_power_of_deferrable_loads=[0] * n,
+             operating_hours_of_each_deferrable_load=ns.l | map(attribute=1) | list, start_timesteps_of_each_deferrable_load=[0] * n,
+             end_timesteps_of_each_deferrable_load=ns.l | map(attribute=2) | list, treat_deferrable_load_as_semi_cont=[true] * n,
+             set_deferrable_load_single_constant=[false] * n, set_deferrable_startup_penalty=[0] * n, set_deferrable_max_startups=[0] * n,
+             custom_deferrable_forecast_id=cid.v) }}{% else %}{{ {} }}{% endif %}
         hh_ekstra: >-
           {% if hh is none %}{{ {} }}{% else %}
           {% set r = [15, [hh.get('reserve', 15) | float(15), soc | float(15)] | min] | max %}
@@ -300,8 +316,7 @@ script:
             handling: publish-data
             data: >-
               {{ dict(dict(method_ts_round='first', continual_publish=false, set_use_battery=true, publish_prefix='hh_', number_of_deferrable_loads=0),
-                   **(dict(number_of_deferrable_loads=1, custom_deferrable_forecast_id=[dict(entity_id='sensor.' ~ 'p_deferrable0',
-                      unit_of_measurement='W', friendly_name='Wattlas fleksibel forbruger')]) if fb_ekstra | count > 0 else {})) }}
+                   **(dict(number_of_deferrable_loads=fb_ekstra.number_of_deferrable_loads, custom_deferrable_forecast_id=fb_ekstra.custom_deferrable_forecast_id) if fb_ekstra | count > 0 else {})) }}
       - stop: Hvad-hvis færdig – den rigtige plan er ikke ændret.
     - if:
       - condition: template
@@ -321,8 +336,7 @@ script:
         handling: publish-data
         data: >-
           {{ dict(dict(method_ts_round='first', continual_publish=false, set_use_battery=true, number_of_deferrable_loads=0),
-               **(dict(number_of_deferrable_loads=1, custom_deferrable_forecast_id=[dict(entity_id='sensor.' ~ 'p_deferrable0',
-                  unit_of_measurement='W', friendly_name='Wattlas fleksibel forbruger')]) if fb_ekstra | count > 0 else {})) }}
+               **(dict(number_of_deferrable_loads=fb_ekstra.number_of_deferrable_loads, custom_deferrable_forecast_id=fb_ekstra.custom_deferrable_forecast_id) if fb_ekstra | count > 0 else {})) }}
       response_variable: publicering
     - delay:
         seconds: 2
@@ -672,6 +686,8 @@ script:
           {% set desired=[0,-p_batt-surplus]|max %}
           {% set rs=states.input_number.wattlas_forbruger1_reserve %}
           {% set reserve=rs.state|float(0) if rs is not none and (now()-rs.last_changed).total_seconds()<300 and is_state(states('input_text.wattlas_forbruger1_entitet'),'off') else 0 %}
+          {% set rl=states.input_number.wattlas_lader_reserve %}
+          {% set reserve=reserve+(rl.state|float(0) if rl is not none and (now()-rl.last_changed).total_seconds()<300 else 0) %}
           {% set vb=states('sensor.emhass_m_battery_voltage')|float(0) %}
           {% set a=[states('input_number.wattlas_maks_ladestroem_a')|float(0),states('sensor.wattlas_maks_ladestroem')|float(0)]|min %}
           {% set hardware=[0,a*vb/0.95-surplus]|max %}

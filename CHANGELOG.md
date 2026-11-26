@@ -2,6 +2,23 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.5.0
+- **Ny, eksperimentel: styring af elbil-laderen.** Vælg din lader under Konfigurer, lad Wattlas prøve den af, og brug den nye fane *Elbil*: lad nu, klar til
+  et klokkeslæt, kun sol, stop. Bilen behøver ikke være i Home Assistant. Se [docs/ELBIL.md](docs/ELBIL.md)
+- Fuld strøm eller slet ikke; skrues kun ned for faserne og importloftet. Batteriets netladning viger for bilen
+- Wattlas ser på, hvad laderen **måler**: stop sendes igen, hvis den ikke stopper, og den stoppes, hvis den trækker mere, end der er bedt om
+- EMHASS planlægger bilen sammen med batteriet (som endnu en last). Har du ingen lader valgt, er planen uændret
+- Ingen lader valgt = præcis som før
+- **Afprøvet** på udviklerens egen 11 kW-lader over OCPP (start, op og ned i strøm, stop, start igen) og i en test-installation gennem Home Assistants
+  OCPP-integration mod en falsk lader. Andre mærker kun i de automatiske tests. Se [docs/ELBIL.md](docs/ELBIL.md#hvad-er-afprøvet)
+- **Ny: Nordpool og Solcast.** Vælg dem i opsætningen (Forbindelser og prognoser) i stedet for Energi Data Service og Helios. Wattlas omregner selv øre, MWh og moms og deler Solcasts halve timer op i kvarterer
+
+## 0.4.5
+- **Ny: to grænser pr. fase.** Sæt *hovedsikringen* (valgfri) under Konfigurer → *Elnet og sikringer*. Så er den eksisterende grænse kun den, der
+  *reguleres* efter (fx 23 A), og først sikringen (fx 25 A) stopper noget og giver alarm. En fleksibel forbruger slukkes efter 1 minut over sikringen
+  eller 10 minutter over reguleringsgrænsen. Ikke sat = præcis som før
+- Alarmen *Høj netbelastning* bruger hovedsikringen, når den er sat. Teksten nævner ikke længere et fast tal
+
 ## 0.4.4
 - **Ny: automatiske nettariffer.** Vælg dit netselskab (i opsætningen eller under Konfigurer → *Netselskab*), så henter Wattlas nettarif, elafgift og
   Energinets tariffer én gang om dagen, også når de skifter ved sommer, vinter og nytår. Du ser tallene, før de gemmes, og får besked, når de

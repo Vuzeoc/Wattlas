@@ -23,7 +23,7 @@ template:
         {% for id in ids %}{% if not is_number(states(id)) %}{% set sample.ok=false %}{% endif %}{% endfor %}
         {% if not is_state('binary_sensor.emhass_ui_netdata_ok','on') %}{% set sample.ok=false %}{% endif %}
         {% set price=namespace(values=[]) %}
-        {% for r in (state_attr('sensor.energi_data_service','raw_today') or [])+(state_attr('sensor.energi_data_service','raw_tomorrow') or []) %}
+        {% for r in (state_attr('sensor.wattlas_spotpris','raw_today') or [])+(state_attr('sensor.wattlas_spotpris','raw_tomorrow') or []) %}
         {% set rt=as_timestamp(r.get('hour'),0) %}
         {% if rt<=t<rt+3600 and is_number(r.get('price')) %}{% set price.values=price.values+[dict(t=rt,p=r.price|float)] %}{% endif %}
         {% endfor %}

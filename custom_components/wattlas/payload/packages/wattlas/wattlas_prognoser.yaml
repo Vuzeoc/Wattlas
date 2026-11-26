@@ -51,7 +51,7 @@ template:
       - trigger: time_pattern
         minutes: /1
       - trigger: state
-        entity_id: sensor.energi_data_service
+        entity_id: sensor.wattlas_spotpris
         attribute: raw_tomorrow
       - trigger: state
         entity_id: [input_number.wattlas_nettarif_lav, input_number.wattlas_nettarif_hoej, input_number.wattlas_nettarif_spids,
@@ -64,7 +64,7 @@ template:
             {# fra næste hele time – men timen, der lige er startet, holdes 1 min, så en tidspunkt-udløser på sensoren når at køre #}
             {% set fra = ((as_timestamp(now()) - 60) // 3600 + 1) * 3600 %}
             {% set ns = namespace(t={}, n={}) %}
-            {% for p in (state_attr('sensor.energi_data_service', 'raw_today') or []) + (state_attr('sensor.energi_data_service', 'raw_tomorrow') or [])
+            {% for p in (state_attr('sensor.wattlas_spotpris', 'raw_today') or []) + (state_attr('sensor.wattlas_spotpris', 'raw_tomorrow') or [])
                  if is_number(p.price) and as_timestamp(p.hour, 0) >= fra %}
               {% set h = ((as_timestamp(p.hour) // 3600) * 3600) | int | string %}
               {% set ns.t = dict(ns.t, **{h: ns.t.get(h, 0) + p.price | float}) %}

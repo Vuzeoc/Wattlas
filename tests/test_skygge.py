@@ -139,9 +139,9 @@ async def main():
     forvent = min(range(1, 6), key=lambda h: koeb(h, spot[h]))
     kv = [{'hour': (h0 + timedelta(hours=h, minutes=15 * q)).isoformat(), 'price': spot[h] + (0.02 if q == 3 else -0.02 if q == 0 else 0)}
           for h in spot for q in range(4)]
-    sæt('sensor.energi_data_service', '1', {'raw_today': kv, 'raw_tomorrow': []})
+    sæt('sensor.wattlas_spotpris', '1', {'raw_today': kv, 'raw_tomorrow': []})
     await hass.async_block_till_done()
-    sæt('sensor.energi_data_service', '1', {'raw_today': kv, 'raw_tomorrow': [{'hour': (h0 + timedelta(hours=6)).isoformat(), 'price': 9}]})
+    sæt('sensor.wattlas_spotpris', '1', {'raw_today': kv, 'raw_tomorrow': [{'hour': (h0 + timedelta(hours=6)).isoformat(), 'price': 9}]})
     await hass.async_block_till_done()
     bt = hass.states.get('sensor.wattlas_billigste_time')
     assert dt_util.parse_datetime(bt.state) == h0 + timedelta(hours=forvent), (bt.state, forvent)

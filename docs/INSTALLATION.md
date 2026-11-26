@@ -57,7 +57,7 @@ Styringen kan ikke starte, før trin 6 er gjort færdigt. Den har en startspærr
 | Hvad | Hvorfor | Hvor |
 |---|---|---|
 | **EMHASS** (app/add-on, version 0.18 eller nyere) | laver planen | Indstillinger → Apps → Butik → tilføj `https://github.com/davidusb-geek/emhass-add-on` |
-| **Energi Data Service** (HACS) | spotpriser → `sensor.energi_data_service` | HACS → søg "Energi Data Service". Sæt pris **inkl. moms**, uden tariffer |
+| **Energi Data Service** (HACS) – *eller Nordpool* | spotpriser → `sensor.energi_data_service` | HACS → søg "Energi Data Service". Sæt pris **inkl. moms**, uden tariffer. Bruger du **Nordpool** (HACS), så vælg dens sensor under *Spotpriser* i opsætningen, og sæt hak, hvis den er uden moms. Øre og MWh klarer Wattlas selv |
 | **Workday** (indbygget) | hverdage/fridage i regler → `binary_sensor.workday_sensor` | Indstillinger → Enheder og tjenester → Tilføj → Workday, land Danmark. Hedder entiteten `binary_sensor.workday_sensor_dk` (HA 2026.11), så omdøb den til `binary_sensor.workday_sensor` |
 | **SQL** (indbygget) | husprognose og historik fra HA's database – kræver standarddatabasen (SQLite), ikke MariaDB/PostgreSQL | aktiveres automatisk af pakken |
 | En **solprognose** med attributten `forecast` (liste af `{datetime, watts}`) | solen i planen | **Helios Forecast** (HACS) anbefales, Wattlas er bygget til den. Andre kræver samme format med kvarterstal, se [SOLPROGNOSE.md](SOLPROGNOSE.md) |

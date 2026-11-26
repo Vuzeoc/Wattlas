@@ -9,7 +9,7 @@ faser, spænding, batteriets strømme og reserve) gælder altid, uanset hvad du 
 **Indhold:** [De første dage](#de-første-dage) · [Hverdagen](#hverdagen) · [Styring](#wattlas-styring--styring) ·
 [Regler](#wattlas-styring--regler) · [Planens logik](#wattlas-styring--planens-logik) ·
 [Overvågning](#wattlas-styring--overvågning) · [Teknik](#wattlas-styring--teknik) · [Appen](#wattlas-appen) ·
-[Når noget går galt](#når-noget-går-galt) · [Én eller flere invertere](#én-eller-flere-invertere)
+[Når noget går galt](#når-noget-går-galt) · [Én eller flere invertere](#én-eller-flere-invertere) · [Elbil-lader](ELBIL.md)
 
 ## De første dage
 
@@ -117,8 +117,8 @@ brugt. Beder du om flere timer, end der er tilbage inden fristen, planlægges s�
 slukket, så sørg for, at apparatet har sin egen termostat eller sikring.
 
 **Fasevagten:** kontakten tændes kun, når der er plads på alle tre faser (regnet på den værste) og under importloftet. Fylder
-batteriets netladning, viger den først. Er en fase eller importloftet alligevel overskredet i et minut, slukkes forbrugeren, og der
-går mindst 10 minutter, før den tændes igen. Det er et værn oven på apparatets egen sikring, ikke i stedet for den: Wattlas ser
+batteriets netladning, viger den først. Er hovedsikringen alligevel overskredet i et minut, eller fasegrænsen eller importloftet i 10
+minutter, slukkes forbrugeren, og der går mindst 10 minutter, før den tændes igen. (Er hovedsikringen ikke sat, er det 1 minut over fasegrænsen eller loftet.) Det er et værn oven på apparatets egen sikring, ikke i stedet for den: Wattlas ser
 målingerne hvert 30. sekund, og går Home Assistant ned, bliver kontakten stående.
 
 **Elbilen må ikke tømme husbatteriet:** vælg laderens effekt (W eller kW) under Indstillinger → Enheder og tjenester → Wattlas → Konfigurer →
@@ -205,7 +205,7 @@ selvforbrug. Du får en besked, og Wattlas prøver selv igen.
 | *Inverteren svarer ikke* | ingen nye målinger i 10 min | tjek loggeren/WiFi og inverter-integrationen |
 | *Mangler aktuel plan* | EMHASS har ikke lavet en brugbar plan | se beskeden *EMHASS – beregning fejlede* under Notifikationer; tjek EMHASS-app'en, nøglen og at priser og solprognose har data |
 | *EMHASS – prognosedata mangler* | solprognosen har huller | se [SOLPROGNOSE.md](SOLPROGNOSE.md) |
-| *Høj netbelastning* | en fase bruger mere end fasegrænsen + 25 % under netladning | Wattlas skruer selv ned; sker det tit, så sænk `wattlas_fase_graense_a` |
+| *Høj netbelastning* | en fase bruger i 5 minutter mere end hovedsikringen (ikke sat: fasegrænsen + 25 %) under netladning | Wattlas skruer selv ned; sker det tit, så sænk `wattlas_fase_graense_a` |
 | *Periode følger ikke planen* | inverterens tidsprogram svarer ikke til det, Wattlas skrev | tjek at "Time of use" er slået til, og at programtiderne er 01, 05, 09, 13, 17 og 21 |
 | Et tjek i *Planens logik* er gult | planen ser mærkelig ud | læs forklaringen; ofte er det ok (fx små prisforskelle) |
 

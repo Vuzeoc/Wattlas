@@ -57,15 +57,15 @@ template:
     state: |-
       {% set h=now().hour %}
       {% set net=(states('input_number.wattlas_nettarif_lav')|float(0)) if h<6 else (states('input_number.wattlas_nettarif_spids')|float(0)) if 17<=h<21 else (states('input_number.wattlas_nettarif_hoej')|float(0)) %}
-      {{ (states('sensor.energi_data_service')|float(0)+(net+(states('input_number.wattlas_elafgift')|float(0)))*1.25+(states('input_number.wattlas_tillaeg')|float(0)))|round(4) }}
+      {{ (states('sensor.wattlas_spotpris')|float(0)+(net+(states('input_number.wattlas_elafgift')|float(0)))*1.25+(states('input_number.wattlas_tillaeg')|float(0)))|round(4) }}
     unit_of_measurement: DKK/kWh
-    availability: '{{ is_number(states(''sensor.energi_data_service'')) }}'
+    availability: '{{ is_number(states(''sensor.wattlas_spotpris'')) }}'
   - name: EMHASS foreløbig salgspris
     unique_id: emhass_ui_salgspris
     default_entity_id: sensor.emhass_ui_salgspris
-    state: '{{ (states(''sensor.energi_data_service'')|float(0)/1.25-(states(''input_number.wattlas_salg_nettarif'')|float(0))*1.25-(states(''input_number.wattlas_salg_gebyr'')|float(0)))|round(4) }}'
+    state: '{{ (states(''sensor.wattlas_spotpris'')|float(0)/1.25-(states(''input_number.wattlas_salg_nettarif'')|float(0))*1.25-(states(''input_number.wattlas_salg_gebyr'')|float(0)))|round(4) }}'
     unit_of_measurement: DKK/kWh
-    availability: '{{ is_number(states(''sensor.energi_data_service'')) }}'
+    availability: '{{ is_number(states(''sensor.wattlas_spotpris'')) }}'
   - name: EMHASS fase 1 strømestimat
     unique_id: emhass_ui_fase_1
     default_entity_id: sensor.emhass_ui_fase_1
@@ -232,7 +232,7 @@ template:
       {% set load=states('sensor.emhass_m_load_w_totalpower')|float(0) %}
       {{ is_state('input_boolean.emhass_styring_aktiv','on') and is_state('switch.wattlas_netladning','on')
        and -b/0.95-([0,pv-load]|max)>500
-       and ([states('sensor.emhass_ui_fase_1')|float(0),states('sensor.emhass_ui_fase_2')|float(0),states('sensor.emhass_ui_fase_3')|float(0)]|max)>states('input_number.wattlas_fase_graense_a')|float(0)*1.25 }}
+       and ([states('sensor.emhass_ui_fase_1')|float(0),states('sensor.emhass_ui_fase_2')|float(0),states('sensor.emhass_ui_fase_3')|float(0)]|max)>(states('input_number.wattlas_sikring_a')|float(0) or states('input_number.wattlas_fase_graense_a')|float(0)*1.25) }}
     device_class: problem
     delay_on:
       minutes: 5
@@ -240,7 +240,8 @@ template:
       seconds: 60
     availability: '{{ is_state(''binary_sensor.emhass_ui_netdata_ok'',''on'') }}'
     attributes:
-      forklaring: Netopladning fortsætter over 500 W i fem minutter samtidig med faseestimat over 25 A. Reguleringen
+      forklaring: Netopladning fortsætter over 500 W i fem minutter samtidig med
+        en fase over hovedsikringen (eller fasegrænsen + 25 %, hvis den ikke er sat). Reguleringen
         bør have reduceret opladningen. W/V er et estimat, ikke målt RMS-strøm.
   - name: EMHASS kontrollér batteritemperatur
     unique_id: emhass_ui_temperatur

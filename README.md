@@ -53,6 +53,15 @@ Wattlas er open source. Idéer og ønsker er meget velkomne – opret et issue, 
 | **App** | To dashboards: *Wattlas* (live-energiflow, økonomi, historik, elpris, solprognose) og *Wattlas Styring* (styring, regler, planens logik, overvågning, teknik) |
 | **Økonomi** | Sparet i dag/uge/måned/i alt, tilbagebetalingstid, rekorder, ugerapport søndag aften |
 
+## Elbil (eksperimentel)
+
+Vælg din lader under *Konfigurer*, lad Wattlas prøve den af, og styr den fra fanen **Elbil**: lad nu, klar til et klokkeslæt, kun sol eller stop.
+Har du bilen i Home Assistant, vises dens batteri og rækkevidde, mens den sidder i laderen. Fanen og bilen på forsiden vises kun, når en lader er valgt.
+Se [docs/ELBIL.md](docs/ELBIL.md).
+
+| ![Bilen på forsiden](docs/billeder/live_elbil.png) | ![Elbil-fanen](docs/billeder/elbil.png) |
+|---|---|
+
 ## Sådan ser det ud
 
 ### Wattlas – appen
@@ -92,9 +101,9 @@ og fleksibel forbruger.
 
 ### På telefonen
 
-| Live | Økonomi | Styring | Planens logik |
-|---|---|---|---|
-| ![Live på telefon](docs/billeder/mobil/live.jpg) | ![Økonomi på telefon](docs/billeder/mobil/okonomi.jpg) | ![Styring på telefon](docs/billeder/mobil/styring.jpg) | ![Planens logik på telefon](docs/billeder/mobil/plan.jpg) |
+| Live | Økonomi | Styring | Planens logik | Elbil |
+|---|---|---|---|---|
+| ![Live på telefon](docs/billeder/mobil/live.jpg) | ![Økonomi på telefon](docs/billeder/mobil/okonomi.jpg) | ![Styring på telefon](docs/billeder/mobil/styring.jpg) | ![Planens logik på telefon](docs/billeder/mobil/plan.jpg) | ![Elbil på telefon](docs/billeder/mobil/elbil.jpg) |
 
 *Live, planens logik, elpris og solprognose i de store billeder er vist med opdigtede demotal. De øvrige billeder, også dem fra telefonen, er fra en rigtig installation.*
 

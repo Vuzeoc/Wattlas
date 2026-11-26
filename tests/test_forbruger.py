@@ -146,6 +146,26 @@ async def main():
     assert (await kør())[0] == 'on'
     sæt('binary_sensor.wattlas_forbruger1_overbelaster', 'on')
     assert (await kør())[0] == 'off'
+    # 10b) to grænser: er hovedsikringen sat (25 A), stopper først den efter et minut – over reguleringsgrænsen (20 A) først efter ti
+    blød = f['template'][0]['binary_sensor'][1]
+    assert f['template'][0]['binary_sensor'][0]['delay_on'] == {'seconds': 60} and blød['delay_on'] == {'minutes': 10}
+    blød = Template(blød['state'], hass)
+    await forfra(tændt=True)
+    tilstand = lambda: (over.async_render(), blød.async_render())  # noqa: E731
+    for sikring, w, ventet in ((0, 4500, (False, False)), (0, 4700, (True, False)), (25, 4500, (False, False)), (25, 4700, (False, True)),
+                               (25, 5700, (False, True)), (25, 5800, (True, True)), (18, 4500, (False, False)), (18, 4700, (True, False))):
+        sæt('input_number.wattlas_sikring_a', sikring); hus((500, w, 500))
+        assert tilstand() == ventet, (sikring, w, tilstand())
+    sæt('input_number.wattlas_sikring_a', 25)
+    for import_w, ventet in ((12900, (False, False)), (13100, (False, True)), (16200, (False, True)), (16300, (True, True))):  # loftet 13.000 × 25/20
+        hus((500, 500, 500)); sæt('sensor.emhass_m_grid_out_total_power', import_w)
+        assert tilstand() == ventet, (import_w, tilstand())
+    for e, s in ((VAND, 'off'), ('binary_sensor.emhass_ui_data_frisk', 'off'), ('input_boolean.wattlas_forbruger1_aktiv', 'off')):
+        sæt(e, s); assert tilstand() == (False, False), e
+        sæt(e, 'on', 700)
+    hus(); sæt('binary_sensor.wattlas_forbruger1_over_regulering', 'on')
+    assert (await kør())[0] == 'off'
+    sæt('binary_sensor.wattlas_forbruger1_over_regulering', 'off'); sæt('input_number.wattlas_sikring_a', 0)
     # 11) timerne er brugt, eller styringen er slukket
     await forfra(tændt=True); await tal('koert', 2)
     assert (await kør())[0] == 'off'

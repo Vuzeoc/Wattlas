@@ -218,7 +218,7 @@ async def main():
     sæt('sensor.sol', '0', {'forecast': [{'datetime': (t0 + timedelta(minutes=15 * i)).isoformat(), 'watts': 100} for i in range(16)]})
 
     def koeb(priser):
-        sæt('sensor.energi_data_service', '1', {'raw_today': [{'hour': (t0 + timedelta(seconds=s)).isoformat(), 'price': v} for s, v in priser],
+        sæt('sensor.wattlas_spotpris', '1', {'raw_today': [{'hour': (t0 + timedelta(seconds=s)).isoformat(), 'price': v} for s, v in priser],
                                                 'raw_tomorrow': []})
         r = Template(PROG, hass).async_render({'start_ts': t0.timestamp()})
         assert not r['fejl'] and r['intervaller'] == 8, r
@@ -236,6 +236,18 @@ async def main():
         sæt('input_text.wattlas_besked_handling', felt)
         assert Template(hvis, hass).async_render() is ok, felt
     print('Beskedmodtager fra indstillingen: OK')
+
+    # Alarmen Høj netbelastning: over hovedsikringen, når den er sat – ellers fasegrænsen + 25 %
+    ov = yaml.safe_load((REPO / 'packages/wattlas/emhass_overblik.yaml').read_text(encoding='utf-8'))
+    alarm = [b for blok in ov['template'] for b in blok.get('binary_sensor', []) if b['unique_id'] == 'emhass_ui_netbelastning'][0]
+    assert '25 A' not in alarm['attributes']['forklaring']
+    for e, v in (('input_boolean.emhass_styring_aktiv', 'on'), ('switch.wattlas_netladning', 'on'), ('sensor.emhass_m_battery_output_w_power', -5000),
+                 ('sensor.emhass_m_load_w_totalpower', 1000), ('sensor.emhass_solproduktion_samlet', 0), ('input_number.wattlas_fase_graense_a', 20)):
+        sæt(e, str(v))
+    for sikring, fase, går in ((0, 24.9, False), (0, 25.1, True), (25, 24.9, False), (25, 25.1, True), (22, 22.1, True), (35, 34, False)):
+        sæt('input_number.wattlas_sikring_a', str(sikring)); sæt('sensor.emhass_ui_fase_1', '5'); sæt('sensor.emhass_ui_fase_2', str(fase)); sæt('sensor.emhass_ui_fase_3', '5')
+        assert Template(alarm['state'], hass).async_render() is går, (sikring, fase)
+    print('Høj netbelastning ved hovedsikringen: OK')
 
     # To Deye i parallel: strøm og effekt deles, så summen er det bedte (også ulige tal); batteri summeres; husforbrug fra balancen
     pk = yaml.safe_load((REPO / 'styrekanaler/deye_parallel/wattlas_kanal_deye.yaml').read_text(encoding='utf-8'))
@@ -485,7 +497,7 @@ async def main():
     for trin, antal, forventet in ((60, 24, 48), (15, 96, 48)):
         sæt('sensor.sol', '0', {'forecast': [{'datetime': nul + timedelta(minutes=15 * i), 'watts': 100} for i in range(400)]})
         sæt('input_text.wattlas_solprognose_entitet', 'sensor.sol')
-        sæt('sensor.energi_data_service', '1', {'raw_today': [{'hour': nul + timedelta(minutes=trin * i), 'price': 1 + i / 100} for i in range(antal)], 'raw_tomorrow': []})
+        sæt('sensor.wattlas_spotpris', '1', {'raw_today': [{'hour': nul + timedelta(minutes=trin * i), 'price': 1 + i / 100} for i in range(antal)], 'raw_tomorrow': []})
         r = Template(P, hass).async_render({'start_ts': nul.timestamp()})
         assert r['intervaller'] == forventet and not r['fejl'], (trin, r['intervaller'], r['fejl'])
     print('Planens længde ved time- og kvarterpriser: OK')
@@ -501,7 +513,7 @@ async def main():
     for e in ('weather.test', 'sensor.wattlas_udetemperatur', 'binary_sensor.workday_sensor'):
         sæt(e, 'unavailable')
     assert spaerre() == (True, []), spaerre()
-    for e, hvad in (('sensor.energi_data_service', 'energi_data_service'), ('binary_sensor.workday_sensor', 'workday')):
+    for e, hvad in (('sensor.wattlas_spotpris', 'wattlas_spotpris'), ('binary_sensor.workday_sensor', 'workday')):
         gemt = hass.states.get(e); hass.states.async_remove(e)
         ok, mangler = spaerre()
         assert ok is False and len(mangler) == 1 and hvad in mangler[0], (e, mangler)

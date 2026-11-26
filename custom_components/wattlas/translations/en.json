@@ -68,7 +68,9 @@
         "data": {
           "emhass_adresse": "EMHASS-adresse",
           "emhass_noegle": "EMHASS API-nøgle",
-          "solprognose": "Solprognose (fx Helios Forecast …_power_now)",
+          "solprognose": "Solprognose (Helios …_power_now, eller Solcasts prognose i dag)",
+          "priser": "Spotpriser (tom = Energi Data Service; eller Nordpool)",
+          "priser_uden_moms": "Nordpools priser er uden moms",
           "vejr": "Vejr",
           "udetemperatur": "Udetemperatur (valgfri – ellers bruges vejrets)"
         }
@@ -99,13 +101,15 @@
         "title": "Elnet og sikringer",
         "description": "Grænserne beskytter dine sikringer, også når planen tager fejl. Spørg din elinstallatør, hvis du er i tvivl.",
         "data": {
+          "sikring_a": "Hovedsikring pr. fase (0 = ikke sat)",
           "fase_graense_a": "Maks. strøm pr. fase (under hovedsikringen)",
           "import_graense_w": "Maks. samlet import fra nettet (netladning)",
           "maks_netimport_w": "Plan-grænse import fra nettet",
           "maks_eksport_w": "Plan-grænse eksport til nettet"
         },
         "data_description": {
-          "fase_graense_a": "Lidt under hovedsikringen. 3 × 20 A sikring → fx 16 A.",
+          "sikring_a": "Hovedsikringens størrelse (valgfri). Så skrues der roligt ned ved grænsen nedenfor, og først hovedsikringen stopper noget og giver alarm. Uden den er grænsen nedenfor begge dele.",
+          "fase_graense_a": "Her skrues der ned. Lidt under hovedsikringen: fx 23 A ved en sikring på 25 A, 18 A ved 20 A.",
           "import_graense_w": "Samlet import under netladning, fx 3 × 16 A × 230 V ≈ 11 000 W.",
           "maks_netimport_w": "Højeste import i planen – højst importgrænsen.",
           "maks_eksport_w": "Den eksport, du har lov til."
@@ -165,9 +169,12 @@
       "bekraeft": "Sæt flueben for at fortsætte trods advarslerne.",
       "adresse": "Adressen skal starte med http:// eller https://",
       "noegle": "Nøglen skal være mindst 8 tegn uden linjeskift.",
-      "prognose_format": "Sensoren har ikke en prognose med datetime og watts.",
+      "prognose_format": "Sensoren har ikke en prognose (Helios: datetime og watts; Solcast: detailedForecast).",
+      "priser_format": "Sensoren har ikke priser fra Energi Data Service eller Nordpool (raw_today).",
+      "priser_tillaeg": "Nordpool lægger ekstra omkostninger på prisen. Fjern *additional costs* i Nordpools indstillinger – Wattlas lægger selv tarifferne på.",
       "prognose_kvarter": "Prognosen skal have en værdi pr. 15 minutter (se SOLPROGNOSE.md).",
       "over_nul": "Skal være større end 0.",
+      "sikring_lav": "Hovedsikringen kan ikke være mindre end grænsen nedenfor.",
       "elbil_sensor": "Vælg laderens effekt i W eller kW (ikke kWh, og ikke en af Wattlas' egne sensorer).",
       "tarif": "Tallene kunne ikke hentes (grunden står ovenfor). Prøv igen om lidt, eller vælg at taste dem selv."
     },
@@ -197,6 +204,12 @@
       "options": {
         "huawei": "Huawei-elmåler på inverteren (Power meter)",
         "emma": "EMMA (Huawei Energy Management Assistant) – eksperimentel"
+      }
+    },
+    "faser": {
+      "options": {
+        "3": "Tre faser",
+        "1": "Én fase"
       }
     },
     "tilslutning": {
@@ -244,6 +257,22 @@
       "title": "Wattlas får ikke ren spotpris fra Energi Data Service",
       "description": "Tariffer (eller visning i øre/MWh) er slået til i Energi Data Service. Wattlas lægger selv nettarif og elafgift på, så de tælles to gange, og salgsprisen bliver forkert. Slå dem fra i Energi Data Service, og genstart Home Assistant."
     },
+    "lader_stopper_ikke": {
+      "title": "Elbil-laderen stopper ikke",
+      "description": "Wattlas har bedt laderen stoppe flere gange, men bilen lader stadig. Stop den i laderens app, eller tag stikket ud. Wattlas bliver ved med at prøve."
+    },
+    "lader_over_graense": {
+      "title": "Elbil-laderen trak mere strøm, end Wattlas bad om",
+      "description": "Laderen holdt ikke grænsen, så Wattlas stoppede ladningen. Prøv laderen igen under Konfigurer."
+    },
+    "lader_udenfor": {
+      "title": "Elbil-laderen ses ikke i husets måling",
+      "description": "Laderen trækker strøm, men husets måler viser det ikke. Så kan Wattlas ikke passe på faserne, og ladningen er stoppet."
+    },
+    "lader_svarer_ikke": {
+      "title": "Elbil-laderen tager ikke imod",
+      "description": "Home Assistant kan ikke styre laderen lige nu. Tjek laderens integration. Wattlas prøver igen."
+    },
     "tarif_fejl": {
       "title": "Wattlas kan ikke hente nettarifferne",
       "description": "Planen regner videre med de seneste tal: {fejl}.\n\nWattlas prøver igen hver time. Er tallene forkerte, så vælg *Jeg taster selv tallene* under Indstillinger → Enheder og tjenester → Wattlas → *Konfigurer* → Netselskab, og ret dem under Priser og tariffer."
@@ -284,7 +313,8 @@
           "elnet": "Elnet og sikringer (fasegrænse, importloft, eksport)",
           "netselskab": "Netselskab (hent nettarif og afgifter automatisk)",
           "priser": "Priser og tariffer",
-          "elbil": "Elbil-lader (hold batteriet, mens bilen lader)",
+          "elbil": "Elbil: hold batteriet, mens bilen lader",
+          "lader": "Elbil-lader: lad Wattlas styre den",
           "sonnen": "SonnenBatterie: adresse og token"
         }
       },
@@ -294,7 +324,9 @@
         "data": {
           "emhass_adresse": "EMHASS-adresse",
           "emhass_noegle": "EMHASS API-nøgle",
-          "solprognose": "Solprognose (fx Helios Forecast …_power_now)",
+          "solprognose": "Solprognose (Helios …_power_now, eller Solcasts prognose i dag)",
+          "priser": "Spotpriser (tom = Energi Data Service; eller Nordpool)",
+          "priser_uden_moms": "Nordpools priser er uden moms",
           "vejr": "Vejr",
           "udetemperatur": "Udetemperatur (valgfri – ellers bruges vejrets)"
         }
@@ -325,13 +357,15 @@
         "title": "Elnet og sikringer",
         "description": "Grænserne beskytter dine sikringer, også når planen tager fejl. Spørg din elinstallatør, hvis du er i tvivl.",
         "data": {
+          "sikring_a": "Hovedsikring pr. fase (0 = ikke sat)",
           "fase_graense_a": "Maks. strøm pr. fase (under hovedsikringen)",
           "import_graense_w": "Maks. samlet import fra nettet (netladning)",
           "maks_netimport_w": "Plan-grænse import fra nettet",
           "maks_eksport_w": "Plan-grænse eksport til nettet"
         },
         "data_description": {
-          "fase_graense_a": "Lidt under hovedsikringen. 3 × 20 A sikring → fx 16 A.",
+          "sikring_a": "Hovedsikringens størrelse (valgfri). Så skrues der roligt ned ved grænsen nedenfor, og først hovedsikringen stopper noget og giver alarm. Uden den er grænsen nedenfor begge dele.",
+          "fase_graense_a": "Her skrues der ned. Lidt under hovedsikringen: fx 23 A ved en sikring på 25 A, 18 A ved 20 A.",
           "import_graense_w": "Samlet import under netladning, fx 3 × 16 A × 230 V ≈ 11 000 W.",
           "maks_netimport_w": "Højeste import i planen – højst importgrænsen.",
           "maks_eksport_w": "Den eksport, du har lov til."
@@ -380,6 +414,53 @@
           "elbil_hold": "Hold batteriet, mens elbilen lader"
         }
       },
+      "lader": {
+        "title": "Vælg din lader",
+        "description": "Vælg den lader, du allerede har i Home Assistant. Wattlas finder selv resten.\n\nEr den ikke på listen: sæt den først op i Home Assistant (Indstillinger → Enheder og tjenester), eller vælg *Min lader er ikke på listen* og peg på den.",
+        "data": {
+          "lader": "Lader",
+          "enhed": "Enhed (kun hvis den ikke er på listen)"
+        }
+      },
+      "lader_ok": {
+        "title": "Det fandt Wattlas",
+        "description": "{effekt} Effekt lige nu\n{status} Om bilen er tilsluttet\n{til} Start og stop\n{strom} Justering af strømmen\n\n**–** betyder, at Wattlas ikke fandt den. Uden *Justering af strømmen* kan Wattlas kun starte og stoppe.",
+        "data": {
+          "faser": "Laderens faser",
+          "maks_a": "Højeste strøm",
+          "bil_soc": "Bilens batteri i % (kun hvis bilen er i Home Assistant)",
+          "bil_kwh": "Bilens batteri i kWh",
+          "ret": "Ret, hvad Wattlas fandt"
+        },
+        "data_description": {
+          "bil_soc": "Så kan du vælge \"lad til 80 %\". Wattlas finder selv bilens stik og rækkevidde. Vises kun, når bilen sidder i laderen.",
+          "maks_a": "Laderens egen sikring minus lidt luft: 16 A-gruppe → 15 A, hvis du er i tvivl. Aldrig mere end gruppen tåler."
+        }
+      },
+      "lader_roller": {
+        "title": "Hvad er hvad?",
+        "description": "Kun *Effekt* skal udfyldes, plus enten en kontakt, to knapper eller et strøm-tal. Er du i tvivl, så lad feltet stå tomt.",
+        "data": {
+          "effekt": "Effekt lige nu",
+          "status": "Status (er bilen tilsluttet?)",
+          "til_fra": "Kontakt til start/stop",
+          "omvendt": "Kontakten er en pause-kontakt (tændt = pause)",
+          "strom": "Strøm (A)",
+          "start": "Knap: start",
+          "stop": "Knap: stop"
+        }
+      },
+      "lader_proev": {
+        "title": "Prøv laderen",
+        "description": "Wattlas starter laderen på 6 A, sætter den op til 8 A og stopper igen. Det tager 2–4 minutter, og Wattlas ser på, hvad laderen **måler**.\n\n1. Sæt stikket i bilen.\n2. Bilen må ikke lade i forvejen, og dens batteri må ikke være fuldt.\n3. Bliv i nærheden: virker stop ikke, så tag stikket ud.\n\nUden prøven kan Wattlas ikke vide, om laderen adlyder.",
+        "data": {
+          "proev": "Prøv nu (anbefales)"
+        }
+      },
+      "lader_resultat": {
+        "title": "Sådan gik prøven",
+        "description": "{svar}\n\n{raad}"
+      },
       "netselskab_vis": {
         "title": "Nye tariffer: {navn}",
         "description": "**Nu:** {nu}\n\n**Fra Energinet i dag:** {ny}\n\nPasser det med din elregning, så tryk *Send*. Derefter hentes tallene hver dag, og felterne forsvinder fra *Priser og tariffer*. Passer det ikke, så luk vinduet – intet er ændret."
@@ -396,19 +477,29 @@
     "error": {
       "adresse": "Adressen skal starte med http:// eller https://",
       "noegle": "Nøglen skal være mindst 8 tegn uden linjeskift.",
-      "prognose_format": "Sensoren har ikke en prognose med datetime og watts.",
+      "prognose_format": "Sensoren har ikke en prognose (Helios: datetime og watts; Solcast: detailedForecast).",
       "prognose_kvarter": "Prognosen skal have en værdi pr. 15 minutter (se SOLPROGNOSE.md).",
+      "priser_format": "Sensoren har ikke priser fra Energi Data Service eller Nordpool (raw_today).",
+      "priser_tillaeg": "Nordpool lægger ekstra omkostninger på prisen. Fjern *additional costs* i Nordpools indstillinger – Wattlas lægger selv tarifferne på.",
       "over_nul": "Skal være større end 0.",
+      "sikring_lav": "Hovedsikringen kan ikke være mindre end grænsen nedenfor.",
       "tarif": "Tallene kunne ikke hentes (grunden står ovenfor). Prøv igen om lidt, eller vælg at taste dem selv.",
       "elbil_sensor": "Vælg laderens effekt i W eller kW (ikke kWh, og ikke en af Wattlas' egne sensorer).",
       "sonnen_adresse": "Skriv adressen som http://10.0.0.50 (uden sti).",
       "sonnen_token": "Tokenet ser forkert ud (kopiér det fra Software-Integration).",
       "sonnen_afvist": "Batteriet afviste tokenet. Er JSON API for Reading slået til, og er tokenet kopieret helt?",
-      "sonnen_svarer_ikke": "Batteriet svarer ikke på adressen (eller firmwaren er ældre end 1.40)."
+      "sonnen_svarer_ikke": "Batteriet svarer ikke på adressen (eller firmwaren er ældre end 1.40).",
+      "lader_ingen_styring": "Vælg en kontakt, to knapper (start og stop) eller et strøm-tal, der kan sættes til 0 A.",
+      "bil_kwh": "Skriv bilens batteristørrelse (5–250 kWh), eller ryd bilens batteri.",
+      "lader_valg": "Wattlas kender ikke valgene i den liste. Brug en kontakt eller knapper."
+    },
+    "progress": {
+      "lader_proev": "Prøver laderen: start, strøm og stop. Det tager 2–4 minutter …"
     },
     "abort": {
       "install_fejl": "Installationen blev ikke gennemført: {fejl}",
-      "genstart_foerst": "Genstart Home Assistant først – Wattlas' nye filer er ikke indlæst endnu."
+      "genstart_foerst": "Genstart Home Assistant først – Wattlas' nye filer er ikke indlæst endnu.",
+      "lader_ikke_styret": "{svar}\n\nWattlas styrer ikke laderen. Intet er ændret. Se guiden *Elbil-lader* for, hvad laderen skal kunne."
     }
   }
 }

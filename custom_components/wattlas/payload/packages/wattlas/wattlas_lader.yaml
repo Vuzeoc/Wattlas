@@ -1,0 +1,85 @@
+# Wattlas – elbil-lader (Konfigurer → Elbil-lader → styring). Beslutningen og vagterne ligger i integrationen (lader.py, lader_logik.py), som læser
+# disse hjælpere. 'fra' = Wattlas rører ikke laderen. Vises kun i appen, når en lader er valgt.
+input_select:
+  wattlas_lader_tilstand:
+    name: Wattlas · elbil-lader
+    options: [fra, stop, lad_nu, klar, sol]
+    icon: mdi:ev-station
+
+input_number:
+  wattlas_lader_maks_a:
+    name: Wattlas · elbil-lader højeste strøm
+    min: 6
+    max: 32
+    step: 1
+    mode: box
+    unit_of_measurement: A
+    icon: mdi:current-ac
+  wattlas_lader_kwh:
+    name: Wattlas · elbil-lader energi pr. opladning
+    min: 1
+    max: 150
+    step: 1
+    mode: box
+    unit_of_measurement: kWh
+    icon: mdi:battery-charging-medium
+  # kun når bilen er i Home Assistant: så højt skal den lades
+  wattlas_lader_maal:
+    name: Wattlas · elbil lad til
+    min: 50
+    max: 100
+    step: 5
+    mode: box
+    unit_of_measurement: "%"
+    icon: mdi:battery-charging-high
+  # lagt ind, siden bilen blev tilsluttet. Nulstilles af Wattlas, når bilen kobles fra
+  wattlas_lader_ladet:
+    name: Wattlas · elbil-lader ladet
+    min: 0
+    max: 500
+    step: 0.01
+    mode: box
+    unit_of_measurement: kWh
+    icon: mdi:counter
+  # plads, som netladningen skal holde fri til bilen (trefaset W; 0 = ingen). Sættes kun af integrationen
+  wattlas_lader_reserve:
+    name: Wattlas · elbil-lader venter på plads
+    min: 0
+    max: 100000
+    step: 1
+    mode: box
+    initial: 0
+    unit_of_measurement: W
+
+input_datetime:
+  wattlas_lader_klar:
+    name: Wattlas · elbil-lader klar kl.
+    has_date: false
+    has_time: true
+    icon: mdi:clock-end
+
+template:
+  - triggers:
+      - trigger: event
+        event_type: wattlas_lader
+    sensor:
+      - name: Wattlas lader
+        unique_id: wattlas_lader
+        default_entity_id: sensor.wattlas_lader
+        icon: mdi:ev-station
+        state: "{{ trigger.event.data.grund }}"
+        attributes:
+          ordre_a: "{{ trigger.event.data.ordre_a }}"
+          effekt_w: "{{ trigger.event.data.effekt_w }}"
+          plads_a: "{{ trigger.event.data.plads_a }}"
+          tilsluttet: "{{ trigger.event.data.tilsluttet }}"
+          rest_kwh: "{{ trigger.event.data.rest_kwh }}"
+          p_maks_w: "{{ trigger.event.data.p_maks_w }}"
+          klar: "{{ trigger.event.data.klar }}"
+          noed: "{{ trigger.event.data.noed }}"
+          bil_soc: "{{ trigger.event.data.bil_soc }}"
+          bil_km: "{{ trigger.event.data.bil_km }}"
+          skygge: "{{ trigger.event.data.skygge }}"
+          fejl: "{{ trigger.event.data.fejl }}"
+          fast_a: "{{ trigger.event.data.fast_a }}"
+          tid: "{{ now().isoformat() }}"

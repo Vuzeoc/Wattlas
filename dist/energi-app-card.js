@@ -6,7 +6,7 @@ if (!customElements.get('emhass-plan-card')) import('./emhass-plan-card.js' + ne
 (() => {
   const VERSION = '3.0.5';
   // Wattlas HUD-palet (bevidst forskellig fra SunMate)
-  const C = {sol: '#fbbf24', net: '#f472b6', hus: '#22d3ee', bat: '#34d399', ok: '#4ade80', warn: '#fb923c', err: '#fb7185',
+  const C = {sol: '#fbbf24', net: '#f472b6', hus: '#22d3ee', bat: '#34d399', ev: '#a78bfa', ok: '#4ade80', warn: '#fb923c', err: '#fb7185',
     goal: '#64748b', blue: '#818cf8', cyan: '#22d3ee', lav: '#4ade80', hoej: '#fb923c', spids: '#fb7185'};
   const SEED = {};
   let FOER_NOV = 0, FOER_DATO = null; // kort-konfiguration: startsaldo (kr. sparet før Wattlas) og startsaldo_dato
@@ -35,12 +35,12 @@ if (!customElements.get('emhass-plan-card')) import('./emhass-plan-card.js' + ne
   const SQL_DAGE = start => `WITH r AS (SELECT sm.statistic_id id, st.start_ts ts, st.state sv, st.sum - LAG(st.sum) OVER (PARTITION BY sm.statistic_id ORDER BY st.start_ts) ds
  FROM statistics st JOIN statistics_meta sm ON st.metadata_id = sm.id
  WHERE sm.statistic_id IN ('sensor.wattlas_i_dag_produktion','sensor.wattlas_total_koebt','sensor.wattlas_total_solgt',
- 'sensor.wattlas_i_dag_ladet','sensor.wattlas_i_dag_afladet','sensor.energi_data_service')
+ 'sensor.wattlas_i_dag_ladet','sensor.wattlas_i_dag_afladet','sensor.energi_data_service','sensor.wattlas_spotpris')
  AND st.start_ts >= CAST(strftime('%s', '${start}', '-1 day') AS INTEGER)),
 h AS (SELECT ts, CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER) hr,
  MAX(0, COALESCE(SUM(CASE WHEN id = 'sensor.wattlas_i_dag_produktion' THEN ds END), 0)) pv, MAX(0, COALESCE(SUM(CASE WHEN id = 'sensor.wattlas_total_koebt' THEN ds END), 0)) b,
  MAX(0, COALESCE(SUM(CASE WHEN id = 'sensor.wattlas_total_solgt' THEN ds END), 0)) s, MAX(0, COALESCE(SUM(CASE WHEN id = 'sensor.wattlas_i_dag_ladet' THEN ds END), 0)) ch,
- MAX(0, COALESCE(SUM(CASE WHEN id = 'sensor.wattlas_i_dag_afladet' THEN ds END), 0)) dis, MAX(CASE WHEN id = 'sensor.energi_data_service' THEN sv END) p FROM r GROUP BY ts)
+ MAX(0, COALESCE(SUM(CASE WHEN id = 'sensor.wattlas_i_dag_afladet' THEN ds END), 0)) dis, MAX(CASE WHEN id IN ('sensor.energi_data_service','sensor.wattlas_spotpris') THEN sv END) p FROM r GROUP BY ts)
 SELECT date(ts, 'unixepoch', 'localtime') d, ROUND(SUM(pv), 1) pv, ROUND(SUM(b), 1) b, ROUND(SUM(s), 1) s, ROUND(SUM(ch), 1) ch, ROUND(SUM(dis), 1) dis,
  ROUND(SUM(CASE WHEN hr < 6 THEN b ELSE 0 END), 1) bl, ROUND(SUM(CASE WHEN hr >= 17 AND hr < 21 THEN b ELSE 0 END), 1) bs,
  ROUND(SUM(CASE WHEN (hr >= 6 AND hr < 17) OR hr >= 21 THEN b ELSE 0 END), 1) bh
@@ -220,6 +220,8 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       else if (a === 'hhapply') { if (!confirm('Brug disse indstillinger i den rigtige styring?')) return;
         [['reserve', 'wattlas_reserve'], ['slut_soc', 'wattlas_slut_soc'], ['max_net_kw', 'wattlas_max_net_kw'], ['slid', 'wattlas_slid']]
           .forEach(([k, id]) => this._hass.callService('input_number', 'set_value', {entity_id: 'input_number.' + id, value: this._hh[k]})); return; }
+      else if (a === 'lt') { this._hass.callService('input_select', 'select_option', {entity_id: 'input_select.wattlas_lader_tilstand', option: v}); this._last = 0; return; }
+      else if (a === 'ln') { this._hass.callService('input_number', 'set_value', {entity_id: 'input_number.wattlas_lader_ladet', value: 0}); this._last = 0; return; }
       else if (a === 'num') { const [id, d] = v.split('|'), s = this.st(id); if (!s) return;
         const x = Math.max(s.attributes.min, Math.min(s.attributes.max, Math.round((parseFloat(s.state) + Number(d)) * 100) / 100));
         this._hass.callService('input_number', 'set_value', {entity_id: id, value: x}); this._last = 0; return; }
@@ -233,16 +235,19 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
 
     _render() {
       if (!this._hass) return;
-      const ALLE = {live: ['mdi:flash', 'Live'], styring: ['mdi:tune-variant', 'Styring'], regler: ['mdi:calendar-clock', 'Regler'], plan: ['mdi:head-question-outline', 'Planens logik'],
+      const ALLE = {live: ['mdi:flash', 'Live'], styring: ['mdi:tune-variant', 'Styring'], lader: ['mdi:ev-station', 'Elbil'], regler: ['mdi:calendar-clock', 'Regler'], plan: ['mdi:head-question-outline', 'Planens logik'],
         overvaagning: ['mdi:shield-check-outline', 'Overvågning'], teknik: ['mdi:sine-wave', 'Teknik'], okonomi: ['mdi:piggy-bank', 'Økonomi'], historik: ['mdi:chart-areaspline', 'Historik'],
         elpris: ['mdi:currency-usd', 'Elpris'], sol: ['mdi:weather-sunny', 'Solprognose']};
       const valgte = (this._cfg?.tabs || ['live', 'okonomi', 'historik', 'elpris', 'sol']).filter(k => ALLE[k]);
+      // elbilen vises kun, når en lader er valgt i opsætningen (styringen melder sig hvert minut)
+      const lt = this.a('sensor.wattlas_lader', 'tid');
+      if (lt && Date.now() - new Date(lt) < 6e5 && !valgte.includes('lader')) valgte.splice(1, 0, 'lader');
       if (!valgte.includes(this._tab)) this._tab = valgte[0];
       const tabs = valgte.map(k => [k, ...ALLE[k]]);
       const andet = this._cfg?.link;
       let body = '';
       try {
-        body = {live: () => this.live(), styring: () => this.styring(), regler: () => this.regler(), plan: () => '<div class="plan-host"></div>',
+        body = {live: () => this.live(), styring: () => this.styring(), lader: () => this.lader(), regler: () => this.regler(), plan: () => '<div class="plan-host"></div>',
           overvaagning: () => this.overvaagning(), teknik: () => this.teknik(), okonomi: () => this.okonomi(), historik: () => this.historik(), elpris: () => this.elpris(),
           sol: () => this.solprognose()}[this._tab]?.() || this.live();
       } catch (e) { body = `<div class="card">Fejl i visningen: ${esc(e.message)}</div>`; console.error(e); }
@@ -304,6 +309,9 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       const lad = Math.max(0, -bat), afl = Math.max(0, bat);
       const solHus = Math.min(pv, load), solRest = pv - solHus, solBat = Math.min(solRest, lad), solNet = Math.max(0, solRest - solBat);
       const husRest = load - solHus, batHus = Math.min(afl, husRest), netHus = Math.max(0, husRest - batHus), netBat = Math.max(0, lad - solBat);
+      // elbilen: kun når den er koblet på (eller trækker strøm). Den er en del af husets måling, så huset vises uden den
+      const lad_ = this.st('sensor.wattlas_lader'), lx = lad_?.attributes || {}, frisk = lx.tid && Date.now() - new Date(lx.tid) < 6e5;
+      const evW = Math.max(0, this.n('sensor.wattlas_elbil_effekt') || 0), ev = evW > 50 || (frisk && lx.tilsluttet === true), bilSoc = ev && frisk && lx.bil_soc != null ? parseFloat(lx.bil_soc) : NaN;
       const kw = w => w >= 1000 ? nf(w / 1000, 1) + ' kW' : nf(w) + ' W';
       const F = [
         ['M330,118 Q470,128 512,204', solHus, C.sol, 'Sol → hus', 478, 126],
@@ -312,6 +320,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         ['M146,250 L494,250', netHus, C.net, 'Elnet → hus', 400, 240],
         ['M150,290 Q190,372 288,398', netBat, C.net, 'Elnet → batteri', 190, 370],
         ['M372,398 Q470,372 512,296', batHus, C.bat, 'Batteri → hus', 488, 331]];
+      if (ev) F.push(['M560,332 L560,372', evW, C.ev, 'Hus → elbil', 610, 350]);
       let flows = '', labels = '';
       F.forEach(([d, w, c, n, lx, ly], k) => {
         flows += `<path d="${d}" class="fb"/>`;
@@ -344,24 +353,26 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       else if (bat > 100 && bK) { const m = bK / (afl / 1000 / 0.95) * 60, d = new Date(Date.now() + m * 6e4);
         eta = `reserve nås kl. ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
       const tx = (x, y, s, c, cls = 'ex', anc = 'middle') => `<text x="${x}" y="${y}" text-anchor="${anc}" class="${cls}" fill="${c}">${s}</text>`;
+      const bx = ev ? 262 : 404, ba = ev ? 'end' : 'start';  // bilen står, hvor batteriets tal ellers er
       const extras =
         tx(100, 178, koeb !== null ? `${nf(koeb, 2)} kr/kWh` : '', C.net, 'exb') + tx(100, 192, salg !== null ? `salg ${nf(salg, 2)} kr` : '', C.net) +
         tx(100, 342, ph.every(v => v !== null) ? ph.map((v, i) => `L${i + 1} ${nf(v / 1000, 1)}`).join(' · ') + ' kW' : '', 'var(--secondary-text-color)') +
         tx(560, 178, tjener != null ? `tjener ${nf(tjener, 2)} kr/kWh` : husK !== null ? `${nf(husK, 2)} kr/kWh` : '', C.hus, 'exb') +
         tx(560, 192, tjener == null && husS !== null ? `med slid ${nf(husS, 2)}` : '', C.hus) +
         anl.map(([n, v], k) => tx(398, 52 + 16 * k, v !== null ? `${esc(n)}  ${kw(Math.max(0, v))}` : '', C.sol, 'ex', 'start')).join('') +
-        tx(404, 410, bK !== null ? `${nf(bK, 1)} kWh over reserven` : '', C.bat, 'exb', 'start') +
-        tx(404, 426, [bV !== null && !['Huawei', 'Growatt', 'SolaX', 'Sofar', 'Solis'].includes(this.st('sensor.emhass_maalekilde')?.state) ? nf(bV, 1) + ' V' : '',  /* Huawei: kanalens beregningsspænding, ikke batteriets */ bT !== null ? nf(bT, 1) + ' °C' : '', batPris !== null ? nf(batPris, 2) + ' kr/kWh' : ''].filter(Boolean).join(' · '), 'var(--secondary-text-color)', 'ex', 'start') +
-        tx(404, 442, eta, C.bat, 'ex', 'start') +
+        tx(bx, 410, bK !== null ? `${nf(bK, 1)} kWh over reserven` : '', C.bat, 'exb', ba) +
+        tx(bx, 426, [bV !== null && !['Huawei', 'Growatt', 'SolaX', 'Sofar', 'Solis'].includes(this.st('sensor.emhass_maalekilde')?.state) ? nf(bV, 1) + ' V' : '',  /* Huawei: kanalens beregningsspænding, ikke batteriets */ bT !== null ? nf(bT, 1) + ' °C' : '', batPris !== null ? nf(batPris, 2) + ' kr/kWh' : ''].filter(Boolean).join(' · '), 'var(--secondary-text-color)', 'ex', ba) +
+        tx(bx, 442, eta, C.bat, 'ex', ba) +
         tx(330, 290, invT !== null ? `inverter ${nf(invT, 0)} °C` : '', 'var(--secondary-text-color)');
-      const svg = `<svg viewBox="0 0 660 490" class="flow"><defs><radialGradient id="nodebg"><stop offset="0" stop-color="#16294a"/><stop offset="1" stop-color="#0a1426"/></radialGradient></defs>
+      const svg = `<svg viewBox="0 0 660 ${ev ? 510 : 490}" class="flow"><defs><radialGradient id="nodebg"><stop offset="0" stop-color="#16294a"/><stop offset="1" stop-color="#0a1426"/></radialGradient></defs>
         ${flows}
         <circle cx="330" cy="250" r="26" fill="#0a1426" stroke="${C.cyan}" stroke-width="1.5" style="filter:drop-shadow(0 0 8px ${C.cyan})"/>
         <image href="${LOGO}" x="308" y="228" width="44" height="44"/>
         ${node(330, 70, C.sol, 'mdi:white-balance-sunny', kw(pv), 'SOL', `${nf(pvD, 1)} kWh i dag · prognose ${nf(progn, 0)} kWh`)}
         ${node(100, 250, C.net, 'mdi:transmission-tower', kw(Math.abs(grid)), grid < -30 ? 'SÆLGER' : 'KØBER', `${nf(ind, 1)} kWh købt · ${nf(ud, 1)} solgt`)}
-        ${node(560, 250, C.hus, 'mdi:home-lightning-bolt', kw(load), 'HUS', `${nf(lastD, 1)} kWh i dag`)}
+        ${node(560, 250, C.hus, 'mdi:home-lightning-bolt', kw(Math.max(0, load - evW)), 'HUS', `${nf(lastD, 1)} kWh i dag`)}
         ${node(330, 400, C.bat, 'mdi:battery-charging-high', nf(soc) + ' %', 'BATTERI', `${batTxt} ${kw(Math.abs(bat))} · ${nf(ch, 1)} ladet / ${nf(dis, 1)} afladet`, socArc)}
+        ${ev ? node(560, 420, C.ev, 'mdi:car-electric', kw(evW), 'ELBIL', isNaN(bilSoc) ? (frisk ? `${nf(this.n('input_number.wattlas_lader_ladet') || 0, 1)} kWh ladet` : '') : `${nf(bilSoc)} % · mål ${nf(this.n('input_number.wattlas_lader_maal') || 0)} %`) : ''}
         ${extras}${labels}</svg>`;
       const fraNet = Math.min(lastD, Math.max(0, ind - ch)), fraBat = Math.max(0, Math.min(dis, lastD - fraNet)), fraSol = Math.max(0, lastD - fraNet - fraBat);
       const tot = lastD || 1, autark = load > 0 ? 100 * (solHus + batHus) / load : 0;
@@ -461,6 +472,34 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         <div class="set"><div><b>Wattlas styrer forbrugeren</b><span>${on ? (plan.length ? 'planlagt: ' + plan.map(kl).join(', ') : 'ingen kørsel i planen lige nu') : 'slået fra – prøv den i hvad-hvis først'}</span></div><button class="sw ${on ? 'on' : ''}" data-a="tog" data-v="input_boolean.wattlas_forbruger1_aktiv" ${gyldig && es ? '' : 'disabled'}><i></i></button></div>`, {icon: 'mdi:power-socket-eu'});
     }
 
+    // ---------- ELBIL (laderen; lader.py styrer, kortet viser og sætter hjælperne) ----------
+    lader() {
+      const st = this.st('sensor.wattlas_lader'), x = st?.attributes || {}, til = this.st('input_select.wattlas_lader_tilstand')?.state || 'fra';
+      const tal = id => { const n = parseFloat(this.st(id)?.state); return isNaN(n) ? 0 : n; };
+      const GRUND = {fra: 'Wattlas rører ikke laderen', stop: 'Stoppet', starter: 'Starter', lader: 'Lader', faserne: 'Lader – skruet ned, så faserne holder', 'lidt plads': 'Lader på laveste strøm – lidt plads på faserne',
+        'ingen plads': 'Venter: for lidt plads på faserne', 'over sikring': 'Holder igen: en fase er over hovedsikringen', hviler: 'Holder en kort pause', venter: 'Venter på de billige timer', sol: 'Venter på sol',
+        'færdig': 'Færdig', frakoblet: 'Ingen bil tilsluttet', 'status ukendt': 'Laderen svarer ikke lige nu', 'målinger mangler': 'Venter: husets målinger mangler', 'bilen tager ikke imod': 'Bilen tager ikke imod (fuld, eller dens egen tidsplan)',
+        'effekten mangler': 'Stoppet: laderen melder ikke sin effekt. Prøver igen om lidt', 'uden for målingen': 'Stoppet: laderen ses ikke i husets måling', 'grænser': 'Højeste strøm er ikke sat'};
+      const VALG = [['lad_nu', 'Lad nu', 'mdi:flash'], ['klar', 'Klar til tid', 'mdi:clock-end'], ['sol', 'Kun sol', 'mdi:weather-sunny'], ['stop', 'Stop', 'mdi:stop'], ['fra', 'Fra', 'mdi:hand-back-right-off']];
+      const FORKLAR = {lad_nu: 'Lader med fuld strøm med det samme. Skrues kun ned, når faserne kræver det.', klar: 'Lægger energien i de billigste timer og er færdig til tiden. Nås det ikke ellers, lades der uanset prisen.',
+        sol: 'Lader kun med strøm, huset ikke selv bruger. Kræver overskud til mindst laveste strøm.', stop: 'Wattlas holder laderen stoppet.', fra: 'Wattlas slipper laderen. Brug dens egen app.'};
+      const plan = (this.a('sensor.wattlas_lader_plan', 'deferrables_schedule') || []).filter(r => parseFloat(r.wattlas_lader_plan ?? r.p_deferrable1 ?? r.p_deferrable0) > 50).map(r => new Date(r.date)).filter(d => d > Date.now() - 18e5);
+      const kl = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      const tid = (this.st('input_datetime.wattlas_lader_klar')?.state || '07:00:00').slice(0, 5), kw = Number(x.effekt_w) > 50 ? nf(x.effekt_w / 1000, 1) + ' kW' : '0 kW';
+      const trin = (id, d, vis) => `<div class="stp"><button data-a="num" data-v="input_number.${id}|-${d}">−</button><em>${vis}</em><button data-a="num" data-v="input_number.${id}|${d}">+</button></div>`;
+      const bilSoc = x.tilsluttet === true && x.bil_soc != null && !isNaN(parseFloat(x.bil_soc)) ? parseFloat(x.bil_soc) : null;
+      const bil = x.tilsluttet === false ? 'ingen bil' : x.tilsluttet === true ? 'bil tilsluttet' : 'ukendt';
+      return this.card('Elbil', `<div class="cmp"><div><span>Lige nu</span><b>${kw}</b></div><div><span>Ladet</span><b>${nf(tal('input_number.wattlas_lader_ladet'), 1)} kWh</b></div><div><span>Strøm</span><b>${x.ordre_a == null ? '–' : nf(x.ordre_a) + ' A'}</b></div></div>
+        <p class="note" style="margin:10px 0"><b>${esc(GRUND[st?.state] || st?.state || '–')}</b> · ${bil}${x.skygge ? ' · skygge: vises kun' : ''}${x.noed ? ' · lader nu for at nå det til tiden' : ''}</p>
+        <div class="seg" style="flex-wrap:wrap">${VALG.map(([k, n, i]) => `<button class="${til === k ? 'on' : ''}" data-a="lt" data-v="${k}"><ha-icon icon="${i}"></ha-icon> ${n}</button>`).join('')}</div>
+        <p class="note">${FORKLAR[til] || ''}</p>
+        ${bilSoc !== null ? `<div class="set"><div><b>Bilen: ${nf(bilSoc)} %${x.bil_km != null && !isNaN(x.bil_km) ? ` · ${nf(x.bil_km)} km` : ''}</b><span>lad til · mangler ${nf(x.rest_kwh || 0, 1)} kWh</span></div>${trin('wattlas_lader_maal', 5, nf(tal('input_number.wattlas_lader_maal')) + ' %')}</div>` : ''}
+        ${til === 'klar' ? `<div class="set"><div><b>Klar kl.</b><span>${plan.length ? 'planlagt: ' + plan.map(kl).join(', ') : 'ingen timer i planen lige nu'}</span></div><input class="inp" type="time" data-set="time|input_datetime.wattlas_lader_klar" value="${tid}"></div>${bilSoc !== null ? '' : `
+        <div class="set"><div><b>Energi</b><span>så meget skal bilen have · mangler ${nf(x.rest_kwh || 0, 1)} kWh</span></div>${trin('wattlas_lader_kwh', 5, nf(tal('input_number.wattlas_lader_kwh')) + ' kWh')}</div>`}` : ''}
+        ${x.fast_a ? '' : `<div class="set"><div><b>Højeste strøm</b><span>aldrig mere end laderens gruppe tåler</span></div>${trin('wattlas_lader_maks_a', 1, nf(tal('input_number.wattlas_lader_maks_a')) + ' A')}</div>`}
+        <div class="set"><div><b>Ladet siden tilslutning</b><span>nulstilles af sig selv, når stikket tages ud</span></div><button class="act" data-a="ln">Nulstil</button></div>`, {icon: 'mdi:ev-station'});
+    }
+
     // ---------- REGLER (tidsstyrede begrænsninger) ----------
     _reglerUdkast() { if (!this._rUdkast) this._rUdkast = JSON.parse(JSON.stringify(this.a('sensor.wattlas_regler', 'regler') || [])); return this._rUdkast; }
     regler() {
@@ -503,7 +542,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       const per = `<table class="tbl"><tbody>
         <tr><td>Drift</td><td>${esc(s('sensor.emhass_ui_drift')?.state || '–')}</td></tr>
         <tr><td>Aktiv Deye-periode</td><td>${esc(s('sensor.emhass_ui_aktiv_periode')?.state || '–')} · effekt ${esc(s('sensor.emhass_ui_periode_effekt')?.state || '–')} W · SOC ${esc(s('sensor.emhass_ui_periode_soc')?.state || '–')} %</td></tr>
-        <tr><td>Fasestrøm (estimat)</td><td>${[1, 2, 3].map(i => esc(s('sensor.emhass_ui_fase_' + i)?.state || '–')).join(' · ')} A</td></tr>
+        <tr><td>Fasestrøm (estimat)</td><td>${[1, 2, 3].map(i => esc(s('sensor.emhass_ui_fase_' + i)?.state || '–')).join(' · ')} A (regulerer ved ${nf(this.n('input_number.wattlas_fase_graense_a'))} A${this.n('input_number.wattlas_sikring_a') > 0 ? `, sikring ${nf(this.n('input_number.wattlas_sikring_a'))} A` : ''})</td></tr>
         <tr><td>Afladegrænse</td><td>${nf(this.n('sensor.emhass_ui_afladegraense_w'))} W</td></tr>
         <tr><td>Netopladning</td><td>${esc(s('switch.wattlas_netladning')?.state || '–')} · ${esc(s('number.wattlas_netladestroem')?.state || '–')} A</td></tr>
         <tr><td>Seneste diagnose</td><td>${esc(s('sensor.emhass_diagnose_seneste')?.state || '–')}</td></tr></tbody></table>`;
@@ -656,7 +695,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
     }
 
     priserIdag(dag = 'raw_today') {
-      return (this.a('sensor.energi_data_service', dag) || []).map(r => { const d = new Date(r.hour); const p = Number(r.price);
+      return (this.a('sensor.wattlas_spotpris', dag) || []).map(r => { const d = new Date(r.hour); const p = Number(r.price);
         return {h: d.getHours(), t: d, spot: p, buy: buy(p, d.getHours()), sell: sell(p)}; }).filter(r => !isNaN(r.spot));
     }
 

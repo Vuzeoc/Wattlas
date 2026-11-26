@@ -20,7 +20,7 @@ from homeassistant.helpers import selector as sel
 from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.loader import async_get_integration
 
-from . import installer, tariffer
+from . import installer, lader, lader_find, tariffer
 from .const import DOMAIN, EMHASS_SLUG, GAMLE, GENSTART, LINK, NAVN_RE, PAAKRAEVET, STANDARD, TAL, TEKST, TRIN
 
 VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
@@ -61,17 +61,21 @@ def _database(hass) -> str | None:
         return None
 
 
-def priser_fejl(hass) -> bool:
+def priser_fejl(hass, entity_id: str = "sensor.energi_data_service") -> bool:
     """Energi Data Service giver noget andet end ren spotpris i kr./kWh: så ville Wattlas lægge tarifferne på to gange og regne forkert salgspris."""
-    s = hass.states.get("sensor.energi_data_service")
+    s = hass.states.get(entity_id)
     return s is not None and bool(s.attributes.get("tariffs") or s.attributes.get("use_cent") or s.attributes.get("unit", "kWh") != "kWh")
 
 
 # kendte ladere: integrationens navn i Home Assistant → navn. Kun for at foreslå laderens effekt-sensor; alle andre vælges selv
-LADERE = {"zaptec": "Zaptec", "easee": "Easee", "goecharger_api2": "go-e", "wallbox": "Wallbox", "tesla_wall_connector": "Tesla Wall Connector",
-          "ocpp": "OCPP", "keba": "Keba", "ohme": "Ohme", "abb_terra_ac": "ABB", "chargeamps": "Charge Amps", "garo_wallbox": "Garo", "besen": "Besen",
-          "nexblue": "NexBlue"}
+LADERE = {**lader_find.MAERKER, "keba": "Keba", "tesla_wall_connector": "Tesla Wall Connector", "besen": "Besen"}
 ELBIL, ELBIL_HOLD = "input_text.wattlas_elbil_entitet", "input_boolean.wattlas_elbil_hold"
+LADER_FEJL = {"maalinger": "Wattlas kan ikke se husets faser lige nu. Prøv igen, når Wattlas har friske målinger.",
+              "plads": "Der er for lidt plads på faserne til en sikker prøve. Prøv igen, når der bruges mindre strøm (fx når varmepumpen holder pause, og batteriet ikke lader).",
+              "frakoblet": "Laderen melder, at bilen ikke er tilsluttet. Sæt stikket i bilen, og prøv igen.",
+              "effekt": "Laderens effekt kan ikke læses lige nu.", "effekt_ingen": "Laderen melder ikke sin effekt, mens den lader, så Wattlas kan ikke se, om den adlyder. Bruger du OCPP: genindlæs integrationen, eller vælg målingerne selv (Power.Active.Import).",
+              "lader_allerede": "Bilen lader allerede. Stop den i laderens app, og prøv igen."}
+LADER_TILSTAND, LADER_MAKS, LADER_MAAL = "input_select.wattlas_lader_tilstand", "input_number.wattlas_lader_maks_a", "input_number.wattlas_lader_maal"
 
 
 def _fundne_ladere(hass) -> list[tuple[str, str]]:
@@ -113,6 +117,22 @@ def _platform_entitet(hass, domæne: str, platform: str) -> str | None:
     return None
 
 
+def _faktor_med_moms(pris: str) -> bool:
+    """Indeholder Nordpool-faktoren de 25 % moms, Wattlas selv lagde på? (så står fluebenet, når Konfigurer åbnes igen)"""
+    try:
+        f = float(pris.split("|")[1])
+    except (IndexError, ValueError):
+        return False
+    return any(abs(f - e * c * 1.25) < 1e-9 * max(1, f) for e in NORDPOOL_ENHED.values() for c in (1, 0.01))
+
+
+def _nordpool(hass) -> str | None:
+    """Første Nordpool-sensor (HACS), hvis Energi Data Service ikke findes – så er den foreslået i opsætningen."""
+    if hass.states.get("sensor.energi_data_service") is not None:
+        return None
+    return next((e.entity_id for e in er.async_get(hass).entities.values() if e.platform == "nordpool" and e.domain == "sensor" and not e.disabled), None)
+
+
 def _prognose_fejl(hass, entity_id: str) -> str | None:
     s = hass.states.get(entity_id)
     fc = s.attributes.get("forecast") if s else None
@@ -125,15 +145,73 @@ def _prognose_fejl(hass, entity_id: str) -> str | None:
     return None if (t[1] - t[0]).total_seconds() == 900 else "prognose_kvarter"
 
 
+SOLCAST = "sensor.wattlas_solprognose_solcast"
+NORDPOOL_ENHED = {"kWh": 1, "MWh": 0.001, "Wh": 1000}
+
+
+def _kilder(hass, ui: dict) -> dict[str, str]:
+    """Priser og solprognose fra andre kilder (Nordpool, Solcast) oversættes til det, resten af Wattlas læser. Retter ui; giver fejlene."""
+    fejl: dict[str, str] = {}
+    ui["pris"] = ""
+    if p := ui.get("priser"):
+        s = hass.states.get(p)
+        r = (s.attributes.get("raw_today") or [None])[0] if s else None
+        if not isinstance(r, dict):
+            fejl["priser"] = "priser_format"
+        elif "value" in r and "start" in r:  # Nordpool (HACS): priser i den valgte enhed, evt. i øre og uden moms
+            enhed = NORDPOOL_ENHED.get(str(s.attributes.get("unit") or "kWh"))
+            try:
+                tillaeg = float(s.attributes.get("additional_costs_current_hour") or 0)
+            except (TypeError, ValueError):
+                tillaeg = 1.0
+            if enhed is None or s.attributes.get("currency") not in (None, "DKK"):  # euro læst som kroner ville give 7,5 gange for lave priser
+                fejl["priser"] = "priser_format"
+            elif tillaeg:  # tariffer lagt på i Nordpool: Wattlas lægger dem selv på og ville tælle dem to gange
+                fejl["priser"] = "priser_tillaeg"
+            else:
+                f = enhed * (0.01 if s.attributes.get("price_in_cents") else 1) * (1.25 if ui.get("priser_uden_moms") else 1)
+                ui["pris"] = f"{p}|{f:g}"
+        elif "hour" in r and "price" in r:
+            if priser_fejl(hass, p):
+                fejl["priser"] = "priser_tillaeg"
+            ui["pris"] = p
+        else:
+            fejl["priser"] = "priser_format"
+    ui["solcast"] = ""
+    e = ui.get("solprognose") or ""
+    s = hass.states.get(e)
+    if s is not None and isinstance(s.attributes.get("detailedForecast"), list):
+        d = s.attributes["detailedForecast"]
+        try:
+            ok = len(d) >= 4 and all(isinstance(x, dict) and "pv_estimate" in x for x in d[:4]) and \
+                (datetime.fromisoformat(str(d[1]["period_start"])) - datetime.fromisoformat(str(d[0]["period_start"]))).total_seconds() == 1800
+        except (KeyError, ValueError, TypeError):
+            ok = False
+        if not ok:
+            fejl["solprognose"] = "prognose_format"
+        else:  # i dag, i morgen og dag 3 fra samme Solcast-opsætning
+            reg = er.async_get(hass)
+            me = reg.async_get(e)
+            dage = {x.translation_key: x.entity_id for x in reg.entities.values() if me and x.config_entry_id == me.config_entry_id and x.domain == "sensor"}
+            # Solcasts egne nøgler (BJReplay/ha-solcast-solar); i dag først, også hvis brugeren valgte i morgen
+            ui["solcast"] = ",".join(dict.fromkeys(x for x in (dage.get("total_kwh_forecast_today", e), dage.get("total_kwh_forecast_tomorrow"), dage.get("total_kwh_forecast_d3")) if x))
+            ui["solprognose"] = SOLCAST
+    elif e == SOLCAST:  # Wattlas' egen Solcast-sensor: de valgte dage beholdes
+        ui["solcast"] = getattr(hass.states.get("input_text.wattlas_solcast_entiteter"), "state", "")
+        if ui["solcast"] in ("", "unknown", "unavailable"):
+            fejl["solprognose"] = "prognose_format"
+    elif (f := _prognose_fejl(hass, e)):
+        fejl["solprognose"] = f
+    return fejl
+
+
 def _forbindelse_fejl(hass, ui: dict, kraev_noegle: bool) -> dict[str, str]:
-    fejl = {}
+    fejl = _kilder(hass, ui)
     if not re.match(r"https?://", ui.get("emhass_adresse") or ""):
         fejl["emhass_adresse"] = "adresse"
     noegle = ui.get("emhass_noegle") or ""
     if (kraev_noegle or noegle) and (len(noegle) < 8 or not noegle.isprintable()):  # linjeskift mv. kan ikke stå i en HTTP-header
         fejl["emhass_noegle"] = "noegle"
-    if (f := _prognose_fejl(hass, ui.get("solprognose") or "")):
-        fejl["solprognose"] = f
     return fejl
 
 
@@ -169,7 +247,10 @@ def _tal_skema(felter: list[str], std: dict) -> vol.Schema:
 
 
 def _tal_fejl(felter: list[str], ui: dict) -> dict[str, str]:
-    return {k: "over_nul" for k in felter if k in PAAKRAEVET and not (ui.get(k) or 0) > 0}
+    fejl = {k: "over_nul" for k in felter if k in PAAKRAEVET and not (ui.get(k) or 0) > 0}
+    if 0 < (ui.get("sikring_a") or 0) < (ui.get("fase_graense_a") or 0):
+        fejl["sikring_a"] = "sikring_lav"
+    return fejl
 
 
 def _med_a(kanal, tal: dict) -> dict:
@@ -413,9 +494,12 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         info = []
         self.d["omdoeb"] = {}
         for ønsket, platform, navn, link, hjælp in [
-                ("sensor.energi_data_service", "energidataservice", "Energi Data Service", None, "Indstillinger → Markedsplads → søg *Energi Data Service* → Installér, genstart og tilføj den med priser inkl. moms."),
+                ("sensor.energi_data_service", "energidataservice", "Energi Data Service", None, "Indstillinger → Markedsplads → søg *Energi Data Service* (eller *Nordpool*) → Installér, genstart og tilføj den med priser inkl. moms."),
                 ("binary_sensor.workday_sensor", "workday", "Workday", LINK["workday"], "vælg Danmark.")]:
             if hass.states.get(ønsket) is not None:
+                continue
+            if platform == "energidataservice" and (np := _nordpool(hass)):
+                info.append(f"ℹ️ Priserne kommer fra **Nordpool** (`{np}`). Vælg den i næste trin.")
                 continue
             fundet = _platform_entitet(hass, ønsket.split(".")[0], platform)
             if fundet:  # findes under et andet navn (fx binary_sensor.workday_sensor_dk) – Wattlas giver den det navn, pakkerne bruger
@@ -432,9 +516,9 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             vis = ", ".join(f"`{e}`" for e in mangler[:8]) + (f" og {len(mangler) - 8} til" if len(mangler) > 8 else "")
             adv.append(f"⚠️ Inverteren mangler {len(mangler)} entiteter, som Wattlas bruger: {vis}. "
                        "Har din inverter-integration slået nogle fra, så slå dem til. Ellers kan dele af styringen mangle.")
-        prognoser = [s.entity_id for s in hass.states.async_all("sensor") if isinstance(s.attributes.get("forecast"), list)]
+        prognoser = [s.entity_id for s in hass.states.async_all("sensor") if isinstance(s.attributes.get("forecast"), list) or isinstance(s.attributes.get("detailedForecast"), list)]
         if not prognoser:
-            adv.append("⚠️ Ingen solprognose fundet – *Helios Forecast* fra Markedspladsen anbefales (se SOLPROGNOSE.md).")
+            adv.append("⚠️ Ingen solprognose fundet – *Helios Forecast* eller *Solcast* fra Markedspladsen (se SOLPROGNOSE.md).")
         if not hass.states.async_all("weather"):
             adv.append("⚠️ Ingen vejr-entitet fundet – tilføj fx Met.no.")
         if _database(hass) not in (None, "sqlite"):
@@ -474,6 +558,8 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required("emhass_adresse", default=self.d.get("emhass_adresse") or "http://homeassistant.local:5000"): sel.TextSelector(),
             vol.Required("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)),
             vol.Required("solprognose"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
+            vol.Optional("priser", description={"suggested_value": self.d.get("priser") or _nordpool(self.hass)}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
+            vol.Required("priser_uden_moms", default=False): sel.BooleanSelector(),
             vol.Required("vejr"): sel.EntitySelector(sel.EntitySelectorConfig(domain="weather")),
             vol.Optional("udetemperatur"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="temperature")),
         }))
@@ -531,7 +617,7 @@ class WattlasOptionsFlow(OptionsFlow):
     Inverteren (styrekanalen) skiftes ved at fjerne Wattlas og tilføje den igen."""
 
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="init", menu_options=["forbindelser", "batteri", "elnet", "netselskab", "priser", "elbil"]
+        return self.async_show_menu(step_id="init", menu_options=["forbindelser", "batteri", "elnet", "netselskab", "priser", "elbil", "lader"]
                                     + (["sonnen"] if self.config_entry.data.get("kanal") == "sonnen" else []))
 
     async def async_step_sonnen(self, user_input=None) -> ConfigFlowResult:
@@ -584,11 +670,16 @@ class WattlasOptionsFlow(OptionsFlow):
                         await self.hass.services.async_call("input_text", "set_value", {"entity_id": GAMLE[k], "value": v}, blocking=True)
                 return self.async_create_entry(data={})
         nu = {**{k: self._hjaelper("input_text", h) for k, h in TEKST.items()}, "emhass_adresse": self.config_entry.data.get("emhass_adresse")}
+        if nu.get("solprognose") == SOLCAST and nu.get("solcast"):
+            nu["solprognose"] = nu["solcast"].split(",")[0]  # vis den Solcast-sensor, brugeren valgte
+        moms = _faktor_med_moms(nu.get("pris") or "")
         d = lambda k: {"default": nu[k]} if nu.get(k) else {}  # noqa: E731
         return self.async_show_form(step_id="forbindelser", errors=fejl, data_schema=vol.Schema({
             vol.Required("emhass_adresse", **d("emhass_adresse")): sel.TextSelector(),
             vol.Optional("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)),
             vol.Required("solprognose", **d("solprognose")): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
+            vol.Optional("priser", description={"suggested_value": (nu.get("pris") or "").split("|")[0] or None}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
+            vol.Required("priser_uden_moms", default=moms): sel.BooleanSelector(),
             vol.Required("vejr", **d("vejr")): sel.EntitySelector(sel.EntitySelectorConfig(domain="weather")),
             vol.Optional("udetemperatur", **d("udetemperatur")): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="temperature")),
         }))
@@ -637,8 +728,9 @@ class WattlasOptionsFlow(OptionsFlow):
             return self.async_abort(reason="genstart_foerst")
         fejl = {}
         kan = self.config_entry.data.get("kanal") != "sonnen"  # Sonnen kan ikke holdes; prognosen uden bilen virker stadig
+        styret = (self.config_entry.data.get("lader") or {}).get("effekt")
         if user_input is not None:
-            lader = user_input.get("elbil_sensor") or ""
+            lader = styret or user_input.get("elbil_sensor") or ""  # styrer Wattlas laderen, skal målingen være dens (ellers "uden for målingen")
             if lader and _elbil_fejl(self.hass, lader, self.config_entry.data):
                 fejl = {"elbil_sensor": "elbil_sensor"}
             else:
@@ -650,9 +742,136 @@ class WattlasOptionsFlow(OptionsFlow):
         valgt = nu.state if nu.state.startswith("sensor.") else None
         foreslag = (user_input or {}).get("elbil_sensor") or valgt or (fundet[0][0] if len(fundet) == 1 else None)
         return self.async_show_form(step_id="elbil", errors=fejl, data_schema=vol.Schema({
-            vol.Optional("elbil_sensor", description={"suggested_value": foreslag}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="power")),
+            **({} if styret else {vol.Optional("elbil_sensor", description={"suggested_value": foreslag}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="power"))}),
             **({vol.Required("elbil_hold", default=til.state == "on" if valgt else True): sel.BooleanSelector()} if kan else {}),
         }), description_placeholders={"fundet": "; ".join(n for _, n in fundet) or "Ingen kendt lader fundet – vælg selv"})
+
+    # --- elbil-laderen: vælg den på listen → se, hvad Wattlas fandt → prøv den ---
+    async def async_step_lader(self, user_input=None) -> ConfigFlowResult:
+        if self.hass.states.get(LADER_TILSTAND) is None:
+            return self.async_abort(reason="genstart_foerst")
+        fundet = lader_find.fundne(self.hass)
+        if user_input is not None:
+            valg = user_input["lader"]
+            if valg == "ingen":
+                return await self._gem_lader(None)
+            if valg == "anden":
+                self._lader = lader_find.fra_enhed(self.hass, user_input["enhed"]) if user_input.get("enhed") else {"slags": "entiteter"}
+                return await self.async_step_lader_roller()
+            self._lader = dict(fundet[valg][1])
+            return await self.async_step_lader_ok()
+        valg = [sel.SelectOptionDict(value=k, label=n) for k, (n, _) in sorted(fundet.items(), key=lambda x: x[1][0])]
+        valg += [sel.SelectOptionDict(value="anden", label="Min lader er ikke på listen"), sel.SelectOptionDict(value="ingen", label="Wattlas skal ikke styre en lader")]
+        return self.async_show_form(step_id="lader", data_schema=vol.Schema({
+            vol.Required("lader", default=next(iter(fundet), "anden")): sel.SelectSelector(sel.SelectSelectorConfig(options=valg, mode=sel.SelectSelectorMode.LIST)),
+            vol.Optional("enhed"): sel.DeviceSelector()}))
+
+    async def async_step_lader_ok(self, user_input=None) -> ConfigFlowResult:
+        d, fejl = self._lader, {}
+        til, strom = lader_find.kan(self.hass, d)
+        if user_input is not None:
+            d["faser"], d["maks_a"] = int(user_input["faser"]), int(user_input["maks_a"])
+            for k in ("bil_soc", "bil_stik", "bil_km", "bil_kwh"):
+                d.pop(k, None)
+            if soc := user_input.get("bil_soc"):
+                d.update(lader_find.bil_fra(self.hass, soc), bil_kwh=float(user_input.get("bil_kwh") or 0))
+                if not 5 <= d["bil_kwh"] <= 250:
+                    fejl = {"bil_kwh": "bil_kwh"}
+            if not fejl:
+                return await (self.async_step_lader_roller() if user_input.get("ret") else self.async_step_lader_proev())
+        s = self.hass.states.get(d.get("strom", ""))
+        loft = int(min(32, max(6, float((s and s.attributes.get("max")) or (32 if d.get("slags") in ("easee", "ocpp") else 16)))))
+        ja = lambda x: "✓" if x else "–"  # noqa: E731
+        return self.async_show_form(step_id="lader_ok", errors=fejl, data_schema=vol.Schema({
+            vol.Required("faser", default=str(d.get("faser") or 3)): sel.SelectSelector(sel.SelectSelectorConfig(options=["3", "1"], translation_key="faser")),
+            vol.Required("maks_a", default=d.get("maks_a") or min(16, loft)): sel.NumberSelector(sel.NumberSelectorConfig(min=6, max=loft, step=1, unit_of_measurement="A", mode=sel.NumberSelectorMode.BOX)),
+            vol.Optional("bil_soc", description={"suggested_value": d.get("bil_soc")}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="battery")),
+            vol.Optional("bil_kwh", description={"suggested_value": d.get("bil_kwh")}): sel.NumberSelector(sel.NumberSelectorConfig(min=5, max=250, step=1, unit_of_measurement="kWh", mode=sel.NumberSelectorMode.BOX)),
+            vol.Required("ret", default=False): sel.BooleanSelector()}),
+            description_placeholders={"effekt": ja(d.get("effekt")), "status": ja(d.get("status")), "til": ja(til), "strom": ja(strom)})
+
+    async def async_step_lader_roller(self, user_input=None) -> ConfigFlowResult:
+        d, fejl = self._lader, {}
+        if user_input is not None:
+            ny = {**{k: v for k, v in d.items() if k not in ("effekt", "status", "til_fra", "strom", "start", "stop", "omvendt", "til_valg", "fra_valg")}, **user_input}
+            if _elbil_fejl(self.hass, ny["effekt"], self.config_entry.data):
+                fejl["effekt"] = "elbil_sensor"
+            elif not lader_find.kan(self.hass, ny)[0]:
+                fejl["base"] = "lader_ingen_styring"
+            elif (ny.get("til_fra") or "").startswith("select."):
+                muligt = getattr(self.hass.states.get(ny["til_fra"]), "attributes", {}).get("options") or []
+                par = next(((t, f) for t, f in lader_find.VALG if t in muligt and f in muligt), None)
+                if par is None:
+                    fejl["til_fra"] = "lader_valg"
+                else:
+                    ny["til_valg"], ny["fra_valg"] = par
+            if not fejl:
+                self._lader = ny
+                return await self.async_step_lader_ok()
+            d = ny
+        felt = lambda k, dom, **x: (vol.Required(k) if k == "effekt" and not d.get(k) else (vol.Required if k == "effekt" else vol.Optional)(k, description={"suggested_value": d.get(k)}),  # noqa: E731
+                                    sel.EntitySelector(sel.EntitySelectorConfig(domain=dom, **x)))
+        felter = [felt("effekt", "sensor", device_class="power"), felt("status", ["sensor", "binary_sensor"])]
+        if d.get("slags") == "entiteter":
+            felter += [felt("til_fra", ["switch", "input_boolean", "select"]), (vol.Optional("omvendt", default=bool(d.get("omvendt"))), sel.BooleanSelector()),
+                       felt("strom", "number"), felt("start", "button"), felt("stop", "button")]
+        return self.async_show_form(step_id="lader_roller", errors=fejl, data_schema=vol.Schema(dict(felter)))
+
+    async def async_step_lader_proev(self, user_input=None) -> ConfigFlowResult:
+        if user_input is not None:
+            if user_input["proev"]:
+                return await self.async_step_lader_koer()
+            return await self._gem_lader({**self._lader, "proevet": False})
+        return self.async_show_form(step_id="lader_proev", data_schema=vol.Schema({vol.Required("proev", default=True): sel.BooleanSelector()}))
+
+    async def async_step_lader_koer(self, user_input=None) -> ConfigFlowResult:
+        if getattr(self, "_opgave", None) is None:
+            async def koer() -> dict:
+                await lader.afslut(self.hass)  # kun én styrer laderen ad gangen
+                try:
+                    return await lader_find.proev(self.hass, self._lader)
+                finally:
+                    await lader.aktiver(self.hass, self.config_entry)
+            self._opgave = self.hass.async_create_task(koer())
+        if not self._opgave.done():
+            return self.async_show_progress(step_id="lader_koer", progress_action="lader_proev", progress_task=self._opgave)
+        return self.async_show_progress_done(next_step_id="lader_resultat")
+
+    async def async_step_lader_resultat(self, user_input=None) -> ConfigFlowResult:
+        r, self._opgave = (self._opgave.result(), None) if getattr(self, "_opgave", None) else (self._svar, None)
+        self._svar = r
+        if r.get("fejl"):
+            tekst = LADER_FEJL.get(r["fejl"], f"Laderen tog ikke imod: {r['fejl']}")
+            kan = False
+        else:
+            kan = r["start"] and r["stop"]
+            ja = lambda x: "✓ virker" if x else "✗ virker ikke"  # noqa: E731
+            styrer_strom = lader_find.kan(self.hass, self._lader)[1]
+            tekst = f"Start: {ja(r['start'])} · Strøm: {ja(r['strom']) if styrer_strom else 'kan laderen ikke'} · Stop: {ja(r['stop'])}"
+        if kan and user_input is None:
+            return self.async_show_form(step_id="lader_resultat", data_schema=vol.Schema({}), description_placeholders={"svar": tekst, "raad": "Tryk *Send* for at gemme."})
+        if kan:
+            d = {**self._lader, "proevet": True}
+            if lader_find.kan(self.hass, d)[1] and not r["strom"]:  # strømmen kunne ikke bekræftes: kun tænd/sluk
+                if d["slags"] != "entiteter" or not (d.get("til_fra") or d.get("start")):
+                    return self.async_abort(reason="lader_ikke_styret", description_placeholders={"svar": tekst})
+                d.pop("strom", None)
+            return await self._gem_lader(d)
+        return self.async_abort(reason="lader_ikke_styret", description_placeholders={"svar": tekst})
+
+    async def _gem_lader(self, d: dict | None) -> ConfigFlowResult:
+        data = {k: v for k, v in self.config_entry.data.items() if k != "lader"}
+        if d:
+            data["lader"] = d
+            await self.hass.services.async_call("input_number", "set_value", {"entity_id": LADER_MAKS, "value": d.get("maks_a") or 16}, blocking=True)
+            await self.hass.services.async_call("input_text", "set_value", {"entity_id": ELBIL, "value": d["effekt"]}, blocking=True)
+            maal = self.hass.states.get(LADER_MAAL)
+            if d.get("bil_soc") and maal is not None and maal.state in ("50", "50.0"):  # aldrig sat: 80 % er et godt sted at begynde
+                await self.hass.services.async_call("input_number", "set_value", {"entity_id": LADER_MAAL, "value": 80}, blocking=True)
+        await self.hass.services.async_call("input_select", "select_option", {"entity_id": LADER_TILSTAND, "option": "fra"}, blocking=True)
+        self.hass.config_entries.async_update_entry(self.config_entry, data=data)
+        await lader.aktiver(self.hass, self.config_entry)
+        return self.async_create_entry(data={})
 
     async def async_step_netselskab_vis(self, user_input=None) -> ConfigFlowResult:
         """Vis de nye tal, før de gemmes."""

@@ -20,8 +20,8 @@ input_number:
 
 template:
   - binary_sensor:
-      # Faserne eller importloftet er overskredet, mens forbrugeren kører. Netladningen viger først (inden for 30 s) – er det ikke nok
-      # efter et minut, slukkes forbrugeren.
+      # Hovedsikringen er overskredet, mens forbrugeren kører. Netladningen viger først (inden for 30 s) – er det ikke nok efter et minut,
+      # slukkes forbrugeren. Er hovedsikringen ikke sat, gælder fasegrænsen og importloftet.
       - name: Wattlas forbruger overbelaster
         unique_id: wattlas_forbruger1_overbelaster
         default_entity_id: binary_sensor.wattlas_forbruger1_overbelaster
@@ -29,12 +29,28 @@ template:
         delay_on:
           seconds: 60
         state: >-
-          {% set ns = namespace(over=states('sensor.emhass_m_grid_out_total_power') | float(0) > states('input_number.wattlas_import_graense_w') | float(0)) %}
+          {% set g = states('input_number.wattlas_fase_graense_a') | float(0) %}{% set sik = [states('input_number.wattlas_sikring_a') | float(0), g] | max %}
+          {% set ns = namespace(over=states('sensor.emhass_m_grid_out_total_power') | float(0) > states('input_number.wattlas_import_graense_w') | float(0) * (sik / g if g > 0 else 1)) %}
           {% for i in range(1, 4) %}
-            {% if states('sensor.emhass_m_external_ct_w_l' ~ i) | float(0) > states('input_number.wattlas_fase_graense_a') | float(0) * states('sensor.emhass_m_grid_current_v_l' ~ i) | float(230) %}{% set ns.over = true %}{% endif %}
+            {% if states('sensor.emhass_m_external_ct_w_l' ~ i) | float(0) > sik * states('sensor.emhass_m_grid_current_v_l' ~ i) | float(230) %}{% set ns.over = true %}{% endif %}
           {% endfor %}
           {{ is_state('input_boolean.wattlas_forbruger1_aktiv', 'on') and is_state('binary_sensor.emhass_ui_data_frisk', 'on')
              and is_state(states('input_text.wattlas_forbruger1_entitet'), 'on') and ns.over }}
+      # Over reguleringsgrænsen, men under hovedsikringen: det tåler en sikring længe. Først efter 10 minutter slukkes forbrugeren.
+      - name: Wattlas forbruger over reguleringsgrænsen
+        unique_id: wattlas_forbruger1_over_regulering
+        default_entity_id: binary_sensor.wattlas_forbruger1_over_regulering
+        device_class: problem
+        delay_on:
+          minutes: 10
+        state: >-
+          {% set g = states('input_number.wattlas_fase_graense_a') | float(0) %}
+          {% set ns = namespace(over=states('sensor.emhass_m_grid_out_total_power') | float(0) > states('input_number.wattlas_import_graense_w') | float(0)) %}
+          {% for i in range(1, 4) %}
+            {% if states('sensor.emhass_m_external_ct_w_l' ~ i) | float(0) > g * states('sensor.emhass_m_grid_current_v_l' ~ i) | float(230) %}{% set ns.over = true %}{% endif %}
+          {% endfor %}
+          {{ states('input_number.wattlas_sikring_a') | float(0) > g and is_state('input_boolean.wattlas_forbruger1_aktiv', 'on')
+             and is_state('binary_sensor.emhass_ui_data_frisk', 'on') and is_state(states('input_text.wattlas_forbruger1_entitet'), 'on') and ns.over }}
 
 automation:
   # Slukket, når planen ikke er frisk. Tændes kun med friske målinger og plads på hver fase.
@@ -88,17 +104,19 @@ automation:
       - if:
           - condition: template
             value_template: >-
-              {{ aktiv and koerer and (not oensket or is_state('binary_sensor.emhass_ui_datafejl', 'on') or is_state('binary_sensor.wattlas_forbruger1_overbelaster', 'on')) }}
+              {{ aktiv and koerer and (not oensket or is_state('binary_sensor.emhass_ui_datafejl', 'on') or is_state('binary_sensor.wattlas_forbruger1_overbelaster', 'on')
+                 or is_state('binary_sensor.wattlas_forbruger1_over_regulering', 'on')) }}
         then:
           - action: homeassistant.turn_off
             target: {entity_id: "{{ ent }}"}
           - if:
               - condition: state
-                entity_id: binary_sensor.wattlas_forbruger1_overbelaster
+                entity_id: [binary_sensor.wattlas_forbruger1_overbelaster, binary_sensor.wattlas_forbruger1_over_regulering]
+                match: any
                 state: "on"
             then:
               - action: logbook.log
-                data: {name: Wattlas, entity_id: input_boolean.wattlas_forbruger1_aktiv, message: fleksibel forbruger slukket – fasegrænsen eller importloftet var overskredet i et minut}
+                data: {name: Wattlas, entity_id: input_boolean.wattlas_forbruger1_aktiv, message: fleksibel forbruger slukket – der var for lidt plads på faserne eller under importloftet}
       # mangler der plads, viger netladningen – men kun, hvis det er nok (emhass_reguler læser reserven, højst i 5 min.)
       - variables:
           reserve: >-
