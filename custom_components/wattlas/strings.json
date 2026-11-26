@@ -117,7 +117,7 @@
       },
       "netselskab": {
         "title": "Netselskab",
-        "description": "Vælg dit netselskab, så henter Wattlas nettarif, elafgift og Energinets tariffer hver dag fra Energinets åbne liste (husholdninger, *Nettarif C*), også når de skifter ved sommer, vinter og nytår. Elselskabets tillæg og gebyrer taster du selv.\n\nStår dit netselskab der ikke, så vælg *Jeg taster selv tallene*.\n\nKilde: Energinet (www.energidataservice.dk)\n\n{grund}",
+        "description": "Vælg dit netselskab, så henter Wattlas nettarif, elafgift og Energinets tariffer hver dag fra Energinets åbne liste (husholdninger, *Nettarif C*), også når de skifter ved sommer, vinter og nytår. Elselskabets tillæg og gebyrer taster du selv.\n\nStår dit netselskab der ikke, så vælg *Jeg taster selv tallene*.\n\nKilde: Energinet (Energi Data Service)\n\n{grund}",
         "data": {
           "netselskab": "Netselskab"
         }
@@ -401,7 +401,7 @@
       },
       "netselskab": {
         "title": "Netselskab",
-        "description": "Vælg dit netselskab, så henter Wattlas nettarif, elafgift og Energinets tariffer hver dag fra Energinets åbne liste (husholdninger, *Nettarif C*), også når de skifter ved sommer, vinter og nytår. Elselskabets tillæg og gebyrer taster du selv.\n\nStår dit netselskab der ikke, så vælg *Jeg taster selv tallene*.\n\nKilde: Energinet (www.energidataservice.dk)\n\n{grund}",
+        "description": "Vælg dit netselskab, så henter Wattlas nettarif, elafgift og Energinets tariffer hver dag fra Energinets åbne liste (husholdninger, *Nettarif C*), også når de skifter ved sommer, vinter og nytår. Elselskabets tillæg og gebyrer taster du selv.\n\nStår dit netselskab der ikke, så vælg *Jeg taster selv tallene*.\n\nKilde: Energinet (Energi Data Service)\n\n{grund}",
         "data": {
           "netselskab": "Netselskab"
         }
