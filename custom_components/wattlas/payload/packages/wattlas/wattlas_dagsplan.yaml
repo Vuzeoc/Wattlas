@@ -22,8 +22,8 @@ template:
               {%- set l = (s.attributes.get(attr) or []) if s is not none and pv is not none and (as_timestamp(pv.last_reported) - as_timestamp(s.last_reported)) | abs < 720 else [] -%}
               {{ dict(zip(l | map(attribute='date') | map('string') | list, l | map(attribute=key) | list)) | to_json }}{% endmacro %}
             {% set L = serie('sensor.p_load_forecast', 'forecasts', 'p_load_forecast') | from_json %}
-            {% set D0 = serie('sensor.p_deferrable0', 'deferrables_schedule', 'p_deferrable0') | from_json %}
-            {% set D1 = serie('sensor.wattlas_lader_plan', 'deferrables_schedule', 'wattlas_lader_plan') | from_json %}
+            {% set D0 = serie('sensor.' ~ 'p_deferrable0', 'deferrables_schedule', 'p_deferrable0') | from_json %}
+            {% set D1 = serie('sensor.' ~ 'wattlas_lader_plan', 'deferrables_schedule', 'wattlas_lader_plan') | from_json %}
             {% set G = serie('sensor.p_grid_forecast', 'forecasts', 'p_grid_forecast') | from_json %}
             {% set K = serie('sensor.unit_load_cost', 'unit_load_cost_forecasts', 'unit_load_cost') | from_json %}
             {% set S = serie('sensor.unit_prod_price', 'unit_prod_price_forecasts', 'unit_prod_price') | from_json %}

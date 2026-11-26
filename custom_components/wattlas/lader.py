@@ -288,7 +288,10 @@ class Styring:
         rum, over, volt = self._plads(egen if self.sendt is None else min(egen, self.sendt * antal * MAAL_V), antal)
         timer, klar, ny_periode = self._timer()
         ladet = await self._tael(nu, effekt, tilsluttet, ny_periode)
-        maks = min(int(self._v("input_number.wattlas_lader_maks_a", 0)), int(self.d.get("maks_a") or 32))  # aldrig over opsætningens (laderens) grænse
+        graense = int(self.d.get("maks_a") or 32)
+        maks = min(int(self._v("input_number.wattlas_lader_maks_a", 0)), graense)  # aldrig over opsætningens (laderens) grænse
+        if self._v("input_number.wattlas_lader_maks_a", 0) > graense:  # appens + når op til hjælperens 32: vis den grænse, der gælder
+            await self.hass.services.async_call("input_number", "set_value", {"entity_id": "input_number.wattlas_lader_maks_a", "value": graense}, blocking=True)
         mini = max(6, int(self.d.get("min_a") or 6))
         fast = self.d["slags"] == "entiteter" and not self.d.get("strom")
         if fast:  # kan ikke skrues ned: den trækker sin egen strøm, fuld eller ingenting

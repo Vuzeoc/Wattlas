@@ -30,8 +30,8 @@ gamle, regner Wattlas det ladede med.
 | **Lad nu** | fuld strøm med det samme |
 | **Klar til tid** | så mange kWh, du vælger, i de billigste timer og færdig til klokkeslættet. Nås det ikke ellers, lades der uanset prisen. Imellem lader den på gratis sol (overskud, der ellers sælges), når der er nok til laveste strøm. Ved *Energi* står, hvor længe det cirka tager ved fuld strøm |
 | **Kun sol** | kun strøm, huset ikke selv bruger. Kræver overskud til laderens laveste strøm (6 A: ca. 1,4 kW på én fase, 4,1 kW på tre) |
-| **Stop** | Wattlas holder laderen stoppet – også hvis den startes et andet sted |
-| **Fra** | Wattlas slipper laderen. Brug dens egen app |
+| **Stop** | stopper ladningen og holder laderen stoppet – også hvis den startes et andet sted |
+| **Slip laderen** | Wattlas slipper laderen og sender intet. **En ladning, der er i gang, kører videre** – vælg *Stop* for at stoppe. Brug laderens eller bilens egen app |
 
 **Kun fra elnettet** (kontakt på fanen Elbil): husbatteriet aflader ikke, mens bilen lader. Bilen får strøm fra nettet og solen, og batteriet må stadig lades.
 Imens køber hele huset fra nettet, også i dyre timer. Slået fra følger batteriet planen som ellers og kan også dække bilen.

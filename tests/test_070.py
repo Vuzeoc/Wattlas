@@ -80,6 +80,12 @@ async def main():
     await systemtest_test()
     await sommertid_test()
     ladetid_test()
+    # EMHASS' lastsensorer findes kun, mens lasten er i planen: står navnet helt i en skabelon, melder Spook "ukendt entitet" (skal deles: 'sensor.' ~ '…')
+    import re
+    for f in (REPO / 'packages/wattlas').glob('*.yaml'):
+        fund = re.findall(r"sensor\.(?:p_deferrable\d|wattlas_lader_plan)\b", '\n'.join(x.split('#')[0] for x in f.read_text(encoding='utf-8').splitlines()))
+        assert not fund, (f.name, fund)
+    print('Spook: ingen hele lastnavne i skabeloner: OK')
     print('OK – 0.7.0')
 
 

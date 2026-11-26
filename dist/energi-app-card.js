@@ -507,13 +507,13 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
     lader() {
       const st = this.st('sensor.wattlas_lader'), x = st?.attributes || {}, til = this.st('input_select.wattlas_lader_tilstand')?.state || 'fra';
       const tal = id => { const n = parseFloat(this.st(id)?.state); return isNaN(n) ? 0 : n; };
-      const GRUND = {fra: 'Wattlas rører ikke laderen', stop: 'Stoppet', starter: 'Starter', lader: 'Lader', faserne: 'Lader – skruet ned, så faserne holder', 'lidt plads': 'Lader på laveste strøm – lidt plads på faserne',
+      const GRUND = {fra: 'Wattlas har sluppet laderen', stop: 'Stoppet', starter: 'Starter', lader: 'Lader', faserne: 'Lader – skruet ned, så faserne holder', 'lidt plads': 'Lader på laveste strøm – lidt plads på faserne',
         'ingen plads': 'Venter: for lidt plads på faserne', 'over sikring': 'Holder igen: en fase er over hovedsikringen', hviler: 'Holder en kort pause', venter: 'Venter på de billige timer', sol: 'Venter på sol',
         'færdig': 'Færdig', frakoblet: 'Ingen bil tilsluttet', 'status ukendt': 'Laderen svarer ikke lige nu', 'målinger mangler': 'Venter: husets målinger mangler', 'bilen tager ikke imod': 'Bilen tager ikke imod (fuld, eller dens egen tidsplan)',
         'effekten mangler': 'Stoppet: laderen melder ikke sin effekt. Prøver igen om lidt', 'uden for målingen': 'Stoppet: laderen ses ikke i husets måling', 'grænser': 'Højeste strøm er ikke sat'};
-      const VALG = [['lad_nu', 'Lad nu', 'mdi:flash'], ['klar', 'Klar til tid', 'mdi:clock-end'], ['sol', 'Kun sol', 'mdi:weather-sunny'], ['stop', 'Stop', 'mdi:stop'], ['fra', 'Fra', 'mdi:hand-back-right-off']];
+      const VALG = [['lad_nu', 'Lad nu', 'mdi:flash'], ['klar', 'Klar til tid', 'mdi:clock-end'], ['sol', 'Kun sol', 'mdi:weather-sunny'], ['stop', 'Stop', 'mdi:stop'], ['fra', 'Slip laderen', 'mdi:hand-back-right-off']];
       const FORKLAR = {lad_nu: 'Lader med fuld strøm med det samme. Skrues kun ned, når faserne kræver det.', klar: 'Lægger energien i de billigste timer og er færdig til tiden. Nås det ikke ellers, lades der uanset prisen. Imellem tager den gratis sol.',
-        sol: 'Lader kun med strøm, huset ikke selv bruger. Kræver overskud til mindst laveste strøm.', stop: 'Wattlas holder laderen stoppet.', fra: 'Wattlas slipper laderen. Brug dens egen app.'};
+        sol: 'Lader kun med strøm, huset ikke selv bruger. Kræver overskud til mindst laveste strøm.', stop: 'Stopper ladningen og holder laderen stoppet – også hvis den startes et andet sted.', fra: 'Wattlas slipper laderen og sender intet. En ladning, der er i gang, kører videre – vil du stoppe den, så vælg Stop. Brug laderens eller bilens egen app.'};
       const plan = (this.a('sensor.wattlas_lader_plan', 'deferrables_schedule') || []).filter(r => parseFloat(r.wattlas_lader_plan ?? r.p_deferrable1 ?? r.p_deferrable0) > 50).map(r => new Date(r.date)).filter(d => d > Date.now() - 18e5);
       const kl = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
       const tid = (this.st('input_datetime.wattlas_lader_klar')?.state || '07:00:00').slice(0, 5), kw = Number(x.effekt_w) > 50 ? nf(x.effekt_w / 1000, 1) + ' kW' : '0 kW';

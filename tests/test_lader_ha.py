@@ -411,6 +411,7 @@ async def main():
     # aldrig over opsætningens højeste, selv om appens tal står højere
     await ny(maks_a=13); await saet('input_number', 'input_number.wattlas_lader_maks_a', value=20); await til('lad_nu'); await trin(2)
     assert fysik['a'] == 13, fysik
+    assert float(hass.states.get('input_number.wattlas_lader_maks_a').state) == 13, 'appens tal sættes tilbage til den grænse, der gælder'
     await saet('input_number', 'input_number.wattlas_lader_maks_a', value=16)
     # kun strøm-tal: tallet står allerede på 0, men laderen trækker – vagten skriver igen
     await ny(til_fra=None); await til('lad_nu'); await trin(2); await til('stop'); await trin(2)

@@ -2,6 +2,13 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.7.1
+- **Rettet: elbilens højeste strøm i appen.** *Højeste strøm* på fanen Elbil kunne trykkes op til 32 A, selv om laderen er sat op til
+  fx 16 A. Wattlas har hele tiden brugt den laveste af de to, men nu sættes tallet tilbage, så appen viser den grænse, der gælder
+- **Tydeligere: *Fra* hedder nu *Slip laderen*** på fanen Elbil. Den stopper ikke en ladning, der er i gang – Wattlas holder bare op
+  med at styre. Vil du stoppe, så vælg *Stop* (prøvet på en rigtig lader: strømmen var væk efter ca. 10 sekunder)
+- **Rettet: falsk advarsel fra Spook** om ukendte entiteter i *Wattlas dagsplan* (EMHASS' lastsensorer findes kun, mens lasten er i planen)
+
 ## 0.7.0
 - **Hvad-hvis: et andet batteri.** Skriv en anden batteristørrelse (0 = intet batteri) og se, hvad planen for de næste timer ville koste.
   Strømmen i batteriet nu og reserven regnes i kWh, så det større batteri ikke får gratis strøm. Batteriets pris er ikke med, og et døgn i
