@@ -22,13 +22,14 @@ from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.start import async_at_started
 
-from . import emhass, installer, lader, tariffer
+from . import emhass, installer, lader, tariffer, vagt
 from .config_flow import VERSION, priser_fejl
 from .const import DOMAIN, GAMLE, GENSTART, GYLDIG, STANDARD, TEKST
 
 _LOGGER = logging.getLogger(__name__)
 STYRING = "input_boolean.emhass_styring_aktiv"
 FULD = "input_boolean.emhass_fuld_opladning"
+VARMTVAND = "input_boolean.wattlas_varmtvand"
 VENT_S = 60  # så længe ventes der ved fjernelse på, at inverteren er sat til selvforbrug
 # platforme, Wattlas' YAML-pakker opretter entiteter med (deres registreringer bliver liggende, når filerne skifter)
 HER = Path(__file__).parent
@@ -228,6 +229,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(async_at_started(hass, tarif))
     # shortcut: ny dato ses op til en time efter midnat; et fast klokkeslæt ville få alle installationer til at kalde Energinet samtidig
     entry.async_on_unload(async_track_time_interval(hass, tarif, timedelta(hours=1)))
+    # vagt mod anden styring: ved start og hver time (automationer kan være genindlæst)
+    entry.async_on_unload(async_at_started(hass, vagt.tjek))
+    async def vagt_tjek(_nu) -> None:
+        await vagt.tjek(hass)
+    entry.async_on_unload(async_track_time_interval(hass, vagt_tjek, timedelta(hours=1)))
     await lader.aktiver(hass, entry)
     return True
 
@@ -237,6 +243,29 @@ def _tal(v: str) -> float:
         return float(v)
     except ValueError:
         return 0.0
+
+
+async def _varmtvand_tilbage(hass: HomeAssistant) -> None:
+    """Har Wattlas hævet varmtvandsbeholderens mål, sættes brugerens eget tilbage (automationen forsvinder ved genstarten)."""
+    if hass.states.get(VARMTVAND) is not None:
+        await hass.services.async_call("input_boolean", "turn_off", {"entity_id": VARMTVAND}, blocking=True)
+    gemt = _tal(s.state) if (s := hass.states.get("input_number.wattlas_varmtvand_brugerens")) else 0.0
+    ent = s.state if (s := hass.states.get("input_text.wattlas_varmtvand_entitet")) else ""
+    if gemt <= 0 or not re.fullmatch(r"(water_heater|number)\.[a-z0-9_]+", ent):
+        return
+    vh = ent.startswith("water_heater.")
+    st = hass.states.get(ent)
+    try:
+        if st is None or st.state in ("unavailable", "unknown"):  # HA springer en utilgængelig entitet over uden fejl
+            raise RuntimeError("beholderen svarer ikke")
+        await hass.services.async_call("water_heater" if vh else "number", "set_temperature" if vh else "set_value",
+                                       {"entity_id": ent, "temperature" if vh else "value": gemt}, blocking=True)
+        await hass.services.async_call("input_number", "set_value", {"entity_id": "input_number.wattlas_varmtvand_brugerens", "value": 0}, blocking=True)
+    except Exception as e:  # noqa: BLE001 – fjernelsen skal gennemføres alligevel; brugeren får besked
+        _LOGGER.warning("Wattlas: kunne ikke sætte varmtvandsbeholderens mål tilbage til %s: %s", gemt, e)
+        await hass.services.async_call("persistent_notification", "create", {
+            "notification_id": "wattlas_varmtvand", "title": "Sæt varmtvandsbeholderen tilbage",
+            "message": f"Wattlas havde hævet målet på `{ent}` og kunne ikke sætte det tilbage ({e}). Sæt det selv til {gemt:g} °C."}, blocking=True)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -256,8 +285,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
             await asyncio.sleep(1)
     # stadig "overtaget": inverteren svarede ikke (fx offline), så den står i det sidste program
     selvforbrug = not hass.states.is_state("input_boolean.emhass_har_overtaget", "on")
+    await _varmtvand_tilbage(hass)
     backup = await hass.async_add_executor_job(installer.afinstaller, hass.config.config_dir)
-    for i in ("genstart", "opdatering_fejlede", "noegle_mangler", "priser_dobbelt", "tarif_fejl"):
+    for i in ("genstart", "opdatering_fejlede", "noegle_mangler", "priser_dobbelt", "tarif_fejl", vagt.ISSUE):
         ir.async_delete_issue(hass, DOMAIN, i)
     if backup:
         _LOGGER.warning("Wattlas er fjernet. Filerne ligger i %s. Genstart Home Assistant.", backup)

@@ -40,7 +40,10 @@ print('Plads på faserne og under importloftet: OK')
 # --- tilstande ---
 for til, kw, svar in (('fra', {}, None), ('vrøvl', {}, None), ('stop', {}, 0), ('lad_nu', {}, 16), ('klar', {}, 0), ('klar', {'plan': True}, 16), ('klar', {'noed': True}, 16),
                       ('klar', {'plan': True, 'noed': True, 'faerdig': True}, 0), ('sol', {}, 0), ('sol', {'sol_a': 5.9}, 0), ('sol', {'sol_a': 9.7}, 9), ('sol', {'sol_a': 40}, 16),
-                      ('sol', {'sol_a': float('nan')}, 0)):
+                      ('sol', {'sol_a': float('nan')}, 0),
+                      # "klar til tid": gratis sol uden for planens timer, også når målet er nået – men ikke over solens grænse
+                      ('klar', {'sol_a': 9.7}, 9), ('klar', {'sol_a': 5.9}, 0), ('klar', {'faerdig': True, 'sol_a': 9.7}, 9), ('klar', {'sol_a': 9.7, 'sol_faerdig': True}, 0),
+                      ('klar', {'plan': True, 'sol_a': 9.7, 'sol_faerdig': True}, 16), ('sol', {'sol_a': 40, 'sol_faerdig': True}, 16), ('lad_nu', {'sol_faerdig': True}, 16)):
     assert beslut(ind(tilstand=til, **kw), Husk())[0] == svar, (til, kw)
 assert beslut(ind(tilsluttet=False), Husk()) == (0, 'frakoblet') and beslut(ind(tilsluttet=None), Husk()) == (0, 'status ukendt')
 assert beslut(ind(maks_a=5), Husk())[0] == 0 and beslut(ind(maks_a=0, min_a=0), Husk())[0] == 0  # grænserne giver ikke mening

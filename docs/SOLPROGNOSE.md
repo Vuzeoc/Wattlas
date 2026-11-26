@@ -33,6 +33,14 @@ Appen bruger også disse søstersensorer, hvis de findes. Styringen virker uden 
 ## Solcast
 Har du **Solcast PV Forecast** (HACS, BJReplay/ha-solcast-solar), så vælg dens *prognose i dag* i opsætningen (Forbindelser og prognoser).
 Wattlas finder selv i morgen og dag 3 og deler Solcasts halve timer op i kvarterer. Planen bruger Solcasts mest sandsynlige tal (`pv_estimate`).
+Vil du hellere regne med lidt mindre sol på usikre dage, så skru op for **Forsigtig solprognose** (Styring → Ferie og storm): 50 % ligger halvvejs
+mod Solcasts forsigtige bud (`pv_estimate10`). På klare dage er buddene næsten ens, så det koster mest på dage, hvor Solcast er i tvivl.
+
+## Skygger i solprognosen (prøvet og fravalgt)
+Vi har bygget og testet en indlæring af skygger: Wattlas sammenlignede hver nat prognosen med den målte sol time for time over de sidste
+21 dage og rettede planens prognose derefter. På et anlæg i oktober-november gav det kun ca. 2 % mindre fejl time for time og ca. 7 % pr.
+døgn, så den er taget ud igen – den krævede mere vedligehold, end besparelsen var værd. Helios og Solcast regner prognosen godt nok, når de
+har lært anlægget at kende og er sat korrekt op.
 
 ## Vil du bruge en anden prognose
 

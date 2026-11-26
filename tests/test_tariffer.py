@@ -237,8 +237,8 @@ async def main():
     entry = hass.config_entries.async_entries('wattlas')[0]
     idag('2031-01-17')
     for f, i in planlagt:
-        if i == timedelta(hours=1):
-            await f(None)
+        if i == timedelta(hours=1) and asyncio.iscoroutine(r := f(None)):  # vagten mod anden styring kører også hver time (ikke async)
+            await r
     assert len(s.kald) == 2, 'skal prøves hver time'
     idag('2031-01-16')
     print('Daglig opdatering: OK')

@@ -76,6 +76,7 @@ LADER_FEJL = {"maalinger": "Wattlas kan ikke se husets faser lige nu. Prøv igen
               "effekt": "Laderens effekt kan ikke læses lige nu.", "effekt_ingen": "Laderen melder ikke sin effekt, mens den lader, så Wattlas kan ikke se, om den adlyder. Bruger du OCPP: genindlæs integrationen, eller vælg målingerne selv (Power.Active.Import).",
               "lader_allerede": "Bilen lader allerede. Stop den i laderens app, og prøv igen."}
 LADER_TILSTAND, LADER_MAKS, LADER_MAAL = "input_select.wattlas_lader_tilstand", "input_number.wattlas_lader_maks_a", "input_number.wattlas_lader_maal"
+LADER_SOL = "input_number.wattlas_lader_sol_maal"
 
 
 def _fundne_ladere(hass) -> list[tuple[str, str]]:
@@ -147,6 +148,17 @@ def _prognose_fejl(hass, entity_id: str) -> str | None:
 
 SOLCAST = "sensor.wattlas_solprognose_solcast"
 NORDPOOL_ENHED = {"kWh": 1, "MWh": 0.001, "Wh": 1000}
+
+
+def _kilde_filter(hass, slags: str, valgt: str | None = None) -> dict:
+    """Kun sensorer, der kan bruges som solprognose (Helios' forecast, Solcasts detailedForecast) eller spotpris (raw_today), plus det valgte.
+    Findes ingen, vises alle sensorer som før – så ingen låses ude."""
+    nøgler = ("forecast", "detailedForecast") if slags == "sol" else ("raw_today",)
+    ok = {s.entity_id for s in hass.states.async_all("sensor")
+          if not s.entity_id.startswith("sensor.wattlas_") and any(isinstance(s.attributes.get(k), list) for k in nøgler)}
+    if ok and valgt and hass.states.get(valgt) is not None:
+        ok.add(valgt)
+    return {"include_entities": sorted(ok)} if ok else {}
 
 
 def _kilder(hass, ui: dict) -> dict[str, str]:
@@ -557,8 +569,9 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="forbindelser", errors=fejl, data_schema=vol.Schema({
             vol.Required("emhass_adresse", default=self.d.get("emhass_adresse") or "http://homeassistant.local:5000"): sel.TextSelector(),
             vol.Required("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)),
-            vol.Required("solprognose"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
-            vol.Optional("priser", description={"suggested_value": self.d.get("priser") or _nordpool(self.hass)}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
+            vol.Required("solprognose"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", **_kilde_filter(self.hass, "sol", self.d.get("solprognose")))),
+            vol.Optional("priser", description={"suggested_value": self.d.get("priser") or _nordpool(self.hass)}): sel.EntitySelector(
+                sel.EntitySelectorConfig(domain="sensor", **_kilde_filter(self.hass, "pris", self.d.get("priser")))),
             vol.Required("priser_uden_moms", default=False): sel.BooleanSelector(),
             vol.Required("vejr"): sel.EntitySelector(sel.EntitySelectorConfig(domain="weather")),
             vol.Optional("udetemperatur"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="temperature")),
@@ -677,8 +690,9 @@ class WattlasOptionsFlow(OptionsFlow):
         return self.async_show_form(step_id="forbindelser", errors=fejl, data_schema=vol.Schema({
             vol.Required("emhass_adresse", **d("emhass_adresse")): sel.TextSelector(),
             vol.Optional("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)),
-            vol.Required("solprognose", **d("solprognose")): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
-            vol.Optional("priser", description={"suggested_value": (nu.get("pris") or "").split("|")[0] or None}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
+            vol.Required("solprognose", **d("solprognose")): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", **_kilde_filter(self.hass, "sol", nu.get("solprognose")))),
+            vol.Optional("priser", description={"suggested_value": (nu.get("pris") or "").split("|")[0] or None}): sel.EntitySelector(
+                sel.EntitySelectorConfig(domain="sensor", **_kilde_filter(self.hass, "pris", (nu.get("pris") or "").split("|")[0] or None))),
             vol.Required("priser_uden_moms", default=moms): sel.BooleanSelector(),
             vol.Required("vejr", **d("vejr")): sel.EntitySelector(sel.EntitySelectorConfig(domain="weather")),
             vol.Optional("udetemperatur", **d("udetemperatur")): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="temperature")),
@@ -722,29 +736,36 @@ class WattlasOptionsFlow(OptionsFlow):
                                     data_schema=_netselskab_skema((user_input or d).get("netselskab")))
 
     async def async_step_elbil(self, user_input=None) -> ConfigFlowResult:
-        """Elbil-laderens effekt og holdet. Ligger kun i hjælperne (styringen læser dem)."""
+        """Laderens måling, når Wattlas ikke selv styrer laderen. "Kun fra elnettet" (holdet) slås til og fra i appen."""
         nu, til = self.hass.states.get(ELBIL), self.hass.states.get(ELBIL_HOLD)
         if nu is None or til is None:
             return self.async_abort(reason="genstart_foerst")
+        if (self.config_entry.data.get("lader") or {}).get("effekt"):
+            return self.async_abort(reason="lader_styret")  # styret lader: målingen er dens, og kontakten ligger på fanen Elbil
         fejl = {}
         kan = self.config_entry.data.get("kanal") != "sonnen"  # Sonnen kan ikke holdes; prognosen uden bilen virker stadig
-        styret = (self.config_entry.data.get("lader") or {}).get("effekt")
+        valgt = nu.state if nu.state.startswith("sensor.") else None
         if user_input is not None:
-            lader = styret or user_input.get("elbil_sensor") or ""  # styrer Wattlas laderen, skal målingen være dens (ellers "uden for målingen")
+            lader = user_input.get("elbil_sensor") or ""
             if lader and _elbil_fejl(self.hass, lader, self.config_entry.data):
                 fejl = {"elbil_sensor": "elbil_sensor"}
             else:
                 await self.hass.services.async_call("input_text", "set_value", {"entity_id": ELBIL, "value": lader}, blocking=True)
-                await self.hass.services.async_call("input_boolean", "turn_on" if lader and user_input.get("elbil_hold") else "turn_off",
-                                                    {"entity_id": ELBIL_HOLD}, blocking=True)
+                # en ny lader: "Kun fra elnettet" slås til (som før); bagefter bestemmer brugeren i appen. Ryddet (eller Sonnen) = slået fra
+                if not lader or not kan or not valgt:
+                    await self.hass.services.async_call("input_boolean", "turn_on" if lader and kan else "turn_off", {"entity_id": ELBIL_HOLD}, blocking=True)
                 return self.async_create_entry(data={})
         fundet = _fundne_ladere(self.hass)
-        valgt = nu.state if nu.state.startswith("sensor.") else None
         foreslag = (user_input or {}).get("elbil_sensor") or valgt or (fundet[0][0] if len(fundet) == 1 else None)
+        # kendte ladere: kun dem (og det valgte). Ellers alle effekter undtagen husets egne (inverter, Wattlas, EMHASS), der aldrig er bilen
+        if fundet:
+            filt = {"include_entities": sorted({e for e, _ in fundet} | ({valgt} if valgt else set()))}
+        else:
+            filt = {"exclude_entities": sorted(s.entity_id for s in self.hass.states.async_all("sensor")
+                                               if s.attributes.get("device_class") == "power" and _elbil_fejl(self.hass, s.entity_id, self.config_entry.data))}
         return self.async_show_form(step_id="elbil", errors=fejl, data_schema=vol.Schema({
-            **({} if styret else {vol.Optional("elbil_sensor", description={"suggested_value": foreslag}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="power"))}),
-            **({vol.Required("elbil_hold", default=til.state == "on" if valgt else True): sel.BooleanSelector()} if kan else {}),
-        }), description_placeholders={"fundet": "; ".join(n for _, n in fundet) or "Ingen kendt lader fundet – vælg selv"})
+            vol.Optional("elbil_sensor", description={"suggested_value": foreslag}): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="power", **filt)),
+        }), description_placeholders={"fundet": "; ".join(n for _, n in fundet) or "Ingen kendt lader fundet"})
 
     # --- elbil-laderen: vælg den på listen → se, hvad Wattlas fandt → prøv den ---
     async def async_step_lader(self, user_input=None) -> ConfigFlowResult:
@@ -756,15 +777,22 @@ class WattlasOptionsFlow(OptionsFlow):
             if valg == "ingen":
                 return await self._gem_lader(None)
             if valg == "anden":
-                self._lader = lader_find.fra_enhed(self.hass, user_input["enhed"]) if user_input.get("enhed") else {"slags": "entiteter"}
-                return await self.async_step_lader_roller()
+                return await self.async_step_lader_enhed()
             self._lader = dict(fundet[valg][1])
             return await self.async_step_lader_ok()
         valg = [sel.SelectOptionDict(value=k, label=n) for k, (n, _) in sorted(fundet.items(), key=lambda x: x[1][0])]
         valg += [sel.SelectOptionDict(value="anden", label="Min lader er ikke på listen"), sel.SelectOptionDict(value="ingen", label="Wattlas skal ikke styre en lader")]
         return self.async_show_form(step_id="lader", data_schema=vol.Schema({
-            vol.Required("lader", default=next(iter(fundet), "anden")): sel.SelectSelector(sel.SelectSelectorConfig(options=valg, mode=sel.SelectSelectorMode.LIST)),
-            vol.Optional("enhed"): sel.DeviceSelector()}))
+            vol.Required("lader", default=next(iter(fundet), "anden")): sel.SelectSelector(sel.SelectSelectorConfig(options=valg, mode=sel.SelectSelectorMode.LIST))}))
+
+    async def async_step_lader_enhed(self, user_input=None) -> ConfigFlowResult:
+        """Laderen er ikke på listen: vælg dens enhed (eller ingen, så peges der på hver ting for sig)."""
+        if user_input is not None:
+            self._lader = lader_find.fra_enhed(self.hass, user_input["enhed"]) if user_input.get("enhed") else {"slags": "entiteter"}
+            return await self.async_step_lader_roller()
+        # kun enheder med en effektmåler: en lader skal kunne vise, hvad den trækker (ellers står tv, router og kort også på listen)
+        return self.async_show_form(step_id="lader_enhed", data_schema=vol.Schema({
+            vol.Optional("enhed"): sel.DeviceSelector(sel.DeviceSelectorConfig(entity=sel.EntityFilterSelectorConfig(domain="sensor", device_class="power")))}))
 
     async def async_step_lader_ok(self, user_input=None) -> ConfigFlowResult:
         d, fejl = self._lader, {}
@@ -868,6 +896,9 @@ class WattlasOptionsFlow(OptionsFlow):
             maal = self.hass.states.get(LADER_MAAL)
             if d.get("bil_soc") and maal is not None and maal.state in ("50", "50.0"):  # aldrig sat: 80 % er et godt sted at begynde
                 await self.hass.services.async_call("input_number", "set_value", {"entity_id": LADER_MAAL, "value": 80}, blocking=True)
+            sol = self.hass.states.get(LADER_SOL)
+            if d.get("bil_soc") and not self.config_entry.data.get("lader") and sol is not None and sol.state in ("50", "50.0"):  # ny lader: gratis sol må fylde bilen
+                await self.hass.services.async_call("input_number", "set_value", {"entity_id": LADER_SOL, "value": 100}, blocking=True)
         await self.hass.services.async_call("input_select", "select_option", {"entity_id": LADER_TILSTAND, "option": "fra"}, blocking=True)
         self.hass.config_entries.async_update_entry(self.config_entry, data=data)
         await lader.aktiver(self.hass, self.config_entry)

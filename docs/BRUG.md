@@ -30,8 +30,9 @@ Normalt skal du ingenting. Det, folk typisk bruger:
 
 | Situation | Gør dette |
 |---|---|
-| Storm eller varslet strømsvigt | **Lad nu** til 100 % og hæv **Reserve** et par dage |
-| Gæster, ferie eller et dyrt apparat skal køre i aften | **Gem batteriet** nogle timer i forvejen, eller en regel |
+| Storm eller varslet strømsvigt | slå **Stormvarsel** til (se nedenfor) – eller **Lad nu** til 100 % og hæv **Reserve** et par dage |
+| Ferie | slå **Ferie** til og skriv, hvornår I tager af sted og kommer hjem (se nedenfor) |
+| Gæster eller et dyrt apparat skal køre i aften | **Gem batteriet** nogle timer i forvejen, eller en regel |
 | Strømmen er dyr nu, men planen venter | **Brug batteriet** |
 | Vinter (lidt sol, kolde nætter) | hæv **Reserve** til 20–30 % |
 | Netselskabet skifter tarif (sommer/vinter) | Indstillinger → Enheder og tjenester → Wattlas → **Konfigurer** → *Netselskab* (følger selv med) eller *Priser* |
@@ -98,6 +99,24 @@ Prøv andre indstillinger uden at røre den rigtige styring.
 
 Et plus i *Forskel* betyder, at ændringen koster penge. Det kan være fint, hvis du får det, du bad om, fx mere reserve.
 
+**Et andet batteri:** skriv en anden størrelse under *Batteri* (0 = intet batteri). Strømmen i batteriet nu og reserven
+regnes i kWh, så et større batteri ikke får gratis strøm. Batteriet vises så i kWh, og *Forskel pr. døgn* er med. Det er
+regnet på de næste timers priser og sol: et døgn i november siger ikke meget om sommeren, og batteriets pris er ikke med.
+*Brug disse indstillinger* rører aldrig batteristørrelsen.
+
+### Varmt vand på billig strøm
+Har du en varmtvandsbeholder i Home Assistant (`water_heater.…`, eller en `number.…` med beholderens mål), kan Wattlas hæve
+målet i den billigste tredjedel af døgnets timer, og når solen sender over 1,5 kW ud på nettet. Varmt vand er et billigt batteri.
+
+- **Ekstra grader** (standard 10 °C). Aldrig over beholderens eget maksimum eller 75 °C. Et hævet mål holdes mindst 30 minutter,
+  så beholderen ikke tændes og slukkes hvert 5. minut, når den selv æder soloverskuddet.
+- Kun når Wattlas styrer batteriet (ikke i skyggedrift eller med hovedafbryderen slået fra).
+- Bagefter sættes **dit eget mål tilbage**: når timen ikke længere er billig, når du slår det fra, når målingerne er gamle,
+  når importloftet er nået, efter en genstart og når Wattlas fjernes. Er beholderen offline, sker det, når den er tilbage
+  (fjernes Wattlas imens, får du en besked om at sætte den selv).
+- Ændrer du selv målet, mens det er hævet, er det dit nye ønske, og Wattlas sætter ikke noget tilbage.
+- Slået fra som standard. Beholder-feltet er låst, mens målet er hævet.
+
 ### Fleksibel forbruger
 Lad EMHASS vælge de bedste timer til et apparat, der bare skal køre et vist antal timer pr. døgn: varmtvandsbeholder,
 pool, affugter eller elbil.
@@ -135,6 +154,40 @@ regulerer ikke ladestrømmen, kender ikke bilens batteri og er ikke prøvet på 
 
 Prøv den i Hvad-hvis først, så du kan se, hvornår den vil køre.
 
+### Enkel eller avanceret
+Appen viser som standard kun det, de fleste bruger. Slå **Avanceret** til nederst i *Indstillinger til optimeringen* for at se regler, hvad-hvis,
+fleksibel forbruger, ferie og storm, batterislid og elbilens ekstra grænser. Det er kun visningen: det, der er slået til, vises og virker altid.
+
+### Ferie og storm
+Kortet ligger nederst på *Styring*. Alt er slået fra, indtil du slår det til – så er planen præcis som før.
+
+| | Hvad sker der |
+|---|---|
+| **Ferie** | Skriv *Fra* og *Hjem igen*. I perioden regner planen kun med det, huset bruger af sig selv (køleskab, standby, varmepumpe: den laveste halve time fra de sidste dage), så den ikke køber strøm til en tom bolig. Fra hjemkomsten regnes der normalt igen, så batteriet er klar, når I kommer hjem. Bagefter tælles ferie-dagene ikke med i forbrugshistorikken (kun når der er mindst 3 andre dage tilbage) |
+| **Når alle er væk et døgn** | Det samme, uden datoer: når alle personer i Home Assistant har været væk i 24 timer, og til den første kommer hjem. Kræver, at personerne har en tracker, der virker |
+| **Stormvarsel** | Ved et orange eller rødt varsel om storm eller torden fra **Meteoalarm** (dækker DMI – integrationen sættes op for sig), eller vindstød over 25 m/s i vejrudsigten inden for 36 timer, fylder planen batteriet i de billigste timer og tømmer det ikke under 80 %. Kan de billige timer ikke nå det, før stormen begynder, lades der fra nettet i god tid (inden for importloftet), også selv om en tidsstyret regel siger andet, og en tidsstyret *brug batteriet* springes over. Under 80 % aflader batteriet ikke. *Højeste batteriniveau* gælder også under storm. En fundet storm holdes til sit eget slut (varslets udløb, højst 3 døgn), også hvis vindstødene dykker eller vejret ikke svarer et øjeblik. **Falder nettet ud** (ingen spænding på faserne), holder stormen ikke batteriet tilbage – så forsyner det huset |
+| **Forsigtig solprognose** | Kun med Solcast: regn med mindre sol, når Solcast er usikker. 0 % = Solcasts eget bud, 100 % = Solcasts forsigtige bud (10 %-prognosen) |
+
+**Meteoalarm** sættes op i `configuration.yaml` (integrationen har intet opsætningsvindue):
+
+```yaml
+binary_sensor:
+  - platform: meteoalarm
+    country: denmark
+    province: "DIT OMRÅDE"          # skriv området, præcis som det står på meteoalarm.org
+    language: da-DK                 # skal findes i varslet, ellers fejler integrationen
+```
+
+Home Assistants Meteoalarm viser kun det første varsel for området. Står et gult regnvarsel foran et orange stormvarsel, ser Wattlas ikke stormen
+der – vindstødene i vejrudsigten fanger den så tit alligevel.
+
+Godt at vide om stormen: kan planen ikke regnes med stormen (fx for lidt plads under importloftet), regnes den med "hold niveauet" og ellers uden storm,
+og du får en besked – reguleringen lader stadig op til 80 % før stormen. En manuel tilsidesættelse vinder altid. Går Wattlas selv i selvforbrug
+(nødvejen, når noget er galt), bruger inverteren sin egen reserve på 15 %.
+
+Til egne automationer: `binary_sensor.wattlas_ferie`, `binary_sensor.wattlas_storm`, `sensor.wattlas_prisniveau` (billig, normal eller dyr – samme
+tredjedele som prisstriben) og `binary_sensor.wattlas_problem` (tændt, når en alarm under *Overvågning* er tændt).
+
 ## Wattlas Styring → Regler
 Faste regler for bestemte tidsrum, fx "hverdage 16–21: gem batteriet".
 
@@ -168,6 +221,14 @@ Står et tjek gult, så læs forklaringen under det. Det er ikke nødvendigvis e
 - **Beskeder til telefonen**: slå push og "normalt igen"-beskeder til eller fra. *Send testbesked* tjekker, at
   `script.wattlas_besked` når frem.
 - **Beregn ny plan nu**: hvis du har ændret noget og ikke vil vente 5 minutter.
+- **Test dit system** (eksperimentel, kun i avanceret): Wattlas beder batteriet lade fra elnettet i op til 4 minutter og
+  derefter aflade til huset i op til 4 minutter. Det sker gennem den almindelige tilsidesættelse, så alle grænser gælder,
+  og den udløber af sig selv. Svaret bygger på den målte batterieffekt. Bruger huset under 400 W, kan afladningen ikke
+  vises, og svaret er *uafgjort*. Kræver, at Wattlas styrer (ikke skyggedrift), at batteriet står mellem 20 og 85 %,
+  at ingen tilsidesættelse er i gang, og at elbilen ikke lader.
+- **Andre automationer styrer også inverteren** (under Indstillinger → Reparationer): Wattlas ser hver time efter andre
+  automationer og scripts, der rører de samme indstillinger i inverteren eller laderen. To styringer skriver oven i
+  hinanden. Kun det, der står fast i automationen, kan ses, ikke navne, der bygges i en skabelon.
 
 ## Wattlas Styring → Teknik
 Rå tal fra inverteren: strenge (PV) med spænding og strøm, udgang, net og husets last pr. fase, batteriets spænding,
@@ -181,7 +242,7 @@ Kun til aflæsning. Inverterens indstillinger ændres i inverteren eller Solarma
 | **Økonomi** | sparet pr. dag, uge, måned og år, mål, tilbagebetalingstid og resultater pr. dag |
 | **Historik** | produktion, forbrug, salg, køb og batteri pr. måned, 30 dage eller år |
 | **Elpris** | købs- og salgspris time for time i dag og i morgen, inkl. tariffer |
-| **Solprognose** | prognose mod målt produktion i dag og de næste dage |
+| **Solprognose** | prognose mod målt produktion i dag og de næste dage, og (i avanceret) *Plan mod virkelighed*: planen fra kl. 23:50 aftenen før mod det, der blev målt i går, for sol, forbrug og regning |
 
 Søndag aften kommer der en ugerapport som besked.
 

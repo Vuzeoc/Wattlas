@@ -1,0 +1,68 @@
+# Wattlas – test dit system (eksperimentel): lader et par minutter fra elnettet og bruger så batteriet til huset, gennem den almindelige
+# tilsidesættelse, så alle grænser gælder (faseloft, importloft, reserve), og den udløber af sig selv, også hvis HA genstarter midt i.
+# Svaret bygger på den målte batterieffekt. Kun når Wattlas styrer (ikke i skyggedrift), og aldrig oven i en tilsidesættelse, brugeren har sat.
+input_text:
+  wattlas_systemtest:
+    name: Wattlas · systemtest
+    max: 255
+    icon: mdi:clipboard-check-outline
+
+script:
+  wattlas_systemtest:
+    alias: Wattlas · test dit system
+    description: Lader et par minutter og bruger så batteriet til huset, og skriver resultatet i input_text.wattlas_systemtest. Eksperimentel.
+    mode: single
+    max_exceeded: silent
+    sequence:
+      - variables:
+          soc: "{{ states('sensor.emhass_m_battery_soc') | float(-1) }}"
+          reserve: "{{ states('input_number.wattlas_reserve') | float(15) }}"
+          # effekten før testen: lader solen allerede, kan netladningen ikke ses
+          p0: "{{ states('sensor.emhass_m_battery_output_w_power') | float(0) }}"
+          grund: >-
+            {% if not (is_state('input_boolean.emhass_styring_aktiv', 'on') and is_state('input_boolean.emhass_har_overtaget', 'on')) %}Wattlas styrer ikke batteriet (skyggedrift eller slået fra)
+            {%- elif is_state('binary_sensor.wattlas_tilsidesaettelse_aktiv', 'on') %}en tilsidesættelse er i gang – stop den først
+            {%- elif not is_state('binary_sensor.emhass_ui_data_frisk', 'on') or not is_state('binary_sensor.emhass_styrekanal_ok', 'on') %}målinger eller styrekanal er ikke klar
+            {%- elif not 20 <= soc <= 85 or soc < reserve + 10 %}batteriet skal stå mellem 20 og 85 % og mindst 10 % over reserven ({{ reserve | round(0) }} %) – det står på {{ soc | round(0) }} %
+            {%- elif states('sensor.wattlas_elbil_effekt') | float(0) > 100 %}elbilen lader – prøv igen bagefter
+            {%- endif %}
+      - if: "{{ grund | length > 0 }}"
+        then:
+          - action: input_text.set_value
+            target: {entity_id: input_text.wattlas_systemtest}
+            data: {value: "{{ ('Ikke startet: ' ~ grund)[:255] }}"}
+          - stop: Forudsætningerne er ikke opfyldt
+      - action: input_text.set_value
+        target: {entity_id: input_text.wattlas_systemtest}
+        data: {value: "Lader fra elnettet … ({{ now().strftime('%H:%M') }})"}
+      - action: script.wattlas_tilsidesaet
+        data: {tilstand: lad, minutter: 15, soc: "{{ [100, (soc / 5) | round(0, 'ceil') * 5 + 10] | min }}"}
+      # batteriet positiv = afladning, negativ = ladning
+      - wait_template: "{{ states('sensor.emhass_m_battery_output_w_power') | float(0) < -300 }}"
+        timeout: "{{ vent_s | default(240) }}"  # vent_s kun i testen
+        continue_on_timeout: true
+      - variables:
+          lad_ok: "{{ wait.completed and p0 > -300 }}"
+          lad_w: "{{ states('sensor.emhass_m_battery_output_w_power') | float(0) | round(0) }}"
+      - action: input_text.set_value
+        target: {entity_id: input_text.wattlas_systemtest}
+        data: {value: "Bruger batteriet til huset … ({{ now().strftime('%H:%M') }})"}
+      - action: script.wattlas_tilsidesaet
+        data: {tilstand: brug, minutter: 15}
+      - wait_template: "{{ states('sensor.emhass_m_battery_output_w_power') | float(0) > 300 }}"
+        timeout: "{{ vent_s | default(240) }}"  # vent_s kun i testen
+        continue_on_timeout: true
+      - variables:
+          brug_ok: "{{ wait.completed }}"
+          brug_w: "{{ states('sensor.emhass_m_battery_output_w_power') | float(0) | round(0) }}"
+          hus_w: "{{ states('sensor.emhass_m_load_w_totalpower') | float(0) | round(0) }}"
+      - action: script.wattlas_tilsidesaet
+        data: {tilstand: ingen}
+      - action: input_text.set_value
+        target: {entity_id: input_text.wattlas_systemtest}
+        data:
+          value: >-
+            {{ ((now().strftime('%d/%m %H:%M') ~ ' · ')
+               ~ ('Lader: OK' if lad_ok else 'Lader: uafgjort – solen ladede allerede' if p0 <= -300 else 'Lader: NEJ (' ~ lad_w ~ ' W efter 4 min)')
+               ~ ' · ' ~ ('Aflader: OK' if brug_ok else 'Aflader: uafgjort – huset brugte kun ' ~ hus_w ~ ' W' if hus_w < 400 else 'Aflader: NEJ (' ~ brug_w ~ ' W efter 4 min)')
+               ~ ('' if lad_ok and brug_ok else ' · se Overvågning og styrekanalens log'))[:255] }}

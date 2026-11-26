@@ -49,3 +49,5 @@ jobs:
       - run: python tests/test_lader_ha.py
       - run: python tests/test_lader_flow.py
       - run: python tests/test_kilder.py
+      - run: python tests/test_ferie_storm.py
+      - run: python tests/test_070.py

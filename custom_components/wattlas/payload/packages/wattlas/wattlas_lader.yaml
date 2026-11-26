@@ -32,6 +32,15 @@ input_number:
     mode: box
     unit_of_measurement: "%"
     icon: mdi:battery-charging-high
+  # kun når bilen er i Home Assistant: så højt må gratis sol (overskud, der ellers sælges) lade den. Aldrig under "lad til"
+  wattlas_lader_sol_maal:
+    name: Wattlas · elbil sol op til
+    min: 50
+    max: 100
+    step: 5
+    mode: box
+    unit_of_measurement: "%"
+    icon: mdi:solar-power
   # lagt ind, siden bilen blev tilsluttet. Nulstilles af Wattlas, når bilen kobles fra
   wattlas_lader_ladet:
     name: Wattlas · elbil-lader ladet
@@ -50,6 +59,12 @@ input_number:
     mode: box
     initial: 0
     unit_of_measurement: W
+
+input_boolean:
+  # "100 % til næste tur": målet er 100 %, til bilen kobles fra (så slår den fra af sig selv)
+  wattlas_lader_tur:
+    name: Wattlas · elbil 100 % til næste tur
+    icon: mdi:road-variant
 
 input_datetime:
   wattlas_lader_klar:

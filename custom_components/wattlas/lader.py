@@ -31,6 +31,7 @@ SVAR_S = 8           # bilens reaktionstid
 UDENFOR_S = 60       # så længe må laderen trække, uden at husets måling viser det
 LANGSOM_S = 900      # sky-ladere hæves højst hvert kvarter (sænkes altid straks)
 PLAN_S = 720         # planens højeste alder
+TUR = "input_boolean.wattlas_lader_tur"  # "100 % til næste tur"
 PROBLEMER = ("lader_stopper_ikke", "lader_over_graense", "lader_udenfor", "lader_svarer_ikke")
 FRI = {"disconnected", "not_connected", "no_ev_connected", "unplugged", "available", "idle", "charger_free", "a_not_connected", "free", "ready", "locked", "a", "1"}  # Wallbox: Ready/Locked uden bil ("Locked, car connected" med)
 MAAL_V = 230.0
@@ -228,17 +229,22 @@ class Styring:
         return (_tal(s) or 0) > 50 and (dt_util.utcnow() - s.last_reported).total_seconds() < PLAN_S \
             and not self.hass.states.is_state("binary_sensor.emhass_ui_planfejl", "on")
 
-    def _bil(self, tilsluttet, ladet: float) -> tuple[float | None, float | None]:
-        """(bilens procent, kWh der mangler). Kun når bilen er i HA og sidder i laderen – ellers None, og så gælder det valgte antal kWh."""
+    def _bil(self, tilsluttet, ladet: float) -> tuple[float | None, float | None, float | None]:
+        """(bilens procent, kWh der mangler til målet, kWh der mangler til solens grænse). Kun når bilen er i HA og sidder i laderen – ellers
+        None, og så gælder det valgte antal kWh (og solen lader, til bilen selv stopper)."""
         d = self.d
         v = self._v(d.get("bil_soc") or "")
         hjemme = not d.get("bil_stik") or self.hass.states.is_state(d["bil_stik"], "on")  # en gæst i laderen er ikke brugerens bil
         if v is None or not 0 <= v <= 100 or not d.get("bil_kwh") or tilsluttet is not True or not hjemme:
             self.soc = (None, 0.0)
-            return None, None
+            return None, None, None
         if self.soc[0] != v:
             self.soc = (v, ladet)
-        return v, logik.bil_rest(v, self._v("input_number.wattlas_lader_maal", 80.0), float(d["bil_kwh"]), ladet - self.soc[1])
+        # "100 % til næste tur" løfter målet, til bilen kobles fra. Solen må lade op til sin egen grænse, dog aldrig under målet
+        maal = 100.0 if self.hass.states.is_state(TUR, "on") else self._v("input_number.wattlas_lader_maal", 80.0)
+        sol = max(maal, self._v("input_number.wattlas_lader_sol_maal", 100.0))
+        kwh, siden = float(d["bil_kwh"]), ladet - self.soc[1]
+        return v, logik.bil_rest(v, maal, kwh, siden), logik.bil_rest(v, sol, kwh, siden)
 
     def _timer(self) -> tuple[float, str, bool]:
         """Timer til "klar kl.", klokkeslættet, og om fristen lige er passeret (så begynder en ny periode)."""
@@ -288,14 +294,21 @@ class Styring:
         if fast:  # kan ikke skrues ned: den trækker sin egen strøm, fuld eller ingenting
             mini = maks = int(self.d.get("maks_a") or maks)
         kwh = self._v("input_number.wattlas_lader_kwh", 0.0)
-        soc, rest = self._bil(tilsluttet, ladet)
+        soc, rest, rest_sol = self._bil(tilsluttet, ladet)
         rest = max(0.0, kwh - ladet) if rest is None else rest
+        # "100 % til næste tur" slår fra af sig selv: bilen er kørt (laderen eller bilens eget stik siger det), eller den er fuld
+        stik_ud = bool(self.d.get("bil_stik")) and self.hass.states.is_state(self.d["bil_stik"], "off")
+        if self.hass.states.is_state(TUR, "on") and (tilsluttet is False or stik_ud or (soc is not None and soc >= 99)):
+            await self.hass.services.async_call("input_boolean", "turn_off", {"entity_id": TUR})
         # lader bilen kun på én fase (mange biler), regnes tiden ud fra det målte, ikke fra opsætningens faser
         antal_e = 1 if antal == 3 and self.sendt and effekt is not None and logik.TOMGANG_W < effekt < 1.5 * self.sendt * volt else antal
         faerdig, noed = logik.noedvendig(rest, maks, antal_e, volt, timer) if maks > 0 else (False, False)
-        sol = (self._v("sensor.emhass_solproduktion_samlet", 0.0) - self._v("sensor.emhass_m_load_w_totalpower", 1e9) + egen) / (antal * volt)
+        # solens overskud: det, huset ikke selv bruger, og som planen ikke lader husbatteriet med (planens tal, ikke det målte – bilen ændrer det målte)
+        styrer = all(self.hass.states.is_state(e, "on") for e in ("input_boolean.emhass_styring_aktiv", "input_boolean.emhass_har_overtaget", "input_boolean.emhass_plan_gyldig"))
+        batt = max(0.0, -self._v("input_number.emhass_plan_batteri_w", 0.0)) if styrer else 0.0  # en gammel planværdi tæller ikke
+        sol = (self._v("sensor.emhass_solproduktion_samlet", 0.0) - self._v("sensor.emhass_m_load_w_totalpower", 1e9) + egen - batt) / (antal * volt)
         ind = logik.Ind(nu=nu, tilstand=tilstand, tilsluttet=tilsluttet, maks_a=maks, min_a=mini, plads_a=rum, over_sikring=over,
-                        plan=self._plan(), noed=noed, faerdig=faerdig, sol_a=sol, vent_op_s=LANGSOM_S if self.d.get("langsom") else logik.VENT_OP_S)
+                        plan=self._plan(), noed=noed, faerdig=faerdig, sol_a=sol, sol_faerdig=rest_sol is not None and rest_sol <= 0.05, vent_op_s=LANGSOM_S if self.d.get("langsom") else logik.VENT_OP_S)
         if effekt is None or not self.hass.states.is_state("binary_sensor.wattlas_konfigureret", "on"):
             ind.plads_a = None  # ingen måling af laderen, eller Wattlas er ikke klar: ingen start, og stop efter to minutter
         ordre, grund = logik.beslut(ind, self.husk)

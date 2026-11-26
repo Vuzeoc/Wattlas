@@ -23,7 +23,7 @@
    Fortsæt med [8. Første start](#8-første-start).
 
 Dashboards fra integrationen er i YAML-tilstand og kan ikke redigeres i HA's editor. En ny version installeres fra
-Markedspladsen; Wattlas lægger selv de nye filer på plads og beder om en genstart. Dashboard-filerne
+Markedspladsen (den ser nye versioner inden for 2 døgn – vil du se dem med det samme: *Markedspladsen → Wattlas → ⋮ → Opdater oplysninger*); Wattlas lægger selv de nye filer på plads og beder om en genstart. Dashboard-filerne
 (`/config/wattlas/dashboards/`) overskrives ved en ny version – de gamle gemmes i backup-mappen. Dine indstillinger bevares. Fejler en opdatering, lægges den gamle
 version tilbage, og der står en besked under *Reparationer*.
 

@@ -15,7 +15,11 @@ template:
           gyldig: >-
             {{ state_attr('sensor.emhass_gemt_plan', 'schema') == 1
                and 0 <= t - as_timestamp(states('sensor.emhass_gemt_plan'), 0) < 7200 }}
-          bund: "{{ [15, states('input_number.wattlas_reserve') | float(15)] | max }}"
+          # under stormvarsel holder planen batteriet over 80 % (wattlas_storm.yaml): det er bunden
+          bund: >-
+            {% set res = [15, states('input_number.wattlas_reserve') | float(15)] | max %}
+            {{ [res, [80, [states('input_number.wattlas_maks_soc') | float(0) or 100, res] | max] | min] | max
+               if is_state('binary_sensor.wattlas_storm', 'on') and is_state('input_boolean.emhass_har_overtaget', 'on') else res }}
           plan: >-
             {% set ns = namespace(tom=none, soc=101, kl=none, fuld=none, slut=none) %}
             {% for r in (state_attr('sensor.emhass_gemt_plan', 'rows') or []) if gyldig

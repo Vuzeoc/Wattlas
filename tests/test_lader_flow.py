@@ -177,6 +177,9 @@ async def main():
     assert hass.states.get('input_select.wattlas_lader_tilstand').state == 'fra', 'styres ikke, før brugeren vælger det'
     # ikke på listen: selv vælge, og fejlene
     o = flow(); r = await o.async_step_lader({'lader': 'anden'})
+    assert r['step_id'] == 'lader_enhed' and list(r['data_schema'].schema) == ['enhed'], 'enheden vælges i sit eget trin'
+    assert r['data_schema'].schema['enhed'].config['entity'] == [{'domain': ['sensor'], 'device_class': ['power']}], 'kun enheder, der måler effekt'
+    r = await o.async_step_lader_enhed({})
     assert r['step_id'] == 'lader_roller'
     r = await o.async_step_lader_roller({'effekt': 'sensor.v2c_charge_power'})
     assert r['errors'] == {'base': 'lader_ingen_styring'}, r
@@ -191,11 +194,10 @@ async def main():
     assert r['step_id'] == 'lader_ok' and o._lader['til_valg'] == '2' and r['description_placeholders']['strom'] == '–'
     r = await flow().async_step_lader({'lader': 'ingen'})
     assert r['type'] == 'create_entry' and 'lader' not in entry.data and M.NOEGLE not in hass.data
-    # elbil-trinnet: med en valgt lader skrives laderens effekt, uanset hvad
+    # elbil-trinnet: med en valgt lader er målingen laderens, og der er intet at vælge (kontakten ligger på fanen Elbil)
     o = flow(); await o.async_step_lader({'lader': v2c}); await o.async_step_lader_ok({'faser': '3', 'maks_a': 15, 'ret': False}); await o.async_step_lader_proev({'proev': False})
     r = await flow().async_step_elbil()
-    assert 'elbil_sensor' not in [str(k) for k in r['data_schema'].schema], 'feltet vises ikke'
-    await flow().async_step_elbil({'elbil_hold': False})
+    assert r['type'] == 'abort' and r['reason'] == 'lader_styret', r
     assert hass.states.get('input_text.wattlas_elbil_entitet').state == 'sensor.v2c_charge_power'
     print('Opsætningen (på listen, ikke på listen, prøve, uden prøve, fjern): OK')
 

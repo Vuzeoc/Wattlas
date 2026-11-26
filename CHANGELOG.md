@@ -2,6 +2,49 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.7.0
+- **Hvad-hvis: et andet batteri.** Skriv en anden batteristørrelse (0 = intet batteri) og se, hvad planen for de næste timer ville koste.
+  Strømmen i batteriet nu og reserven regnes i kWh, så det større batteri ikke får gratis strøm. Batteriets pris er ikke med, og et døgn i
+  november siger ikke meget om et helt år
+- **Ny: plan mod virkelighed** (Solprognose, avanceret). Kl. 23:50 gemmes planen for næste døgn (`sensor.wattlas_dagsplan`). Dagen efter
+  holdes den op mod de målte timer: sol, forbrug og regning, så du kan se, om det er prognosen eller styringen, der rammer ved siden af
+- **Ny: varmt vand på billig strøm** (Styring, avanceret, slået fra som standard). Hæver en varmtvandsbeholders mål (`water_heater` eller
+  `number`) med op til 10 °C i de billigste timer eller ved soloverskud, højst til beholderens maksimum. Dit eget mål sættes altid tilbage,
+  også efter en genstart og når Wattlas fjernes
+- **Ny: vagt mod anden styring.** Andre automationer og scripts, der rører de samme indstillinger i inverteren eller laderen som Wattlas,
+  vises under Reparationer
+- **Ny (eksperimentel): test dit system** (Overvågning, avanceret). Lader og aflader et par minutter gennem den almindelige tilsidesættelse og
+  fortæller ud fra den målte batterieffekt, om inverteren gør, hvad Wattlas beder om. Kun når Wattlas styrer
+- **Elbil: skøn over ladetiden.** I *Klar til tid* står der ved *Energi* (og ved *lad til*, når bilen er i Home Assistant), hvor længe det
+  cirka tager ved laderens fulde strøm, fx *ca. 1 t 50 min ved 11,2 kW*. Skønnet følger med, mens du trykker kWh op og ned. Skrues
+  strømmen ned for faserne eller husets forbrug, tager det længere
+- **Prøvet og fravalgt: skygger i solprognosen.** Vi byggede og testede en funktion, der hver nat lærte, hvordan solprognosen rammer time
+  for time (fx skygge fra træer ved lav sol), og rettede planens prognose derefter. På et anlæg i oktober-november gav det kun ca. 2 % mindre
+  fejl time for time og ca. 7 % pr. døgn. Den er taget ud igen: den krævede mere vedligehold og gav ikke den ønskede besparelse. Helios og
+  Solcast regner prognosen godt nok, når de har lært anlægget at kende og er sat korrekt op (se [SOLPROGNOSE.md](docs/SOLPROGNOSE.md))
+- **Rettet: sommer- og vintertid i husprognosen.** Forbruget tages fra samme klokkeslæt de forrige døgn – før ramte den en time ved siden af
+  i op til en uge efter et tidsskift (også i langtidsstatistikken efter en lang ferie). Plan mod virkelighed regner med rigtige tidspunkter,
+  så døgn med 23 og 25 timer sammenlignes rigtigt
+
+## 0.6.0
+- **Ny: ferie.** Slå *Ferie* til (Styring → *Ferie og storm*) og skriv, hvornår I tager af sted og kommer hjem. I ferien regner planen kun med husets
+  standby-forbrug, så den ikke køber strøm til en tom bolig, og fra hjemkomsten med det normale igen, så batteriet er klar. Bagefter tælles
+  ferie-dagene ikke med i forbrugshistorikken (efter en lang ferie hentes dagene før ferien i langtidsstatistikken). Husets korttidshistorik rækker nu
+  10 døgn tilbage (før 8)
+- **Ny: når alle er væk et døgn** (personerne i Home Assistant) regnes der også med standby, til den første kommer hjem
+- **Ny: stormvarsel.** Ved et orange eller rødt varsel om storm eller torden fra Meteoalarm (dækker DMI) eller vindstød over 25 m/s i vejrudsigten
+  fylder planen batteriet i de billigste timer og tømmer det ikke under 80 %. Kan de billige timer ikke nå det, før stormen begynder, lades der fra
+  nettet i god tid, og en tidsstyret *brug batteriet* springes over. En fundet storm holdes til sit slut (højst 3 døgn). Falder nettet ud, holder stormen ikke batteriet tilbage. Kan planen ikke regnes med
+  stormen, regnes den med "hold niveauet" og ellers uden (med en besked)
+- **Ny: forsigtig solprognose** med Solcast: regn med mindre sol, når Solcast er usikker (mod `pv_estimate10`)
+- **Elbil:** *Klar til tid* lader også på gratis sol mellem de planlagte timer – det, huset ikke bruger, og som planen ikke lader husbatteriet med.
+  To grænser – *Lad til* fra nettet og *Sol op til* på sol – og *100 % til næste tur*, der slår fra af sig selv, når bilen er fuld eller kobles fra.
+  *Kun sol* er uændret
+- **Ny: enkel eller avanceret visning.** Appen viser som standard kun det, de fleste bruger. Slå *Avanceret* til (Styring → Indstillinger) for regler,
+  hvad-hvis, fleksibel forbruger, ferie og storm, batterislid og elbilens ekstra grænser. Det, der er slået til, vises og virker altid
+- **Nye sensorer til egne automationer:** `sensor.wattlas_prisniveau` (billig, normal, dyr) og `binary_sensor.wattlas_problem`
+- Alt nyt er slået fra, indtil du slår det til (undtagen solen i *Klar til tid*). Idéerne er inspireret af Energy Pilot (MIT)
+
 ## 0.5.1
 - **Ny kontakt på fanen Elbil: *Kun fra elnettet*.** Så aflader husbatteriet ikke, mens bilen lader; bilen får strøm fra nettet (og solen), og batteriet må stadig
   lades. Det er den samme indstilling som *Elbil: hold batteriet* under Konfigurer, nu lige ved hånden. Vises ikke for SonnenBatterie, som ikke kan holdes

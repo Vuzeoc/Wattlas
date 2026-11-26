@@ -11,6 +11,17 @@ input_text:
     name: Wattlas · Solcast-sensorer
     max: 255
 
+input_number:
+  # Usikker sol: så langt mod Solcasts forsigtige bud (10 %-prognosen) regnes der. 0 = Solcasts eget bud, præcis som før.
+  # Mest at hente på dage, hvor buddene ligger langt fra hinanden – på klare dage er de næsten ens
+  wattlas_sol_forsigtig:
+    name: Wattlas · forsigtig solprognose
+    min: 0
+    max: 100
+    step: 10
+    unit_of_measurement: "%"
+    icon: mdi:weather-partly-cloudy
+
 template:
   - sensor:
       - name: Wattlas spotpris
@@ -57,15 +68,19 @@ template:
           {% set t = as_timestamp(now()) %}
           {% set ns = namespace(w=0) %}
           {% for r in state_attr(e[0], 'detailedForecast') or [] if r is mapping and is_number(r.get('pv_estimate')) %}
-            {% set s = as_timestamp(r.get('period_start'), 0) %}{% if s <= t < s + 1800 %}{% set ns.w = r.pv_estimate | float * 1000 %}{% endif %}
+            {% set f = states('input_number.wattlas_sol_forsigtig') | float(0) / 100 %}
+            {% set lav = r.pv_estimate10 | float if is_number(r.get('pv_estimate10')) else r.pv_estimate | float %}
+            {% set s = as_timestamp(r.get('period_start'), 0) %}{% if s <= t < s + 1800 %}{% set ns.w = (r.pv_estimate | float - f * [0, r.pv_estimate | float - lav] | max) * 1000 %}{% endif %}
           {% endfor %}{{ ns.w | round(0) }}
         attributes:
           forecast: >-
             {% set e = states('input_text.wattlas_solcast_entiteter').split(',') | map('trim') | reject('eq', '') | list %}
             {% set ns = namespace(l=[], sidst=0) %}
+            {% set f = [0, [1, states('input_number.wattlas_sol_forsigtig') | float(0) / 100] | min] | max %}
             {% for id in e %}
               {% for r in state_attr(id, 'detailedForecast') or [] if r is mapping and is_number(r.get('pv_estimate')) and as_timestamp(r.get('period_start'), 0) > ns.sidst %}
-                {% set s = as_datetime(r.get('period_start')) %}{% set w = (r.pv_estimate | float * 1000) | round(0) %}
+                {% set lav = r.pv_estimate10 | float if is_number(r.get('pv_estimate10')) else r.pv_estimate | float %}
+                {% set s = as_datetime(r.get('period_start')) %}{% set w = ((r.pv_estimate | float - f * [0, r.pv_estimate | float - lav] | max) * 1000) | round(0) %}
                 {% set ns.l = ns.l + [dict(datetime=s.isoformat(), watts=w), dict(datetime=(s + timedelta(minutes=15)).isoformat(), watts=w)] %}
                 {% set ns.sidst = as_timestamp(s) %}
               {% endfor %}

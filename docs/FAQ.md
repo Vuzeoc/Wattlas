@@ -7,6 +7,10 @@ Fanen viser hver beslutning med priser og regnestykke.
 **Hvorfor sælger den ikke fra batteriet?**
 Det er fravalgt (`set_nodischarge_to_grid`). Kun overskudssol sælges, og kun når salgsprisen efter gebyrer er positiv.
 
+**Der er kommet en ny version, men jeg kan ikke se den?**
+Markedspladsen tjekker Wattlas for nye versioner hvert andet døgn (og ved genstart). Vil du se den med det samme, så tryk
+*Markedspladsen → Wattlas → ⋮ → Opdater oplysninger*.
+
 **Kan jeg bruge Wattlas uden at den styrer?**
 Ja. Lad `Wattlas styrer` være slået fra. App, økonomi, historik og planens logik virker stadig, når
 `binary_sensor.wattlas_konfigureret` er on. Det er en god måde at se planen an på i nogle dage.

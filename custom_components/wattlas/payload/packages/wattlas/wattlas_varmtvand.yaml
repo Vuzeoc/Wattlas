@@ -1,0 +1,122 @@
+# Wattlas – varmt vand på billig strøm: i den billigste tredjedel af døgnets timer, eller når solen sender over 1,5 kW ud på nettet,
+# hæves varmtvandsbeholderens mål (højst til beholderens eget maksimum og aldrig over 75 °C) og holdes mindst 30 min. Bagefter sættes
+# brugerens eget mål tilbage – også efter en genstart, når funktionen eller Wattlas' styring slås fra (eller står i skygge), når
+# målingerne er gamle, og når importloftet er nået. Ændrer brugeren selv målet undervejs, er det det nye ønske. Slået fra som standard.
+# shortcut: skiftes beholderen (entiteten), mens målet er hævet, sættes den gamle ikke tilbage – kortet låser feltet, mens det er hævet.
+input_boolean:
+  wattlas_varmtvand:
+    name: Wattlas · varmt vand på billig strøm
+    icon: mdi:water-boiler
+
+input_text:
+  wattlas_varmtvand_entitet:
+    name: Wattlas · varmtvandsbeholder
+    max: 255
+    icon: mdi:water-boiler
+
+input_number:
+  wattlas_varmtvand_ekstra:
+    name: Wattlas · varmt vand ekstra grader
+    min: 0
+    max: 10
+    step: 1
+    unit_of_measurement: °C
+    icon: mdi:thermometer-plus
+  # brugerens eget mål, mens Wattlas har hævet det (0 = intet hævet). Sættes kun af automationen
+  wattlas_varmtvand_brugerens:
+    name: Wattlas · varmt vand brugerens mål
+    min: 0
+    max: 100
+    step: 0.5
+    mode: box
+    unit_of_measurement: °C
+  # det mål, Wattlas selv satte (så en ændret indstilling for ekstra grader ikke ligner brugerens egen ændring)
+  wattlas_varmtvand_sat:
+    name: Wattlas · varmt vand hævet til
+    min: 0
+    max: 100
+    step: 0.5
+    mode: box
+    unit_of_measurement: °C
+
+automation:
+  - id: wattlas_varmtvand
+    alias: Wattlas · varmt vand på billig strøm
+    mode: queued
+    max: 3
+    max_exceeded: silent
+    triggers:
+      - trigger: time_pattern
+        minutes: /5
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: [input_boolean.wattlas_varmtvand, sensor.wattlas_prisniveau, binary_sensor.emhass_ui_data_frisk,
+                    input_boolean.emhass_styring_aktiv, input_boolean.emhass_har_overtaget]
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ states('input_text.wattlas_varmtvand_entitet') | regex_match('^(water_heater|number)[.][a-z0-9_]+$')
+             and (is_state('input_boolean.wattlas_varmtvand', 'on') or states('input_number.wattlas_varmtvand_brugerens') | float(0) > 0) }}
+    actions:
+      - variables:
+          ent: "{{ states('input_text.wattlas_varmtvand_entitet') }}"
+          vh: "{{ ent.startswith('water_heater.') }}"
+          nu: "{{ (state_attr(ent, 'temperature') if vh else states(ent)) | float(none) }}"
+          # beholderens maksimum, men aldrig over 75 °C (en number-entitet uden rigtigt maksimum har 100)
+          maks: "{{ [state_attr(ent, 'max_temp' if vh else 'max') | float(none), 75] | min if state_attr(ent, 'max_temp' if vh else 'max') | float(none) is not none else none }}"
+          gemt: "{{ states('input_number.wattlas_varmtvand_brugerens') | float(0) }}"
+          # sekunder siden brugerens mål sidst blev gemt eller nulstillet (= hævet eller sat tilbage)
+          siden: "{{ as_timestamp(now()) - as_timestamp(states.input_number.wattlas_varmtvand_brugerens.last_changed) }}"
+          ekstra: "{{ states('input_number.wattlas_varmtvand_ekstra') | float(0) }}"
+          graense: "{{ states('input_number.wattlas_import_graense_w') | float(0) }}"
+          net: "{{ states('sensor.emhass_m_grid_out_total_power') | float(0) }}"
+          # stop med det samme: slået fra, Wattlas styrer ikke (hovedafbryder/skygge), gamle målinger, importloftet
+          maa: >-
+            {{ is_state('input_boolean.wattlas_varmtvand', 'on') and ekstra > 0 and maks is not none and is_state('binary_sensor.emhass_ui_data_frisk', 'on')
+               and is_state('input_boolean.emhass_styring_aktiv', 'on') and is_state('input_boolean.emhass_har_overtaget', 'on') and (graense <= 0 or net < graense) }}
+          # billig time eller soloverskud – og et hævet mål holdes mindst 30 min (beholderens eget forbrug æder overskuddet)
+          oensket: "{{ maa and (is_state('sensor.wattlas_prisniveau', 'billig') or net < -1500 or (gemt > 0 and siden < 1800)) }}"
+          hoej: "{{ [nu + ekstra, maks] | min if maks is not none and nu is not none else none }}"
+      - condition: template  # beholderen svarer ikke: intet ændres (er der hævet, sættes det tilbage, når den er tilbage)
+        value_template: "{{ nu is not none }}"
+      - choose:
+          # hæv: brugerens mål gemmes først (aldrig et hævet mål – gemt er 0, når intet er hævet). Mindst 10 min efter sidste
+          # tilbagesætning, så en beholder, der først viser det nye mål ved næste aflæsning, ikke får det hævede gemt som brugerens
+          - conditions: "{{ oensket and gemt == 0 and nu < maks - 0.4 and siden > 600 }}"
+            sequence:
+              - action: input_number.set_value
+                target: {entity_id: input_number.wattlas_varmtvand_brugerens}
+                data: {value: "{{ nu }}"}
+              - action: input_number.set_value
+                target: {entity_id: input_number.wattlas_varmtvand_sat}
+                data: {value: "{{ hoej }}"}
+              - action: "{{ 'water_heater.set_temperature' if vh else 'number.set_value' }}"
+                target: {entity_id: "{{ ent }}"}
+                data: "{{ {'temperature': hoej} if vh else {'value': hoej} }}"
+              # det mål, beholderen faktisk viser (den kan runde eller klippe), er det, der sammenlignes med bagefter
+              - wait_template: "{{ ((state_attr(ent, 'temperature') if vh else states(ent)) | float(nu) - nu) | abs > 0.4 }}"
+                timeout: "{{ vent_s | default(120) }}"  # vent_s kun i testen
+              - if: "{{ wait.completed }}"
+                then:
+                  - action: input_number.set_value
+                    target: {entity_id: input_number.wattlas_varmtvand_sat}
+                    data: {value: "{{ (state_attr(ent, 'temperature') if vh else states(ent)) | float(hoej) }}"}
+          # brugeren har selv ændret målet, mens det var hævet: det er det nye ønske. Viser beholderen stadig brugerens
+          # gamle mål, er den bare ikke opdateret endnu
+          - conditions: "{{ gemt > 0 and (nu - states('input_number.wattlas_varmtvand_sat') | float(0)) | abs > 0.4 and (nu - gemt) | abs > 0.4 }}"
+            sequence:
+              - action: input_number.set_value
+                target: {entity_id: input_number.wattlas_varmtvand_brugerens}
+                data: {value: 0}
+          # sæt tilbage
+          - conditions: "{{ gemt > 0 and not oensket }}"
+            sequence:
+              - action: "{{ 'water_heater.set_temperature' if vh else 'number.set_value' }}"
+                target: {entity_id: "{{ ent }}"}
+                data: "{{ {'temperature': gemt} if vh else {'value': gemt} }}"
+              - wait_template: "{{ ((state_attr(ent, 'temperature') if vh else states(ent)) | float(nu) - gemt) | abs <= 0.4 }}"
+                timeout: "{{ vent_s | default(120) }}"  # vent_s kun i testen
+              - action: input_number.set_value
+                target: {entity_id: input_number.wattlas_varmtvand_brugerens}
+                data: {value: 0}

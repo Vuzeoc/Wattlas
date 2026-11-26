@@ -738,17 +738,23 @@ async def main():
         elif isinstance(x, list):
             for v in x: find(v)
     find(yaml.safe_load((REPO / 'packages/wattlas/emhass_forbindelse.yaml').read_text(encoding='utf-8')))
-    assert [t['handling'] for t in trin] == ['naive-mpc-optim', 'naive-mpc-optim', 'publish-data', 'publish-data']
+    assert [t['handling'] for t in trin] == ['naive-mpc-optim'] * 4 + ['publish-data'] * 2  # planen, storm som hold, uden storm, uden forbruger
     base = {'method_ts_round': 'first', 'continual_publish': False, 'set_use_battery': True, 'number_of_deferrable_loads': 0}
     forbr = {'number_of_deferrable_loads': 1, 'custom_deferrable_forecast_id': [{'entity_id': 'sensor.p_deferrable0', 'unit_of_measurement': 'W', 'friendly_name': 'Wattlas fleksibel forbruger'}]}
-    for t, ekstra in zip(trin[2:], ({'publish_prefix': 'hh_'}, {})):
+    for t, ekstra in zip(trin[4:], ({'publish_prefix': 'hh_'}, {})):
         assert Template(t['data'], hass).async_render({'fb_ekstra': {}}) == {**base, **ekstra}
         assert Template(t['data'], hass).async_render({'fb_ekstra': {**forbr, 'x': 1}}) == {**base, **ekstra, **forbr}
-    r = Template(trin[0]['data'], hass).async_render({'hus': {'ok': True, 'liste': [1, 2]}, 'beregning_basis': {'a': True}, 'fb_ekstra': {'b': 1}, 'hh_ekstra': {}})
+    v = {'hus': {'ok': True, 'liste': [1, 2]}, 'beregning_basis': {'a': True}, 'fb_ekstra': {'b': 1}, 'hh_ekstra': {}, 'storm_ekstra': {'s': 1, 'a': 2}}
+    r = Template(trin[0]['data'], hass).async_render(v)
+    assert r == {'a': 2, 'load_forecast_method': 'list', 'load_power_forecast': [1, 2], 'b': 1, 's': 1}, ('stormen vinder over basis', r)
+    # genforsøg med stormen som "hold niveauet" (samme skabelon), så uden storm (målet kunne ikke nås), men med forbrugeren
+    assert Template(trin[1]['data'], hass).async_render(v) == Template(trin[0]['data'], hass).async_render(v)
+    # genforsøget uden den fleksible forbruger/elbil (EMHASS svarer 400, når opgaven ikke kan løses) beholder stormen
+    r = Template(trin[2]['data'], hass).async_render({**v, 'hh_ekstra': {'c': 2}})
+    assert r == {'a': 2, 'load_forecast_method': 'list', 'load_power_forecast': [1, 2], 's': 1, 'c': 2}, r
+    # først til sidst uden storm
+    r = Template(trin[3]['data'], hass).async_render(v)
     assert r == {'a': True, 'load_forecast_method': 'list', 'load_power_forecast': [1, 2], 'b': 1}, r
-    # genforsøget uden den fleksible forbruger (EMHASS svarer 400, når opgaven ikke kan løses)
-    r = Template(trin[1]['data'], hass).async_render({'hus': {'ok': True, 'liste': [1, 2]}, 'beregning_basis': {'a': True}, 'fb_ekstra': {'b': 1}, 'hh_ekstra': {'c': 2}})
-    assert r == {'a': True, 'load_forecast_method': 'list', 'load_power_forecast': [1, 2], 'c': 2}, r
     # startspærren og stop må ikke afhænge af noget, integrationen selv laver: det forsvinder, før inverteren gives tilbage ved fjernelse
     pakker = ''.join(f.read_text(encoding='utf-8') for f in (REPO / 'packages').rglob('*.yaml'))
     egne = [e.entity_id for e in reg.entities.values() if e.platform == 'wattlas']

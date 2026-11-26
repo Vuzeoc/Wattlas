@@ -48,6 +48,7 @@ Wattlas er open source. Idéer og ønsker er meget velkomne – opret et issue, 
 | **Sikkerhed** | Startspærre til alt er indstillet, fasegrænse pr. fase, importloft, plan-validering, reserveplan hvis EMHASS forsvinder, automatisk selvforbrug ved fejl, besked ved udfald |
 | **Tilsidesættelser** | Lad nu / ingen netladning / gem batteriet / brug batteriet / stop solsalg – altid med udløb |
 | **Regler** | Tidsstyrede regler (fx "hverdage 16–21: gem batteriet til 80 %"), med arbejdsdage via Workday |
+| **Ferie og storm** | Ferie med hjemkomst-dato (standby i ferien, klar når I kommer hjem), "alle er væk", stormvarsel (Meteoalarm/DMI og vindstød), der fylder batteriet |
 | **Hvad-hvis** | Beregn planen med andre indstillinger uden at røre den rigtige styring |
 | **Fleksibel forbruger** | Lad EMHASS lægge varmtvandsbeholder, elbil eller pool i de bedste timer via en kontakt i HA |
 | **App** | To dashboards: *Wattlas* (live-energiflow, økonomi, historik, elpris, solprognose) og *Wattlas Styring* (styring, regler, planens logik, overvågning, teknik) |

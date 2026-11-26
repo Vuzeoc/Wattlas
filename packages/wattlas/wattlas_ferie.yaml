@@ -1,0 +1,63 @@
+# Wattlas – ferie og "ingen hjemme". I ferien regner planen kun med husets standby-forbrug (så den ikke køber strøm til en tom
+# bolig), og fra hjemkomsten med det normale igen. Ferie-dagene tælles ikke med i forbrugshistorikken bagefter.
+# Begge er slået fra, indtil brugeren vælger dem: så er planen præcis som før. Planen (emhass_forbindelse.yaml) læser kun
+# binary_sensor.wattlas_ferie og dens attributter.
+input_boolean:
+  wattlas_ferie:
+    name: Wattlas · ferie
+    icon: mdi:palm-tree
+  wattlas_ingen_hjemme:
+    name: Wattlas · standby, når alle har været væk et døgn
+    icon: mdi:home-export-outline
+
+input_datetime:
+  wattlas_ferie_fra:
+    name: Wattlas · ferie fra
+    has_date: true
+    has_time: true
+  wattlas_ferie_til:
+    name: Wattlas · hjem igen
+    has_date: true
+    has_time: true
+
+template:
+  - binary_sensor:
+      - name: Wattlas ferie
+        unique_id: wattlas_ferie
+        default_entity_id: binary_sensor.wattlas_ferie
+        icon: mdi:palm-tree
+        # tændt = planen regner med standby lige nu
+        state: >-
+          {% set t = as_timestamp(now()) %}
+          {% set fra = state_attr('input_datetime.wattlas_ferie_fra', 'timestamp') | float(0) %}{% set til = state_attr('input_datetime.wattlas_ferie_til', 'timestamp') | float(0) %}
+          {% set p = states.person | rejectattr('state', 'in', ['unknown', 'unavailable']) | list %}
+          {% set vaek = is_state('input_boolean.wattlas_ingen_hjemme', 'on') and p | count > 0 and p | selectattr('state', 'eq', 'home') | list | count == 0
+             and t - as_timestamp(p | map(attribute='last_changed') | max) >= 86400 %}
+          {{ vaek or (is_state('input_boolean.wattlas_ferie', 'on') and 0 < fra <= t < til) }}
+        attributes:
+          # perioden, planen regner med standby i (fremtiden tæller med, så hjemkomsten ses i planen)
+          fra_ts: >-
+            {% set fra = state_attr('input_datetime.wattlas_ferie_fra', 'timestamp') | float(0) %}{% set til = state_attr('input_datetime.wattlas_ferie_til', 'timestamp') | float(0) %}
+            {{ fra if is_state('input_boolean.wattlas_ferie', 'on') and 0 < fra < til else none }}
+          til_ts: >-
+            {% set fra = state_attr('input_datetime.wattlas_ferie_fra', 'timestamp') | float(0) %}{% set til = state_attr('input_datetime.wattlas_ferie_til', 'timestamp') | float(0) %}
+            {{ til if is_state('input_boolean.wattlas_ferie', 'on') and 0 < fra < til else none }}
+          # alle har været væk et døgn: standby i hele planen, til nogen kommer hjem (planen regnes om hvert 5. minut)
+          ingen_hjemme: >-
+            {% set p = states.person | rejectattr('state', 'in', ['unknown', 'unavailable']) | list %}
+            {{ is_state('input_boolean.wattlas_ingen_hjemme', 'on') and p | count > 0 and p | selectattr('state', 'eq', 'home') | list | count == 0
+               and as_timestamp(now()) - as_timestamp(p | map(attribute='last_changed') | max) >= 86400 }}
+          # en ferie, der er begyndt, springes over i historikken – også når kontakten er slået fra igen, og når næste ferie er skrevet ind
+          # (den forrige huskes, til den er 9 døgn gammel)
+          udeluk_fra: >-
+            {% set fra = state_attr('input_datetime.wattlas_ferie_fra', 'timestamp') | float(0) %}{% set til = state_attr('input_datetime.wattlas_ferie_til', 'timestamp') | float(0) %}{% set t = as_timestamp(now()) %}
+            {% set gl = this.attributes if this is defined and this.attributes is defined else {} %}
+            {% if 0 < fra < til and fra < t and (is_state('input_boolean.wattlas_ferie', 'on') or til <= t) %}{{ fra }}
+            {% elif gl.get('udeluk_til') | float(0) > t - 9 * 86400 %}{{ gl.get('udeluk_fra') }}
+            {% else %}{{ none }}{% endif %}
+          udeluk_til: >-
+            {% set fra = state_attr('input_datetime.wattlas_ferie_fra', 'timestamp') | float(0) %}{% set til = state_attr('input_datetime.wattlas_ferie_til', 'timestamp') | float(0) %}{% set t = as_timestamp(now()) %}
+            {% set gl = this.attributes if this is defined and this.attributes is defined else {} %}
+            {% if 0 < fra < til and fra < t and (is_state('input_boolean.wattlas_ferie', 'on') or til <= t) %}{{ til }}
+            {% elif gl.get('udeluk_til') | float(0) > t - 9 * 86400 %}{{ gl.get('udeluk_til') }}
+            {% else %}{{ none }}{% endif %}

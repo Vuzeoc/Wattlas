@@ -49,6 +49,7 @@ class Ind:
     faerdig: bool = False
     vent_op_s: float = VENT_OP_S
     sol_a: float = 0.0         # solens overskud i ampere pr. fase, laderens egen strøm talt med
+    sol_faerdig: bool = False  # bilen har nået det, solen må lade den op til
 
 
 @dataclass
@@ -62,15 +63,19 @@ class Husk:
 
 
 def _oensket(i: Ind) -> int:
-    """Det, brugeren og planen vil have, uden hensyn til pladsen. Fuld strøm eller ingenting (sol: det, solen rækker til)."""
+    """Det, brugeren og planen vil have, uden hensyn til pladsen. Fuld strøm eller ingenting (sol: det, solen rækker til).
+    "Klar til tid" tager også gratis sol uden for de planlagte timer, til bilen har nået solens grænse."""
     if i.tilsluttet is False or i.tilstand not in ("lad_nu", "klar", "sol"):
         return 0
     if i.tilstand == "lad_nu":
         return i.maks_a
-    if i.tilstand == "klar":
-        return i.maks_a if not i.faerdig and (i.plan or i.noed) else 0
     sol = floor(i.sol_a) if isfinite(i.sol_a) else 0
-    return min(i.maks_a, sol) if sol >= i.min_a else 0
+    paa_sol = min(i.maks_a, sol) if sol >= i.min_a else 0
+    if i.tilstand == "sol":
+        return paa_sol  # "Kun sol": til bilen selv stopper, som før
+    if not i.faerdig and (i.plan or i.noed):
+        return i.maks_a
+    return 0 if i.sol_faerdig else paa_sol
 
 
 def beslut(i: Ind, h: Husk) -> tuple[int | None, str]:

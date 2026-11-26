@@ -1,0 +1,81 @@
+# Wattlas – stormvarsel (slået fra, indtil brugeren slår det til). Kommer der storm, fylder planen batteriet i de billigste timer og
+# tømmer det ikke under 80 %, så huset har strøm, hvis nettet falder ud. Bagefter: den normale plan igen.
+# Storm = et alvorligt varsel om vind eller torden fra Meteoalarm (dækker DMI) inden for 36 timer, eller vindstød på mindst
+# 25 m/s i vejrudsigten inden for 36 timer. En fundet storm holdes til sit eget slut, dog højst 3 døgn frem, så et hængende varsel
+# aldrig holder batteriet fuldt. Planen (emhass_forbindelse.yaml) læser kun binary_sensor.wattlas_storm.
+input_boolean:
+  wattlas_storm:
+    name: Wattlas · stormvarsel
+    icon: mdi:weather-windy
+
+template:
+  - triggers:
+      - trigger: time_pattern
+        minutes: /15
+      - trigger: state
+        entity_id: input_boolean.wattlas_storm
+      - trigger: homeassistant
+        event: start
+    actions:
+      - variables:
+          vejr_id: "{{ states('input_text.wattlas_vejr_entitet') }}"
+      - if:
+          - condition: template
+            value_template: "{{ is_state('input_boolean.wattlas_storm', 'on') and vejr_id.startswith('weather.') }}"
+        then:
+          - action: weather.get_forecasts
+            continue_on_error: true
+            target:
+              entity_id: "{{ vejr_id }}"
+            data:
+              type: hourly
+            response_variable: vejr
+      - variables:
+          storm: >-
+            {% set t = as_timestamp(now()) %}
+            {% set ns = namespace(fra=none, til=none, kilde='', tekst='') %}
+            {% if is_state('input_boolean.wattlas_storm', 'on') %}
+              {# Meteoalarm: kun orange og rødt (alvorligt), kun vind, storm og torden, med start inden for 36 timer og et udløb #}
+              {% for e in integration_entities('meteoalarm') if is_state(e, 'on') %}
+                {% set a = states[e].attributes %}
+                {% set niveau = (a.get('awareness_level', '') ~ ' ' ~ a.get('severity', '')) | lower %}
+                {% set slags = (a.get('awareness_type', '') ~ ' ' ~ a.get('event', '')) | lower %}
+                {% set start = as_timestamp(a.get('onset') or a.get('effective'), 0) %}{% set slut = as_timestamp(a.get('expires'), 0) %}
+                {% if ('orange' in niveau or 'red' in niveau or 'severe' in niveau or 'extreme' in niveau)
+                   and ('wind' in slags or 'thunder' in slags or 'storm' in slags or 'vind' in slags or 'torden' in slags)
+                   and slut > t and (start == 0 or start - t <= 36 * 3600) %}
+                  {% set ns.fra = [ns.fra or 9e12, [start, t] | max] | min %}{% set ns.til = [ns.til or 0, [slut, t + 3 * 86400] | min] | max %}
+                  {% set ns.kilde = 'varsel' %}{% set ns.tekst = a.get('headline') or a.get('event') or 'Varsel om storm' %}
+                {% endif %}
+              {% endfor %}
+              {# vejrudsigten: vindstød i vejrets egen enhed – kendes enheden ikke, bruges den ikke #}
+              {% set f = {'m/s': 1, 'km/h': 1 / 3.6, 'mph': 0.44704, 'kn': 0.514444, 'ft/s': 0.3048}.get(state_attr(vejr_id, 'wind_speed_unit')) %}
+              {% set fc = vejr[vejr_id].forecast if vejr is defined and vejr[vejr_id] is defined and f is not none else [] %}
+              {% for x in fc if is_number(x.get('wind_gust_speed')) and x.wind_gust_speed | float * f >= 25 %}
+                {% set xt = as_timestamp(x.datetime, 0) %}
+                {% if 0 < xt - t <= 36 * 3600 or 0 <= t - xt < 3600 %}
+                  {% set ns.fra = [ns.fra or 9e12, [xt, t] | max] | min %}{% set ns.til = [ns.til or 0, xt + 3600] | max %}
+                  {% if ns.kilde == '' %}{% set ns.kilde = 'vejrudsigt' %}{% set ns.tekst = 'Vindstød på ' ~ (x.wind_gust_speed | float * f) | round(0) | int ~ ' m/s i vejrudsigten' %}{% endif %}
+                {% endif %}
+              {% endfor %}
+              {# en storm, der er fundet, holdes til sit eget slut (højst 3 døgn), selv om vindstødene dykker, eller vejret ikke svarer et øjeblik #}
+              {% set gl = states.binary_sensor.wattlas_storm %}
+              {% if ns.til is none and gl is not none and gl.attributes.get('til_ts') | float(0) > t %}
+                {% set ns.fra = gl.attributes.get('fra_ts') | float(t) %}{% set ns.til = gl.attributes.get('til_ts') | float %}
+                {% set ns.kilde = gl.attributes.get('kilde') or '' %}{% set ns.tekst = gl.attributes.get('tekst') or '' %}
+              {% endif %}
+            {% endif %}
+            {{ dict(fra=ns.fra, til=ns.til, kilde=ns.kilde, tekst=ns.tekst) }}
+    binary_sensor:
+      - name: Wattlas storm
+        unique_id: wattlas_storm
+        default_entity_id: binary_sensor.wattlas_storm
+        icon: mdi:weather-windy
+        state: "{{ storm.til is not none }}"
+        attributes:
+          kilde: "{{ storm.kilde }}"
+          tekst: "{{ storm.tekst }}"
+          fra: "{{ storm.fra | as_datetime | as_local if storm.fra is not none else none }}"
+          til: "{{ storm.til | as_datetime | as_local if storm.til is not none else none }}"
+          fra_ts: "{{ storm.fra }}"
+          til_ts: "{{ storm.til }}"

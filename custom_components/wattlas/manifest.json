@@ -2,10 +2,12 @@
   "domain": "wattlas",
   "name": "Wattlas",
   "after_dependencies": [
+    "automation",
     "hassio",
     "input_text",
     "mqtt",
-    "recorder"
+    "recorder",
+    "script"
   ],
   "categories": [
     "energy.solar_batteries"
@@ -23,5 +25,5 @@
   "issue_tracker": "https://github.com/Vuzeoc/Wattlas/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.5.1"
+  "version": "0.7.0"
 }

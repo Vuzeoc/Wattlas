@@ -20,11 +20,15 @@ Har du bilen i Home Assistant, så vælg dens **batteri i %** i samme vindue, og
 Så vælger du *lad til 80 %* i stedet for kWh. Bilens tal vises kun, når den sidder i laderen; sidder en gæst i laderen, bruges kWh. Er bilens tal
 gamle, regner Wattlas det ladede med.
 
+**To grænser i *Klar til tid*** (når bilen er i Home Assistant): *Lad til* gælder strøm fra nettet, *Sol op til* gratis sol – fx 80 % fra nettet og
+100 % på sol. *Sol op til* er aldrig lavere end *Lad til*. Gratis sol er det, huset ikke selv bruger, og som planen ikke lader husbatteriet med.
+**100 % til næste tur** løfter målet til 100 % og slår fra af sig selv, når bilen er fuld eller kobles fra. *Kun sol* lader som før, til bilen selv stopper.
+
 ## Tilstande
 | Tilstand | Hvad den gør |
 |---|---|
 | **Lad nu** | fuld strøm med det samme |
-| **Klar til tid** | så mange kWh, du vælger, i de billigste timer og færdig til klokkeslættet. Nås det ikke ellers, lades der uanset prisen |
+| **Klar til tid** | så mange kWh, du vælger, i de billigste timer og færdig til klokkeslættet. Nås det ikke ellers, lades der uanset prisen. Imellem lader den på gratis sol (overskud, der ellers sælges), når der er nok til laveste strøm. Ved *Energi* står, hvor længe det cirka tager ved fuld strøm |
 | **Kun sol** | kun strøm, huset ikke selv bruger. Kræver overskud til laderens laveste strøm (6 A: ca. 1,4 kW på én fase, 4,1 kW på tre) |
 | **Stop** | Wattlas holder laderen stoppet – også hvis den startes et andet sted |
 | **Fra** | Wattlas slipper laderen. Brug dens egen app |

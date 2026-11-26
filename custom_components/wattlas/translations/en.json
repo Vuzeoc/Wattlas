@@ -257,6 +257,10 @@
       "title": "Wattlas får ikke ren spotpris fra Energi Data Service",
       "description": "Tariffer (eller visning i øre/MWh) er slået til i Energi Data Service. Wattlas lægger selv nettarif og elafgift på, så de tælles to gange, og salgsprisen bliver forkert. Slå dem fra i Energi Data Service, og genstart Home Assistant."
     },
+    "anden_styring": {
+      "title": "Andre automationer styrer også inverteren",
+      "description": "Disse automationer eller scripts rører de samme indstillinger som Wattlas:\n\n{liste}\n\nTo styringer skriver oven i hinanden, så batteriet hverken gør det ene eller det andet. Slå dem fra, mens Wattlas styrer – eller slå Wattlas' styring fra. Meddelelsen forsvinder af sig selv inden for en time."
+    },
     "lader_stopper_ikke": {
       "title": "Elbil-laderen stopper ikke",
       "description": "Wattlas har bedt laderen stoppe flere gange, men bilen lader stadig. Stop den i laderens app, eller tag stikket ud. Wattlas bliver ved med at prøve."
@@ -313,7 +317,7 @@
           "elnet": "Elnet og sikringer (fasegrænse, importloft, eksport)",
           "netselskab": "Netselskab (hent nettarif og afgifter automatisk)",
           "priser": "Priser og tariffer",
-          "elbil": "Elbil: hold batteriet, mens bilen lader",
+          "elbil": "Elbil: laderens måling (når Wattlas ikke styrer laderen)",
           "lader": "Elbil-lader: lad Wattlas styre den",
           "sonnen": "SonnenBatterie: adresse og token"
         }
@@ -407,19 +411,24 @@
         }
       },
       "elbil": {
-        "title": "Elbil-lader",
-        "description": "Vælg laderens **effekt lige nu** (W eller kW). Så aflader husbatteriet ikke, mens bilen lader, og husprognosen regner ikke bilen med. Laderen læses kun – Wattlas styrer den ikke.\n\n**Godt at vide:** mens holdet er på, køber hele huset fra nettet, også i dyre timer. Det virker kun, mens Wattlas styrer, og kun når laderen sidder bag den måler, Wattlas bruger. SonnenBatterie kan ikke holdes.\n\n**Fundet:** {fundet}\n\nRyd feltet for at slå det helt fra.",
+        "title": "Elbilens måling",
+        "description": "Har du en lader, som Wattlas **ikke** selv styrer, så vælg dens **effekt lige nu** (W eller kW). Så regner husprognosen uden bilen, og i appen (Styring) kan du slå **Kun fra elnettet** til: husbatteriet aflader ikke, mens bilen lader, og bilen får strøm fra nettet og solen. Det er slået til fra start og kan slås fra i appen.\n\n**Fundet:** {fundet}\n\nStår laderen ikke her, så sæt den op i Home Assistant først. Vil du have Wattlas til at styre laderen, så brug *Elbil-lader* i stedet. Ryd feltet for at slå det helt fra.",
         "data": {
-          "elbil_sensor": "Laderens effekt",
-          "elbil_hold": "Hold batteriet, mens elbilen lader"
+          "elbil_sensor": "Laderens effekt"
         }
       },
       "lader": {
         "title": "Vælg din lader",
-        "description": "Vælg den lader, du allerede har i Home Assistant. Wattlas finder selv resten.\n\nEr den ikke på listen: sæt den først op i Home Assistant (Indstillinger → Enheder og tjenester), eller vælg *Min lader er ikke på listen* og peg på den.",
+        "description": "Vælg den lader, du allerede har i Home Assistant. Wattlas finder selv resten.\n\n**Står din lader ikke på listen,** er den sandsynligvis ikke sat op i Home Assistant endnu. Gør det først (fx OCPP eller laderens egen integration fra Markedspladsen), og kom så tilbage. Ellers vælg *Min lader er ikke på listen*, så peger du selv på den.",
         "data": {
-          "lader": "Lader",
-          "enhed": "Enhed (kun hvis den ikke er på listen)"
+          "lader": "Lader"
+        }
+      },
+      "lader_enhed": {
+        "title": "Hvilken enhed er din lader?",
+        "description": "Vælg laderens enhed, så finder Wattlas selv dens målinger og knapper. Her vises kun enheder, der måler effekt.\n\nStår den ikke her, så lad feltet være tomt og tryk *Indsend* – så peger du på hver ting for sig.",
+        "data": {
+          "enhed": "Laderens enhed"
         }
       },
       "lader_ok": {
@@ -499,6 +508,7 @@
     "abort": {
       "install_fejl": "Installationen blev ikke gennemført: {fejl}",
       "genstart_foerst": "Genstart Home Assistant først – Wattlas' nye filer er ikke indlæst endnu.",
+      "lader_styret": "Wattlas styrer allerede din lader og kender dens måling. *Kun fra elnettet* slås til og fra på fanen Elbil i appen.",
       "lader_ikke_styret": "{svar}\n\nWattlas styrer ikke laderen. Intet er ændret. Se guiden *Elbil-lader* for, hvad laderen skal kunne."
     }
   }

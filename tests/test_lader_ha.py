@@ -17,7 +17,7 @@ async def main():
     hass, *_ = await ny_hass('')
     import custom_components.wattlas.lader as M
     f = load_yaml(str(REPO / 'packages/wattlas/wattlas_lader.yaml'))
-    for dom in ('input_select', 'input_number', 'input_datetime', 'template'):
+    for dom in ('input_select', 'input_number', 'input_datetime', 'input_boolean', 'template'):
         assert await async_setup_component(hass, dom, {dom: f[dom]}), dom
     await hass.async_block_till_done()
     S = hass.states.async_set
@@ -73,6 +73,8 @@ async def main():
             S(f'sensor.emhass_m_external_ct_w_l{i}', m / 3 + fysik['hus'])
             S(f'sensor.emhass_m_grid_current_v_l{i}', 230)
         S('sensor.emhass_m_grid_out_total_power', m + 3 * fysik['hus'])
+        S('sensor.emhass_m_load_w_totalpower', m + 1500)  # husets forbrug med bilen, som husets måling viser det
+        S('sensor.emhass_solproduktion_samlet', fysik.get('sol', 0))
 
     async def trin(n=1, **k):
         for _ in range(n):
@@ -85,6 +87,7 @@ async def main():
 
     async def trin_raa():
         ur[0] += 10
+        hass.data[M.NOEGLE].meldt = None  # sensoren meldes ellers kun én gang i minuttet, når intet andet ændrer sig
         await hass.data[M.NOEGLE].trin()
         await hass.async_block_till_done()
         return hass.states.get('sensor.wattlas_lader')
@@ -309,6 +312,53 @@ async def main():
     assert st.attributes['bil_soc'] is None, 'kun fremme, når den er koblet på'
     await ny(); await til('klar'); await saet('input_number', 'input_number.wattlas_lader_ladet', value=0)
     assert (await trin(7)).attributes['bil_soc'] is None, 'ingen bil valgt'
+    # "100 % til næste tur": målet er 100 %, og den slår fra af sig selv, når bilen kobles fra
+    S('binary_sensor.bil_stik', 'on'); S('sensor.bil_soc', 50)
+    await ny(**BIL); await til('klar'); await saet('input_number', 'input_number.wattlas_lader_ladet', value=0)
+    await hass.services.async_call('input_boolean', 'turn_on', {'entity_id': 'input_boolean.wattlas_lader_tur'}, blocking=True)
+    st = await trin(2)
+    assert abs(st.attributes['rest_kwh'] - 50 / 100 * 60 / 0.9) < 0.2, ('til 100 %', st)
+    S('sensor.bil_soc', 80); st = await trin(3)
+    assert st.state != 'færdig' and fysik['til'], ('80 % er ikke færdig, når turen kræver 100 %', st)
+    await trin(2, bil=False)
+    assert hass.states.get('input_boolean.wattlas_lader_tur').state == 'off', 'bilen er kørt: slået fra'
+    for e, s, hvorfor in (('sensor.bil_soc', 99, 'fuld'), ('binary_sensor.bil_stik', 'off', 'bilens eget stik er ude')):
+        S('sensor.bil_soc', 50); S('binary_sensor.bil_stik', 'on'); await trin(2, bil=True)
+        await hass.services.async_call('input_boolean', 'turn_on', {'entity_id': 'input_boolean.wattlas_lader_tur'}, blocking=True)
+        await trin(2)
+        assert hass.states.get('input_boolean.wattlas_lader_tur').state == 'on', 'bilen er i laderen og ikke fuld: bliver på'
+        S(e, s); await trin(2)
+        assert hass.states.get('input_boolean.wattlas_lader_tur').state == 'off', hvorfor
+    S('binary_sensor.bil_stik', 'on')
+    # gratis sol i "klar til tid" uden for planens timer – op til solens grænse, aldrig under "lad til"
+    S('sensor.wattlas_lader_plan', 0); S('sensor.bil_soc', 85)
+    await saet('input_number', 'input_number.wattlas_lader_sol_maal', value=90)
+    await ny(**BIL); await til('klar'); st = await trin(3, sol=0)
+    assert not fysik['til'] and st.state == 'færdig', ('ingen sol, målet nået', st)
+    st = await trin(12, sol=8000)
+    assert fysik['til'] and st.attributes['ordre_a'] == 9, ('8000 W sol − 1500 W hus = 9 A', st)
+    S('sensor.bil_soc', 90); st = await trin(3, sol=8000)
+    assert not fysik['til'], ('solens grænse nået', st)
+    await saet('input_number', 'input_number.wattlas_lader_sol_maal', value=50); S('sensor.bil_soc', 85); st = await trin(3, sol=8000)
+    assert not fysik['til'], ('solens grænse under "lad til" (80 %) tæller som "lad til"', st)
+    S('sensor.bil_soc', 70); st = await trin(40, sol=8000)  # efter et stop hviler laderen 5 min
+    assert fysik['til'], ('70 % < "lad til" 80 %: solen lader, selv om "sol op til" står lavere', st)
+    # planen lader husbatteriet med 3 kW af solen: det er ikke overskud (8000 − 1500 − 3000 W = 5 A < 6 A)
+    S('input_number.emhass_plan_batteri_w', -3000); st = await trin(12, sol=8000)
+    assert fysik['til'], ('styringen er slået fra: en gammel planværdi tæller ikke', st)
+    for e in ('input_boolean.emhass_styring_aktiv', 'input_boolean.emhass_har_overtaget', 'input_boolean.emhass_plan_gyldig'):
+        S(e, 'on')
+    st = await trin(12, sol=8000)
+    assert not fysik['til'], ('husbatteriet får sin sol først', st)
+    S('input_number.emhass_plan_batteri_w', 0)
+    for e in ('input_boolean.emhass_styring_aktiv', 'input_boolean.emhass_har_overtaget', 'input_boolean.emhass_plan_gyldig'):
+        S(e, 'off')
+    # "Kun sol": som før – til bilen selv stopper, uanset "sol op til"
+    S('sensor.bil_soc', 95); await til('sol'); st = await trin(40, sol=8000)
+    assert fysik['til'], ('Kun sol stopper ikke ved "sol op til"', st)
+    await til('klar')
+    await saet('input_number', 'input_number.wattlas_lader_sol_maal', value=100); S('sensor.bil_soc', 50)
+    fysik['sol'] = 0
     S('sensor.wattlas_lader_plan', 0)
     print('Bilen i HA: OK')
 

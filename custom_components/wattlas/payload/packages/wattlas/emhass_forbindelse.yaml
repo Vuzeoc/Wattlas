@@ -181,16 +181,39 @@ script:
             {%- if ft > 0 and is_number(f.temperature) -%}{%- set F.d = dict(F.d, **{(((ft // 3600) * 3600) | int | string): f.temperature | float}) -%}{%- endif -%}
           {%- endfor -%}
           {%- set nu_temp = states('sensor.wattlas_udetemperatur') -%}
-          {%- set ns = namespace(liste=[], fejl=0, juster=0) -%}
+          {#- ferie (binary_sensor.wattlas_ferie): standby i perioden, og en overstået ferie tælles ikke med i historikken -#}
+          {%- set fe = states.binary_sensor.wattlas_ferie.attributes if states.binary_sensor.wattlas_ferie is not none else {} -%}
+          {%- set ff = fe.get('fra_ts') | float(0) -%}{%- set ft = fe.get('til_ts') | float(0) -%}
+          {%- set uf = fe.get('udeluk_fra') | float(0) -%}{%- set ut = fe.get('udeluk_til') | float(0) -%}
+          {%- set vaek = fe.get('ingen_hjemme') == true -%}
+          {%- set lraw = state_attr('sensor.wattlas_husforbrug_lang', 'data') if ut > uf and ut > as_timestamp(now()) - 9 * 86400 else none -%}
+          {%- set LL = namespace(d={}) -%}
+          {%- for r in ((lraw | from_json if lraw is string else lraw) or []) -%}{%- if r | count == 2 and is_number(r[1]) -%}{%- set LL.d = dict(LL.d, **{(r[0] | int | string): r[1] | float}) -%}{%- endif -%}{%- endfor -%}
+          {%- set ns = namespace(liste=[], fejl=0, juster=0, ferie=0) -%}
           {%- for i in range(prognose.intervaller | int) -%}
             {%- set ts = (start_ts | float + i * 1800) | int -%}
-            {%- set h = namespace(v=[], t=[]) -%}
-            {%- for k in range(1, 8) -%}
-              {%- set key = (ts - k * 86400) | string -%}
-              {%- if key in L.d -%}{%- set h.v = h.v + [L.d[key]] -%}{%- endif -%}
-              {%- set tkey = (((ts - k * 86400) // 3600) * 3600) | string -%}
-              {%- if tkey in T.d -%}{%- set h.t = h.t + [T.d[tkey]] -%}{%- endif -%}
+            {%- set h = namespace(v=[], t=[], a=[], u=[]) -%}
+            {#- samme klokkeslæt k døgn før (lokal tid regnes på uret): et døgn over sommer-/vintertid er 23 eller 25 timer, ikke 86400 s -#}
+            {%- set lt = ts | as_datetime | as_local -%}
+            {%- for k in range(1, 10) -%}
+              {%- set kt = as_timestamp(lt - timedelta(days=k)) | int -%}{%- set key = kt | string -%}
+              {%- if key in L.d -%}
+                {%- if k < 8 -%}{%- set h.a = h.a + [L.d[key]] -%}{%- endif -%}
+                {%- if not (uf <= kt < ut) -%}{%- set h.u = h.u + [L.d[key]] -%}{%- endif -%}
+              {%- endif -%}
+              {%- set tkey = ((kt // 3600) * 3600) | string -%}
+              {%- if k < 8 and tkey in T.d -%}{%- set h.t = h.t + [T.d[tkey]] -%}{%- endif -%}
             {%- endfor -%}
+            {#- uden ferie: de sidste 7 døgn som før. Efter en ferie (der rører de sidste 9 døgn): de 7 seneste dage uden for den (dag 8-9 kan tage
+                over); er der under 3, så timerne fra før ferien i langtidsstatistikken -#}
+            {%- set nylig = ut > uf and uf < ts - 86400 and ut > ts - 9 * 86400 -%}
+            {%- if nylig and h.u | count < 3 -%}
+              {%- for k in range(10, 61) if (h.u | count) < 7 -%}
+                {%- set kt = as_timestamp(lt - timedelta(days=k)) | int -%}{%- set key = ((kt // 3600) * 3600) | string -%}
+                {%- if key in LL.d and not (uf <= kt < ut) -%}{%- set h.u = h.u + [LL.d[key]] -%}{%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
+            {%- set h.v = h.u[:7] if nylig and h.u | count >= 3 else h.a -%}
             {%- if h.v | count >= 3 -%}
               {%- set base = (h.v | sum) / (h.v | count) -%}
               {%- set fkey = ((ts // 3600) * 3600) | string -%}
@@ -199,13 +222,16 @@ script:
               {%- set adj = kulde_w_pr_grad * (t7 - tf) if (t7 is not none and tf is not none and [t7, tf] | min < 15) else 0 -%}
               {%- set adj = [-1500, [3000, adj] | min] | max -%}
               {%- set ns.juster = ns.juster + adj -%}
-              {%- set ns.liste = ns.liste + [[150, (base + adj) | round(0)] | max] -%}
+              {#- i ferien: halvtimens laveste fra de sidste dage (det, der kører af sig selv – også en varmepumpe), plus kuldejusteringen -#}
+              {%- set fer = vaek or ff <= ts < ft -%}
+              {%- if fer -%}{%- set ns.ferie = ns.ferie + 1 -%}{%- endif -%}
+              {%- set ns.liste = ns.liste + [[150, (((h.a + h.u) | min if fer else base) + adj) | round(0)] | max] -%}
             {%- else -%}
-              {%- set ns.fejl = ns.fejl + 1 -%}{%- set nu = states('sensor.emhass_m_load_w_totalpower') -%}{%- set nu = [0, nu | float - states('sensor.wattlas_elbil_effekt') | float(0)] | max if is_number(nu) else nu -%}{%- set ns.liste = ns.liste + [[150, ((h.v | sum) / (h.v | count)) if h.v | count > 0 else (nu | float if is_number(nu) else 500)] | max | round(0)] -%}
+              {%- set ns.fejl = ns.fejl + 1 -%}{%- set nu = states('sensor.emhass_m_load_w_totalpower') -%}{%- set nu = [0, nu | float - states('sensor.wattlas_elbil_effekt') | float(0)] | max if is_number(nu) else nu -%}{%- set fer = vaek or ff <= ts < ft -%}{%- if fer -%}{%- set ns.ferie = ns.ferie + 1 -%}{%- endif -%}{%- set ns.liste = ns.liste + [[150, ((h.a + h.u) | min) if fer and (h.a + h.u) | count > 0 else ((h.v | sum) / (h.v | count)) if h.v | count > 0 else (nu | float if is_number(nu) else 500)] | max | round(0)] -%}
             {%- endif -%}
           {%- endfor -%}
           {{ dict(ok=(ns.liste | count == prognose.intervaller | int), liste=ns.liste, fejl=ns.fejl,
-                  kwh=((ns.liste | sum) / 2000) | round(1), kulde_kwh=(ns.juster / 2000) | round(1), vejr_timer=F.d | count) }}
+                  kwh=((ns.liste | sum) / 2000) | round(1), kulde_kwh=(ns.juster / 2000) | round(1), vejr_timer=F.d | count, ferie=ns.ferie) }}
     - variables:
         beregning_basis:
           prediction_horizon: '{{ prognose.intervaller | int }}'
@@ -274,16 +300,48 @@ script:
         hh_ekstra: >-
           {% if hh is none %}{{ {} }}{% else %}
           {% set r = [15, [hh.get('reserve', 15) | float(15), soc | float(15)] | min] | max %}
-          {{ dict(battery_minimum_state_of_charge=r / 100, soc_final=([[hh.get('slut_soc', 30) | float(30), maks_soc] | min, r] | max) / 100,
+          {% set ka = states('input_number.wattlas_batteri_kwh') | float(0) %}
+          {% set kn = hh.get('batteri_kwh', ka) | float(ka) %}
+          {% set f = ka / kn if kn >= 1 and ka > 0 else 1 %}
+          {% set slut = [[hh.get('slut_soc', 30) | float(30), maks_soc] | min, r] | max %}
+          {% set batt = dict(battery_charge_power_max=0, battery_discharge_power_max=0, soc_final=soc | float(15) / 100) if kn < 1
+             else dict(battery_nominal_energy_capacity=(kn * 1000) | int, soc_init=([maks_soc | float(100), soc | float(15) * f] | min) / 100,
+                       battery_minimum_state_of_charge=[maks_soc | float(100) - 5, r * f] | min / 100,
+                       soc_final=([maks_soc | float(100), slut * f] | min) / 100) if f != 1 else {} %}
+          {{ dict(dict(battery_minimum_state_of_charge=r / 100, soc_final=slut / 100,
                   maximum_power_from_grid=([1000, [states('input_number.wattlas_maks_netimport_w')|float(0), (hh.get('max_net_kw', 0) | float(0) * 1000 or 99999)] | min] | max) | int,
-                  weight_battery_discharge=[0, [1, hh.get('slid', 0.25) | float(0.25)] | min] | max, publish_prefix='hh_') }}{% endif %}
+                  weight_battery_discharge=[0, [1, hh.get('slid', 0.25) | float(0.25)] | min] | max, publish_prefix='hh_'), **batt) }}{% endif %}
+    - variables:
+        storm_ekstra: >-
+          {% set s = states.binary_sensor.wattlas_storm %}
+          {% if hh is none and s is not none and s.state == 'on' %}
+          {% set r = [15, [[states('input_number.wattlas_reserve') | float(15), 80] | max, maks_soc | float(100), soc | float(15)] | min] | max %}
+          {% set kap = states('input_number.wattlas_batteri_kwh') | float(0) * 1000 %}
+          {% set fart = [charge_limit | float(0), beregning_basis.maximum_power_from_grid | float(0) - (hus.liste | map('float', 0) | max if hus.ok else 3000)] | min %}
+          {% set naa = soc | float(0) + ([0, fart] | max * 0.95 * (prognose.intervaller | int) / 2 / kap * 100 if kap > 0 else 0) - 5 %}
+          {# fyldt så højt, brugeren tillader (Højeste batteriniveau), og aldrig under det, batteriet holdes på #}
+          {{ dict(battery_minimum_state_of_charge=r / 100, soc_final=([r, [maks_soc | float(100), naa] | min] | max) / 100) }}
+          {% else %}{{ {} }}{% endif %}
     - action: wattlas.emhass
       data:
         handling: naive-mpc-optim
         data: >-
           {% set b = dict(beregning_basis, load_forecast_method='list', load_power_forecast=hus.liste) if hus.ok else beregning_basis %}
-          {% set c = dict(b, **fb_ekstra) %}{{ dict(c, **hh_ekstra) }}
+          {% set c = dict(dict(b, **fb_ekstra), **storm_ekstra) %}{{ dict(c, **hh_ekstra) }}
       response_variable: emhass_svar
+    - if:
+      - condition: template
+        value_template: '{{ emhass_svar.status | int != 200 and storm_ekstra | count > 0 }}'
+      then:
+      - variables:
+          storm_ekstra: '{{ dict(storm_ekstra, soc_final=storm_ekstra.battery_minimum_state_of_charge) }}'  # kun hold niveauet
+      - action: wattlas.emhass
+        data:
+          handling: naive-mpc-optim
+          data: >-
+            {% set b = dict(beregning_basis, load_forecast_method='list', load_power_forecast=hus.liste) if hus.ok else beregning_basis %}
+            {% set c = dict(dict(b, **fb_ekstra), **storm_ekstra) %}{{ dict(c, **hh_ekstra) }}
+        response_variable: emhass_svar
     - if:
       - condition: template
         value_template: '{{ emhass_svar.status | int != 200 and fb_ekstra | count > 0 }}'
@@ -296,8 +354,37 @@ script:
           handling: naive-mpc-optim
           data: >-
             {% set b = dict(beregning_basis, load_forecast_method='list', load_power_forecast=hus.liste) if hus.ok else beregning_basis %}
-            {{ dict(b, **hh_ekstra) }}
+            {% set c = dict(b, **storm_ekstra) %}{{ dict(c, **hh_ekstra) }}
         response_variable: emhass_svar
+    - if:
+      - condition: template
+        value_template: '{{ emhass_svar.status | int != 200 and storm_ekstra | count > 0 }}'
+      then:
+      - variables:
+          storm_ekstra: '{{ {} }}'
+      - action: wattlas.emhass
+        data:
+          handling: naive-mpc-optim
+          data: >-
+            {% set b = dict(beregning_basis, load_forecast_method='list', load_power_forecast=hus.liste) if hus.ok else beregning_basis %}
+            {% set c = dict(b, **fb_ekstra) %}{{ dict(c, **hh_ekstra) }}
+        response_variable: emhass_svar
+      - if:
+        - condition: template
+          value_template: '{{ emhass_svar.status | int == 200 and hh is none }}'
+        then:
+        - action: persistent_notification.create
+          data:
+            notification_id: wattlas_storm_droppet
+            title: Wattlas – stormvarsel
+            message: Planen kunne ikke regnes med stormvarslet, så den er regnet uden. Reguleringen holder stadig batteriet på 80 % og lader op før stormen.
+    - if:
+      - condition: template
+        value_template: "{{ emhass_svar.status | int == 200 and storm_ekstra | count > 0 or not is_state('binary_sensor.wattlas_storm', 'on') }}"
+      then:
+      - action: persistent_notification.dismiss
+        data:
+          notification_id: wattlas_storm_droppet
     - if:
       - condition: template
         value_template: '{{ hh is not none }}'
@@ -619,6 +706,31 @@ script:
         ts_soc: >-
           {{ states('input_number.wattlas_tilsidesaet_soc') | float(80) if is_state('binary_sensor.wattlas_tilsidesaettelse_aktiv', 'on')
              else [20, [100, state_attr('sensor.wattlas_aktiv_regel', 'soc') | float(80)] | min] | max }}
+    # stormvarsel (wattlas_storm.yaml): når planen ikke selv har batteriet på 80 % før stormen, lades der fra nettet nu (med tid til overs),
+    # og en tidsstyret "brug" springes over. En manuel tilsidesættelse vinder stadig, og alle hårde grænser nedenfor gælder
+    - variables:
+        storm: >-
+          {% set s = states.binary_sensor.wattlas_storm %}
+          {# er nettet faldet ud (alle faser uden spænding), skal batteriet forsyne huset: stormen holder ikke igen #}
+          {% set net_nede = states('sensor.emhass_m_grid_current_v_l1') | float(230) < 100 and states('sensor.emhass_m_grid_current_v_l2') | float(230) < 100
+             and states('sensor.emhass_m_grid_current_v_l3') | float(230) < 100 %}
+          {% if s is not none and s.state == 'on' and not net_nede and not is_state('binary_sensor.wattlas_tilsidesaettelse_aktiv', 'on') %}
+            {% set res = states('input_number.wattlas_reserve') | float(15) %}
+            {% set r = [[res, 80] | max, [states('input_number.wattlas_maks_soc') | float(0) or 100, res] | max] | min %}
+            {# farten er begrænset af importloftet og fasegrænsen minus husets forbrug; 80 % af det for en sikkerheds skyld #}
+            {% set hus = states('sensor.emhass_m_load_w_totalpower') | float(0) %}
+            {% set eff = [states('input_number.wattlas_maks_netladeeffekt_w') | float(0),
+                          (states('input_number.wattlas_import_graense_w') | float(0) or 99999) - hus,
+                          (3 * states('input_number.wattlas_fase_graense_a') | float(0) * 230 or 99999) - hus] | min * 0.8 %}
+            {% set timer = (r - soc) / 100 * states('input_number.wattlas_batteri_kwh') | float(0) * 1000 / (eff * 0.95) if eff > 0 and soc < r else 0 %}
+            {# er ladningen først i gang, fortsætter den til målet – ellers ville den starte og stoppe hvert par minutter #}
+            {{ dict(paa=true, r=r, lad=soc < r and (eff <= 0 or is_state('switch.wattlas_netladning', 'on')
+                    or as_timestamp(s.attributes.get('fra'), 0) - as_timestamp(now()) <= (timer + 1) * 3600)) }}
+          {% else %}{{ dict(paa=false, r=0, lad=false) }}{% endif %}
+    - variables:
+        # under r holdes batteriet ("gem"), så en plan uden storm ikke aflader og netladningen ikke skifter frem og tilbage
+        ts: "{{ 'lad' if storm.lad else 'gem' if storm.paa and soc <= storm.r and ts in ['ingen', 'brug'] else 'ingen' if storm.paa and ts == 'brug' else ts }}"
+        ts_soc: "{{ storm.r if storm.lad else ts_soc }}"
     - variables:
         p_batt: >-
           {% if ts == 'lad' %}{{ p_batt if soc >= ts_soc else -(states('input_number.wattlas_maks_netladeeffekt_w')|float(0)) }}

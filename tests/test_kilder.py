@@ -16,7 +16,7 @@ async def main():
     from custom_components.wattlas import config_flow as CF
     hass.states.async_remove('sensor.wattlas_spotpris')  # test_flows hjælper sætter en falsk; her er det den rigtige
     f = load_yaml(str(REPO / 'packages/wattlas/wattlas_kilder.yaml'))
-    for dom in ('input_text', 'template'):
+    for dom in ('input_text', 'input_number', 'template'):
         assert await async_setup_component(hass, dom, {dom: f[dom]}), dom
     await hass.async_block_till_done()
     S = hass.states.async_set
@@ -97,6 +97,15 @@ async def main():
     t = [dt_util.parse_datetime(x['datetime']) for x in fc]
     assert all((b - a).total_seconds() == 900 for a, b in zip(t, t[1:])), 'kvarterer i træk, uden huller og dubletter'
     assert CF._prognose_fejl(hass, CF.SOLCAST) is None, 'Wattlas godtager den som Helios'
+    # forsigtig solprognose: halvvejs mod Solcasts 10 %-bud (her 0); 0 % = præcis som før
+    assert v('input_number.wattlas_sol_forsigtig').state == '0.0', 'starter på 0'
+    await hass.services.async_call('input_number', 'set_value', {'entity_id': 'input_number.wattlas_sol_forsigtig', 'value': 50}, blocking=True)
+    await hass.async_block_till_done()
+    f2 = v(CF.SOLCAST).attributes['forecast']
+    assert f2[46]['watts'] == 1150 and f2[2]['watts'] == 50 and len(f2) == len(fc), f2[44:48]
+    await hass.services.async_call('input_number', 'set_value', {'entity_id': 'input_number.wattlas_sol_forsigtig', 'value': 0}, blocking=True)
+    await hass.async_block_till_done()
+    assert v(CF.SOLCAST).attributes['forecast'] == fc, 'tilbage til Solcasts eget bud'
     ui = {'solprognose': CF.SOLCAST}
     assert CF._kilder(hass, ui) == {}, 'Konfigurer igen uden ændring'
     # overlap mellem dagene og en sensor uden data

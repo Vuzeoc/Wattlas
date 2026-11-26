@@ -176,7 +176,8 @@ async def main():
     hass.states.async_set(ENT, ''); hass.states.async_set(TIL, 'off')
     hass.states.async_set('sensor.vaerksted_power', '20', {'device_class': 'power', 'unit_of_measurement': 'W'})
     r = await menu()
-    assert std(r) == {'elbil_sensor': None, 'elbil_hold': True} and 'Ingen' in r['description_placeholders']['fundet'], r
+    assert std(r) == {'elbil_sensor': None} and 'Ingen' in r['description_placeholders']['fundet'], r
+    assert 'sensor.vaerksted_power' not in r['data_schema'].schema['elbil_sensor'].config.get('exclude_entities', []), 'ingen kendt lader: alle effekter, undtagen husets egne'
     # en kendt lader foreslås – den samlede effekt, ikke faserne eller slåede fra
     reg = er.async_get(hass)
     for platform, uid, enhed, navn in (('zaptec', 'x_total_charge_power', 'W', 'Zaptec Carport'), ('zaptec', 'x_phase1', 'W', 'Zaptec fase 1'), ('easee', 'a_import_power', 'kW', 'Equalizer'), ('deye', 'y', 'W', 'Inverter')):
@@ -185,6 +186,7 @@ async def main():
     zap = next(e.entity_id for e in reg.entities.values() if e.unique_id == 'x_total_charge_power')
     r = await menu()
     assert std(r)['elbil_sensor'] == zap and 'Zaptec Carport' in r['description_placeholders']['fundet'] and 'fase 1' not in r['description_placeholders']['fundet'], r
+    assert r['data_schema'].schema['elbil_sensor'].config['include_entities'] == [zap], 'kendte ladere: kun dem på listen'
     # inverterens egne sensorer (også omdøbte) er husets forbrug, ikke bilen
     from homeassistant.helpers import device_registry as dr
     dev = dr.async_get(hass).async_get_or_create(config_entry_id=entry.entry_id, identifiers={('x', 'inv')})
@@ -196,22 +198,24 @@ async def main():
         if attr:
             hass.states.async_set(forkert, 'Charging' if forkert == 'sensor.tekst' else '500', attr)
         kald.clear()
-        f = await om.async_configure(r['flow_id'], {'elbil_sensor': forkert, 'elbil_hold': True})
-        assert f['errors'] == {'elbil_sensor': 'elbil_sensor'} and not kald, (forkert, f)
-    r = await om.async_configure(r['flow_id'], {'elbil_sensor': zap, 'elbil_hold': True})
-    assert r['type'] == 'create_entry' and ('input_text', 'set_value', ENT, zap) in kald and ('input_boolean', 'turn_on', TIL, None) in kald, kald
+        try:  # afvist: af feltet selv (ikke på listen) eller af Wattlas' eget tjek
+            f = await om.async_configure(r['flow_id'], {'elbil_sensor': forkert})
+            assert f['errors'] == {'elbil_sensor': 'elbil_sensor'}, (forkert, f)
+        except __import__('homeassistant').data_entry_flow.InvalidData:
+            pass
+        assert not kald, (forkert, kald)
+    r = await om.async_configure(r['flow_id'], {'elbil_sensor': zap})
+    assert r['type'] == 'create_entry' and ('input_text', 'set_value', ENT, zap) in kald and ('input_boolean', 'turn_on', TIL, None) in kald, ('ny lader: slået til', kald)
     # en lader, der er offline lige nu, må gerne vælges, når enheden kendes
     hass.states.async_set(zap, 'unavailable', {'unit_of_measurement': 'W', 'device_class': 'power'}); hass.states.async_set(ENT, zap); hass.states.async_set(TIL, 'on')
     r = await menu()
-    assert std(r) == {'elbil_sensor': zap, 'elbil_hold': True}
-    kald.clear()
-    r = await om.async_configure(r['flow_id'], {'elbil_sensor': zap, 'elbil_hold': False})
-    assert r['type'] == 'create_entry' and ('input_boolean', 'turn_off', TIL, None) in kald, kald
-    hass.states.async_set(TIL, 'off')
-    assert std(await menu()) == {'elbil_sensor': zap, 'elbil_hold': False}, 'et hold, man har slået fra, må ikke slås til igen'
+    assert std(r) == {'elbil_sensor': zap}
+    hass.states.async_set(TIL, 'off'); kald.clear()
+    r = await om.async_configure(r['flow_id'], {'elbil_sensor': zap})
+    assert r['type'] == 'create_entry' and not [k for k in kald if k[2] == TIL], ('slået fra i appen: forbliver slået fra', kald)
     # ryddes feltet, er det slået helt fra
     r = await menu(); kald.clear()
-    r = await om.async_configure(r['flow_id'], {'elbil_hold': True})
+    r = await om.async_configure(r['flow_id'], {})
     assert r['type'] == 'create_entry' and ('input_text', 'set_value', ENT, '') in kald and ('input_boolean', 'turn_off', TIL, None) in kald, kald
     # flere kendte ladere: intet gættes
     e = reg.async_get_or_create('sensor', 'wallbox', 'charging_power-1', original_name='Wallbox')
@@ -224,6 +228,10 @@ async def main():
     assert set(std(r)) == {'elbil_sensor'}
     r = await om.async_configure(r['flow_id'], {'elbil_sensor': zap})
     assert r['type'] == 'create_entry' and ('input_text', 'set_value', ENT, zap) in kald and ('input_boolean', 'turn_off', TIL, None) in kald, kald
+    # styrer Wattlas laderen, er der intet at vælge her
+    hass.config_entries.async_update_entry(entry, data={**entry.data, 'lader': {'slags': 'ocpp', 'effekt': zap}})
+    r = await menu()
+    assert r['type'] == 'abort' and r['reason'] == 'lader_styret', r
     await hass.async_stop(force=True)
     print('Konfigurer → Elbil-lader: OK')
 

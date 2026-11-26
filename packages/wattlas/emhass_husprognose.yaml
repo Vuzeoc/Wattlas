@@ -2,7 +2,7 @@
 # Læser kun fra Home Assistants egen database. Selve prognosen beregnes i
 # script.emhass_test_helios (emhass_forbindelse.yaml) lige før EMHASS-kaldet.
 sql:
-  # Husets forbrug uden elbilen pr. halve time de sidste 8 døgn (fra 5-minutters statistik)
+  # Husets forbrug uden elbilen pr. halve time de sidste 10 døgn (fra 5-minutters statistik)
   - name: EMHASS husforbrug historik
     unique_id: emhass_husforbrug_historik
     query: >-
@@ -12,18 +12,31 @@ sql:
         LEFT JOIN statistics_short_term ev ON ev.start_ts = st.start_ts
           AND ev.metadata_id = (SELECT id FROM statistics_meta WHERE statistic_id = 'sensor.wattlas_elbil_effekt')
         WHERE sm.statistic_id = 'sensor.emhass_m_load_w_totalpower'
-          AND st.start_ts >= CAST(strftime('%s', 'now') AS INTEGER) - 8 * 86400
+          AND st.start_ts >= CAST(strftime('%s', 'now') AS INTEGER) - 10 * 86400
           AND st.mean IS NOT NULL
         GROUP BY slot ORDER BY slot)
     column: antal
-  # Udetemperatur time for time de sidste 8 døgn (fra timestatistik)
+  # Udetemperatur time for time de sidste 10 døgn (fra timestatistik)
   - name: EMHASS udetemperatur historik
     unique_id: emhass_udetemperatur_historik
     query: >-
       SELECT COUNT(*) AS antal, json_group_array(json_array(CAST(st.start_ts AS INTEGER), ROUND(st.mean, 1))) AS data
       FROM statistics st JOIN statistics_meta sm ON st.metadata_id = sm.id
       WHERE sm.statistic_id = 'sensor.wattlas_udetemperatur'
-        AND st.start_ts >= CAST(strftime('%s', 'now') AS INTEGER) - 8 * 86400
+        AND st.start_ts >= CAST(strftime('%s', 'now') AS INTEGER) - 10 * 86400
+        AND st.mean IS NOT NULL
+    column: antal
+
+  # Husets forbrug uden elbilen time for time de sidste 61 døgn (langtidsstatistik). Bruges kun efter en ferie, der fylder det meste af ugen
+  - name: Wattlas husforbrug lang
+    unique_id: wattlas_husforbrug_lang
+    query: >-
+      SELECT COUNT(*) AS antal, json_group_array(json_array(CAST(st.start_ts AS INTEGER), ROUND(MAX(st.mean - COALESCE(ev.mean, 0), MIN(st.mean, 0))))) AS data
+      FROM statistics st JOIN statistics_meta sm ON st.metadata_id = sm.id
+      LEFT JOIN statistics ev ON ev.start_ts = st.start_ts
+        AND ev.metadata_id = (SELECT id FROM statistics_meta WHERE statistic_id = 'sensor.wattlas_elbil_effekt')
+      WHERE sm.statistic_id = 'sensor.emhass_m_load_w_totalpower'
+        AND st.start_ts >= CAST(strftime('%s', 'now') AS INTEGER) - 61 * 86400
         AND st.mean IS NOT NULL
     column: antal
 
@@ -33,6 +46,7 @@ recorder:
     entities:
       - sensor.emhass_husforbrug_historik
       - sensor.emhass_udetemperatur_historik
+      - sensor.wattlas_husforbrug_lang
       - sensor.wattlas_solprognose_solcast  # Solcast-oversætterens liste er for stor til databasen
     entity_globs:
       - sensor.hh_*  # hvad-hvis-beregningens resultater – kun de aktuelle tal bruges

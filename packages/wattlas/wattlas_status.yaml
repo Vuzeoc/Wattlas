@@ -1,0 +1,63 @@
+# Wattlas – to sensorer til egne automationer (læser kun; styrer intet) og appens visning.
+input_boolean:
+  # Enkel (slået fra) eller avanceret visning i appen. Kun visning: det, der er slået til, vises og virker altid
+  wattlas_avanceret:
+    name: Wattlas · avanceret visning
+    icon: mdi:tune-vertical
+
+template:
+  # Prisniveau lige nu: billig, normal eller dyr – samme tredjedele af købsprisen (med tariffer) i dag og i morgen som prisstriben i appen
+  - triggers:
+      - trigger: time_pattern
+        minutes: /1
+      - trigger: state
+        entity_id: sensor.wattlas_spotpris
+        attribute: raw_tomorrow
+      - trigger: homeassistant
+        event: start
+    actions:
+      - variables:
+          niveau: >-
+            {% set t = as_timestamp(now()) %}
+            {% set ns = namespace(alle=[], nu=none) %}
+            {% for p in (state_attr('sensor.wattlas_spotpris', 'raw_today') or []) + (state_attr('sensor.wattlas_spotpris', 'raw_tomorrow') or [])
+                 if is_number(p.price) and as_timestamp(p.hour, 0) > 0 %}
+              {% set s = as_timestamp(p.hour) %}{% set time = s | timestamp_custom('%H') | int %}
+              {% set net = states('input_number.wattlas_nettarif_lav') | float(0) if time < 6
+                 else states('input_number.wattlas_nettarif_spids') | float(0) if 17 <= time < 21
+                 else states('input_number.wattlas_nettarif_hoej') | float(0) %}
+              {% set pris = p.price | float + (net + states('input_number.wattlas_elafgift') | float(0)) * 1.25 + states('input_number.wattlas_tillaeg') | float(0) %}
+              {% set ns.alle = ns.alle + [pris] %}
+              {% if s <= t and (ns.nu is none or s >= ns.nu[0]) %}{% set ns.nu = [s, pris] %}{% endif %}
+            {% endfor %}
+            {% set srt = ns.alle | sort %}{% set n = srt | count %}
+            {% if n >= 3 and ns.nu is not none and t - ns.nu[0] < 3600 %}
+              {% set lav, hoej = srt[(n / 3) | int], srt[(2 * n / 3) | int] %}
+              {# alle priser (næsten) ens: hverken billig eller dyr #}
+              {{ dict(niveau='normal' if hoej - lav < 0.005 else 'billig' if ns.nu[1] <= lav else 'normal' if ns.nu[1] <= hoej else 'dyr', pris=ns.nu[1] | round(2), lav=lav | round(2), hoej=hoej | round(2)) }}
+            {% else %}{{ dict(niveau=none) }}{% endif %}
+    sensor:
+      - name: Wattlas prisniveau
+        unique_id: wattlas_prisniveau
+        default_entity_id: sensor.wattlas_prisniveau
+        icon: mdi:cash-clock
+        availability: "{{ niveau.niveau is not none }}"
+        state: "{{ niveau.niveau }}"
+        attributes:
+          pris: "{{ niveau.get('pris') }}"
+          billig_til: "{{ niveau.get('lav') }}"
+          dyr_over: "{{ niveau.get('hoej') }}"
+
+  # Problem: tændt, når noget skal ses på – de samme alarmer som Overvågning i appen
+  - binary_sensor:
+      - name: Wattlas problem
+        unique_id: wattlas_problem
+        default_entity_id: binary_sensor.wattlas_problem
+        device_class: problem
+        state: >-
+          {{ ['planfejl', 'datafejl', 'styrekanalfejl', 'inverterfejl', 'netbelastning', 'temperatur', 'lav_soc', 'indstillingsfejl', 'lader_ikke', 'soc_afvigelse']
+             | map('regex_replace', '^', 'binary_sensor.emhass_ui_') | select('is_state', 'on') | list | count > 0 }}
+        attributes:
+          alarmer: >-
+            {{ ['planfejl', 'datafejl', 'styrekanalfejl', 'inverterfejl', 'netbelastning', 'temperatur', 'lav_soc', 'indstillingsfejl', 'lader_ikke', 'soc_afvigelse']
+               | map('regex_replace', '^', 'binary_sensor.emhass_ui_') | select('is_state', 'on') | expand | map(attribute='name') | list }}
