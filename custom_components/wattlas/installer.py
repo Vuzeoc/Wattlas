@@ -183,7 +183,7 @@ def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, versi
         if inv2:
             effekt = inv2.get("effekt") or f"sensor.{prefix}_microinverter_power"
             navn = inv2.get("navn") or "Inverter 2"
-            if inv2.get("prefix"):
+            if inv2.get("prefix") and not inv2["prefix"].startswith(f"{prefix}_"):  # en af hovedinverterens sensorer (0.7.2 og ældre): Teknik fandt intet
                 styr = re.sub(r"(?m)^        # inverter2_prefix: .*$", f"        inverter2_prefix: {inv2['prefix']}_", styr)
             styr = re.sub(r"(?m)^        # inverter2_navn: .*$", f'        inverter2_navn: "{navn}"', styr)
             if inv2.get("relae"):

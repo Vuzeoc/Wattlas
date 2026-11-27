@@ -52,6 +52,7 @@
           "inverter2_navn": "Navn (vises i appen)",
           "inverter2_tilslutning": "Hvor sidder den?",
           "inverter2_effekt": "Dens effekt-sensor (kræves hvis den sidder i eltavlen)",
+          "inverter2_egen": "En af dens egne sensorer, fx AC-effekt (valgfri – så viser Teknik dens målinger)",
           "inverter2_relae": "Relæ, der kan afbryde den (valgfri)"
         }
       },
@@ -228,6 +229,9 @@
             "title": "Genstart Home Assistant",
             "description": "Wattlas er lagt på plads. Home Assistant skal genstarte én gang, før automationer, kort og dashboards virker. Det tager et par minutter."
           }
+        },
+        "abort": {
+          "genstart_fejlede": "Home Assistant ville ikke genstarte lige nu ({fejl}). Måske er den ved at starte op eller opdatere. Vent et minut, og tryk på reparationen igen – den bliver stående, til genstarten er sket."
         }
       }
     },
@@ -239,6 +243,9 @@
             "title": "Genstart Home Assistant",
             "description": "Styringen er slået fra, og inverteren er sat til selvforbrug, hvis Wattlas styrede den. Filerne er flyttet til `{backup}`. Automationer og dashboards forsvinder først, når Home Assistant genstarter. Tjek bagefter inverterens tidsprogrammer."
           }
+        },
+        "abort": {
+          "genstart_fejlede": "Home Assistant ville ikke genstarte lige nu ({fejl}). Måske er den ved at starte op eller opdatere. Vent et minut, og tryk på reparationen igen – den bliver stående, til genstarten er sket."
         }
       }
     },
@@ -250,6 +257,9 @@
             "title": "Genstart Home Assistant",
             "description": "**Inverteren svarede ikke**, da Wattlas ville sætte den til selvforbrug. Den står derfor i det sidste program, Wattlas gav den. Sæt selv tidsprogrammerne i inverterens app.\n\nFilerne er flyttet til `{backup}`. Automationer og dashboards forsvinder først, når Home Assistant genstarter."
           }
+        },
+        "abort": {
+          "genstart_fejlede": "Home Assistant ville ikke genstarte lige nu ({fejl}). Måske er den ved at starte op eller opdatere. Vent et minut, og tryk på reparationen igen – den bliver stående, til genstarten er sket."
         }
       }
     },
@@ -319,7 +329,8 @@
           "priser": "Priser og tariffer",
           "elbil": "Elbil: laderens måling (når Wattlas ikke styrer laderen)",
           "lader": "Elbil-lader: lad Wattlas styre den",
-          "sonnen": "SonnenBatterie: adresse og token"
+          "sonnen": "SonnenBatterie: adresse og token",
+          "inverter2": "Ekstra inverter uden batteri (inverter 2)"
         }
       },
       "forbindelser": {
@@ -480,6 +491,17 @@
         "data": {
           "sonnen_host": "Batteriets adresse (fx http://10.0.0.50)",
           "sonnen_token": "Token (API v2)"
+        }
+      },
+      "inverter2": {
+        "title": "Ekstra inverter uden batteri (inverter 2)",
+        "description": "Sidder den på Deyes GEN-/mikroinverter-port, tæller Deye den allerede med. Sidder den i eltavlen, så vælg dens effekt-sensor, så Wattlas kan regne den med som sol.\n\nVælg en af **dens egne** sensorer (fx AC-effekt fra dens integration), så viser Teknik dens strenge og forbindelse. Deyes måling af GEN-porten er ikke dens egen.\n\n**Home Assistant skal genstartes bagefter** – tryk *Genstart* under Reparationer.",
+        "data": {
+          "inverter2_navn": "Navn (vises i appen)",
+          "inverter2_tilslutning": "Hvor sidder den?",
+          "inverter2_effekt": "Dens effekt-sensor (kræves hvis den sidder i eltavlen)",
+          "inverter2_egen": "En af dens egne sensorer, fx AC-effekt (valgfri – så viser Teknik dens målinger)",
+          "inverter2_relae": "Relæ, der kan afbryde den (valgfri)"
         }
       }
     },

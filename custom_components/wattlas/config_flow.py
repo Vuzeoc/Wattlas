@@ -319,6 +319,33 @@ async def _sonnen_fejl(hass, host: str, token: str) -> dict[str, str]:
     return {"base": f} if f else {}
 
 
+def _inverter2(u: dict, hovedprefix: str) -> tuple[dict | None, dict[str, str]]:
+    """Inverter 2 fra formularen (opsætning og Konfigurer). Teknik finder dens målinger ud fra navnet på en af dens egne sensorer:
+    den valgte (inverter2_egen), ellers effekt-sensoren – men ikke, hvis den hører til hovedinverteren (fx Deyes GEN-port-måling)."""
+    ac = u.get("inverter2_tilslutning") == "ac"
+    eff, egen = u.get("inverter2_effekt") or "", u.get("inverter2_egen") or ""
+    if ac and not eff:
+        return None, {"inverter2_effekt": "mangler_effekt"}
+    if not re.fullmatch(NAVN_RE, u.get("inverter2_navn") or ""):
+        return None, {"inverter2_navn": "navn_tegn"}
+    kilde = egen or ("" if eff.startswith(f"sensor.{hovedprefix}_") else eff)
+    return {"navn": u.get("inverter2_navn") or "Inverter 2", "ac": ac, "effekt": eff, "relae": u.get("inverter2_relae") or "", "egen": egen,
+            "prefix": re.sub(r"_(output_ac_power|ac_power|power)$", "", kilde.split(".", 1)[-1]) if kilde else ""}, {}
+
+
+def _inverter2_skema(g: dict) -> vol.Schema:
+    """g: den gemte inverter 2 (tom ved opsætning). Valgfrie entiteter som forslag, så de kan ryddes igen."""
+    forslag = lambda v: {"suggested_value": v} if v else {}  # noqa: E731
+    return vol.Schema({
+        vol.Optional("inverter2_navn", description=forslag(g.get("navn"))): sel.TextSelector(),
+        vol.Required("inverter2_tilslutning", default="ac" if g.get("ac") else "gen"): sel.SelectSelector(sel.SelectSelectorConfig(
+            options=["gen", "ac"], translation_key="tilslutning", mode=sel.SelectSelectorMode.LIST)),
+        vol.Optional("inverter2_effekt", description=forslag(g.get("effekt"))): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="power")),
+        vol.Optional("inverter2_egen", description=forslag(g.get("egen"))): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor")),
+        vol.Optional("inverter2_relae", description=forslag(g.get("relae"))): sel.EntitySelector(sel.EntitySelectorConfig(domain="switch")),
+    })
+
+
 async def _laeg_filer(hass, d: dict) -> str | None:
     """Lægger Wattlas' filer på plads for opsætningen d og tjekker konfigurationen (rulles tilbage ved fejl).
     Returnerer en fejltekst – eller None: filerne ligger der, og Home Assistant skal genstartes (reparationen oprettes)."""
@@ -472,24 +499,11 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_inverter2(self, user_input=None) -> ConfigFlowResult:
         fejl: dict[str, str] = {}
         if user_input is not None:
-            ac = user_input.get("inverter2_tilslutning") == "ac"
-            eff = user_input.get("inverter2_effekt") or ""
-            if ac and not eff:
-                fejl["inverter2_effekt"] = "mangler_effekt"
-            elif not re.fullmatch(NAVN_RE, user_input.get("inverter2_navn") or ""):
-                fejl["inverter2_navn"] = "navn_tegn"
-            else:
-                self.d["inverter2"] = {"navn": user_input.get("inverter2_navn") or "Inverter 2", "ac": ac, "effekt": eff,
-                                       "relae": user_input.get("inverter2_relae") or "",
-                                       "prefix": re.sub(r"_(output_ac_power|ac_power|power)$", "", eff.split(".", 1)[-1]) if eff else ""}
+            inv2, fejl = _inverter2(user_input, self.d["prefix"])
+            if inv2:
+                self.d["inverter2"] = inv2
                 return await self.async_step_tjek()
-        return self.async_show_form(step_id="inverter2", errors=fejl, data_schema=vol.Schema({
-            vol.Optional("inverter2_navn"): sel.TextSelector(),
-            vol.Required("inverter2_tilslutning", default="gen"): sel.SelectSelector(sel.SelectSelectorConfig(
-                options=["gen", "ac"], translation_key="tilslutning", mode=sel.SelectSelectorMode.LIST)),
-            vol.Optional("inverter2_effekt"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", device_class="power")),
-            vol.Optional("inverter2_relae"): sel.EntitySelector(sel.EntitySelectorConfig(domain="switch")),
-        }))
+        return self.async_show_form(step_id="inverter2", errors=fejl, data_schema=_inverter2_skema({}))
 
     # 3 – tjek forudsætninger
     async def async_step_tjek(self, user_input=None) -> ConfigFlowResult:
@@ -631,7 +645,22 @@ class WattlasOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="init", menu_options=["forbindelser", "batteri", "elnet", "netselskab", "priser", "elbil", "lader"]
-                                    + (["sonnen"] if self.config_entry.data.get("kanal") == "sonnen" else []))
+                                    + (["sonnen"] if self.config_entry.data.get("kanal") == "sonnen" else [])
+                                    + (["inverter2"] if self.config_entry.data.get("inverter2") else []))
+
+    async def async_step_inverter2(self, user_input=None) -> ConfigFlowResult:
+        """Inverter 2: navn, effekt, dens egen sensor (til Teknik) og relæ. Filerne skrives igen, og HA skal genstartes."""
+        d = self.config_entry.data
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            inv2, fejl = _inverter2(user_input, d.get("prefix") or "")
+            if inv2:
+                ny = {**d, "inverter2": inv2}
+                if tekst := await _laeg_filer(self.hass, ny):
+                    return self.async_abort(reason="install_fejl", description_placeholders={"fejl": tekst})
+                self.hass.config_entries.async_update_entry(self.config_entry, data=ny)
+                return self.async_create_entry(data={})
+        return self.async_show_form(step_id="inverter2", errors=fejl, data_schema=_inverter2_skema(d.get("inverter2") or {}))
 
     async def async_step_sonnen(self, user_input=None) -> ConfigFlowResult:
         """Sonnen: ny adresse (fx ny IP fra routeren) eller nyt token. Kanalens filer skrives igen, og HA skal genstartes."""

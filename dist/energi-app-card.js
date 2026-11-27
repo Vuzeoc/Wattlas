@@ -245,8 +245,8 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
           .forEach(([k, id]) => this._hass.callService('input_number', 'set_value', {entity_id: 'input_number.' + id, value: this._hh[k]})); return; }
       else if (a === 'lt') { this._hass.callService('input_select', 'select_option', {entity_id: 'input_select.wattlas_lader_tilstand', option: v}); this._last = 0; return; }
       else if (a === 'ln') { this._hass.callService('input_number', 'set_value', {entity_id: 'input_number.wattlas_lader_ladet', value: 0}); this._last = 0; return; }
-      else if (a === 'num') { const [id, d] = v.split('|'), s = this.st(id); if (!s) return;
-        const x = Math.max(s.attributes.min, Math.min(s.attributes.max, Math.round((parseFloat(s.state) + Number(d)) * 100) / 100));
+      else if (a === 'num') { const [id, d, loft] = v.split('|'), s = this.st(id); if (!s) return;  // loft: fx laderens grænse fra opsætningen
+        const x = Math.max(s.attributes.min, Math.min(s.attributes.max, loft ? Number(loft) : Infinity, Math.round((parseFloat(s.state) + Number(d)) * 100) / 100));
         this._hass.callService('input_number', 'set_value', {entity_id: id, value: x}); this._last = 0; return; }
       else if (a === 'tog') { const s = this.st(v); if (!s) return;
         if (v === 'input_boolean.wattlas_skygge' && !confirm(s.state === 'on' ? 'Slå skygge fra? Wattlas begynder at styre inverteren.' : 'Slå skygge til? Wattlas giver inverteren tilbage (selvforbrug) og viser derefter kun, hvad den ville gøre.')) return;
@@ -384,7 +384,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         tx(100, 342, ph.every(v => v !== null) ? ph.map((v, i) => `L${i + 1} ${nf(v / 1000, 1)}`).join(' · ') + ' kW' : '', 'var(--secondary-text-color)') +
         tx(560, 178, tjener != null ? `tjener ${nf(tjener, 2)} kr/kWh` : husK !== null ? `${nf(husK, 2)} kr/kWh` : '', C.hus, 'exb') +
         tx(560, 192, tjener == null && husS !== null ? `med slid ${nf(husS, 2)}` : '', C.hus) +
-        anl.map(([n, v], k) => tx(398, 52 + 16 * k, v !== null ? `${esc(n)}  ${kw(Math.max(0, v))}` : '', C.sol, 'ex', 'start')).join('') +
+        anl.map(([n, v], k) => tx(398, 52 + 16 * k, v !== null ? `${esc(n)}: ${kw(Math.max(0, v))}` : '', C.sol, 'ex', 'start')).join('') +
         tx(bx, 410, bK !== null ? `${nf(bK, 1)} kWh over reserven` : '', C.bat, 'exb', ba) +
         tx(bx, 426, [bV !== null && !['Huawei', 'Growatt', 'SolaX', 'Sofar', 'Solis'].includes(this.st('sensor.emhass_maalekilde')?.state) ? nf(bV, 1) + ' V' : '',  /* Huawei: kanalens beregningsspænding, ikke batteriets */ bT !== null ? nf(bT, 1) + ' °C' : '', batPris !== null ? nf(batPris, 2) + ' kr/kWh' : ''].filter(Boolean).join(' · '), 'var(--secondary-text-color)', 'ex', ba) +
         tx(bx, 442, eta, C.bat, 'ex', ba) +
@@ -520,23 +520,26 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       const plan = (this.a('sensor.wattlas_lader_plan', 'deferrables_schedule') || []).filter(r => parseFloat(r.wattlas_lader_plan ?? r.p_deferrable1 ?? r.p_deferrable0) > 50).map(r => new Date(r.date)).filter(d => d > Date.now() - 18e5);
       const kl = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
       const tid = (this.st('input_datetime.wattlas_lader_klar')?.state || '07:00:00').slice(0, 5), kw = Number(x.effekt_w) > 50 ? nf(x.effekt_w / 1000, 1) + ' kW' : '0 kW';
-      const trin = (id, d, vis) => `<div class="stp"><button data-a="num" data-v="input_number.${id}|-${d}">−</button><em>${vis}</em><button data-a="num" data-v="input_number.${id}|${d}">+</button></div>`;
+      const trin = (id, d, vis, loft = '') => `<div class="stp"><button data-a="num" data-v="input_number.${id}|-${d}|${loft}">−</button><em>${vis}</em><button data-a="num" data-v="input_number.${id}|${d}|${loft}">+</button></div>`;
       const bilSoc = x.tilsluttet === true && x.bil_soc != null && !isNaN(parseFloat(x.bil_soc)) ? parseFloat(x.bil_soc) : null;
       const bil = x.tilsluttet === false ? 'ingen bil' : x.tilsluttet === true ? 'bil tilsluttet' : 'ukendt';
       // ladetiden ved fuld strøm; kWh regnes her (ikke fra sensoren), så skønnet følger med med det samme, når der trykkes +/−
-      const pw = Number(x.p_maks_w), lt = kwh => { const s = ladetid(kwh, pw); return s ? ` · ${(s + ' ved ' + nf(pw / 1000, 1) + ' kW').replace(/ /g, ' ')}` : ''; };  // knækker ikke midt i skønnet
+      // effekten regnes her ud fra ampere, så skønnene følger +/− med det samme (sensoren melder først ved laderens næste beregning)
+      const wA = Number(x.w_pr_a), minA = Number(x.min_a), gA = Number(x.graense_a) || 32;  // W pr. ampere (faser × V), laveste strøm, opsætningens grænse
+      const maksA = x.fast_a ? minA : Math.min(tal('input_number.wattlas_lader_maks_a'), gA);
+      const pw = wA > 0 ? maksA * wA : Number(x.p_maks_w), lt = kwh => { const s = ladetid(kwh, pw); return s ? ` · ${(s + ' ved ' + nf(pw / 1000, 1) + ' kW').replace(/ /g, ' ')}` : ''; };  // knækker ikke midt i skønnet
       const mangler = Math.max(0, tal('input_number.wattlas_lader_kwh') - tal('input_number.wattlas_lader_ladet')), tilskud = tal('input_number.wattlas_lader_tilskud_w');
       return this.card('Elbil', `<div class="cmp"><div><span>Lige nu</span><b>${kw}</b></div><div><span>Ladet</span><b>${nf(tal('input_number.wattlas_lader_ladet'), 1)} kWh</b></div><div><span>Strøm</span><b>${x.ordre_a == null ? '–' : nf(x.ordre_a) + ' A'}</b></div></div>
         <p class="note" style="margin:10px 0"><b>${esc(GRUND[st?.state] || st?.state || '–')}</b> · ${bil}${x.skygge ? ' · skygge: vises kun' : ''}${x.noed ? ' · lader nu for at nå det til tiden' : ''}</p>
         <div class="seg" style="flex-wrap:wrap">${VALG.map(([k, n, i]) => `<button class="${til === k ? 'on' : ''}" data-a="lt" data-v="${k}"><ha-icon icon="${i}"></ha-icon> ${n}</button>`).join('')}</div>
         <p class="note">${FORKLAR[til] || ''}</p>
-        ${til === 'sol' && this.st('input_number.wattlas_lader_tilskud_w') ? `<div class="set"><div><b>Tilskud fra net/batteri</b><span>${[solstart(Number(x.p_min_w), pw, tilskud), tilskud > 0 ? 'fra ' + (x.hold_kan !== false && this.st('input_boolean.wattlas_elbil_hold')?.state === 'on' ? 'nettet (Kun fra elnettet)' : 'nettet eller husbatteriet') : '0 = kun sol'].filter(Boolean).join(' · ')}</span></div>${trin('wattlas_lader_tilskud_w', 500, nf(tilskud / 1000, 1) + ' kW')}</div>` : ''}
+        ${til === 'sol' && this.st('input_number.wattlas_lader_tilskud_w') ? `<div class="set"><div><b>Tilskud fra net/batteri</b><span>${[solstart(minA * wA, pw, tilskud), tilskud > 0 ? 'fra ' + (x.hold_kan !== false && this.st('input_boolean.wattlas_elbil_hold')?.state === 'on' ? 'nettet (Kun fra elnettet)' : 'nettet eller husbatteriet') : '0 = kun sol'].filter(Boolean).join(' · ')}</span></div>${trin('wattlas_lader_tilskud_w', 500, nf(tilskud / 1000, 1) + ' kW')}</div>` : ''}
         ${bilSoc !== null ? `<div class="set"><div><b>Bilen: ${nf(bilSoc)} %${x.bil_km != null && !isNaN(x.bil_km) ? ` · ${nf(x.bil_km)} km` : ''}</b><span>lad til · mangler ${nf(x.rest_kwh || 0, 1)} kWh${lt(Number(x.rest_kwh))}</span></div>${this.st('input_boolean.wattlas_lader_tur')?.state === 'on' ? '<em>100 %</em>' : trin('wattlas_lader_maal', 5, nf(tal('input_number.wattlas_lader_maal')) + ' %')}</div>
         ${til === 'klar' && this.avanceret() && this.st('input_number.wattlas_lader_sol_maal') ? `<div class="set"><div><b>Sol op til</b><span>gratis sol, der ellers ville blive solgt – aldrig under "lad til"</span></div>${trin('wattlas_lader_sol_maal', 5, nf(Math.max(tal('input_number.wattlas_lader_sol_maal'), tal('input_number.wattlas_lader_maal'))) + ' %')}</div>` : ''}
         ${til === 'klar' && (this.avanceret() || this.st('input_boolean.wattlas_lader_tur')?.state === 'on') && this.st('input_boolean.wattlas_lader_tur') ? `<div class="set"><div><b>100 % til næste tur</b><span>slår fra af sig selv, når bilen er fuld eller kobles fra</span></div><button class="sw ${this.st('input_boolean.wattlas_lader_tur')?.state === 'on' ? 'on' : ''}" data-a="tog" data-v="input_boolean.wattlas_lader_tur"><i></i></button></div>` : ''}` : ''}
         ${til === 'klar' ? `<div class="set"><div><b>Klar kl.</b><span>${plan.length ? 'planlagt: ' + plan.map(kl).join(', ') : 'ingen timer i planen lige nu'}</span></div><input class="inp" type="time" data-set="time|input_datetime.wattlas_lader_klar" value="${tid}"></div>${bilSoc !== null ? '' : `
         <div class="set"><div><b>Energi</b><span>så meget skal bilen have · mangler ${nf(mangler, 1)} kWh${lt(mangler)}</span></div>${trin('wattlas_lader_kwh', 5, nf(tal('input_number.wattlas_lader_kwh')) + ' kWh')}</div>`}` : ''}
-        ${x.fast_a ? '' : `<div class="set"><div><b>Højeste strøm</b><span>aldrig mere end laderens gruppe tåler</span></div>${trin('wattlas_lader_maks_a', 1, nf(tal('input_number.wattlas_lader_maks_a')) + ' A')}</div>`}
+        ${x.fast_a ? '' : `<div class="set"><div><b>Højeste strøm</b><span>aldrig mere end laderens gruppe tåler · højst ${nf(gA)} A (opsætningen)</span></div>${trin('wattlas_lader_maks_a', 1, nf(maksA) + ' A', gA)}</div>`}
         ${x.hold_kan === false ? '' : `<div class="set"><div><b>Kun fra elnettet</b><span>husbatteriet aflader ikke, mens bilen lader – huset køber fra nettet imens, også i dyre timer. Batteriet må stadig lades</span></div><button class="sw ${this.st('input_boolean.wattlas_elbil_hold')?.state === 'on' ? 'on' : ''}" data-a="tog" data-v="input_boolean.wattlas_elbil_hold"><i></i></button></div>`}
         <div class="set"><div><b>Ladet siden tilslutning</b><span>nulstilles af sig selv, når stikket tages ud</span></div><button class="act" data-a="ln">Nulstil</button></div>`, {icon: 'mdi:ev-station'});
     }
@@ -615,7 +618,9 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       const vaek2 = c2 ? c2 !== 'on' : (!a2 || ['unavailable', 'unknown'].includes(a2));
       const solNu = parseFloat(d('pv_power')?.state) || 0; // producerer hovedinverteren, er det ikke nat
       const relae2 = rel('') ? `<p class="note">Relæ: ${esc(rel('').state)}${fejl.length ? ` · <b style="color:${C.err}">${fejl.join(', ')}</b>` : ''}</p>` : '';
-      const inv2 = vaek2 ? (solNu > 300
+      const ukendt2 = c2 === undefined && a2 === undefined;  // ingen af inverterens egne entiteter findes: forkert valgt, ikke "svarer ikke"
+      const inv2 = ukendt2 ? `<div class="sover"><ha-icon icon="mdi:help-circle-outline"></ha-icon><div><b>Ingen målinger fundet</b><span>Wattlas kan ikke finde inverter 2's egne målinger. Vælg en af dens sensorer under Konfigurer → Inverter 2.</span></div></div>${relae2}`
+        : vaek2 ? (solNu > 300
         ? `<div class="sover warn"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><div><b>Svarer ikke</b><span>Der er sol på hovedanlægget (${nf(solNu / 1000, 1)} kW), men inverter 2 svarer ikke. Tjek forbindelsen eller relæet.</span></div></div>${relae2}`
         : `<div class="sover"><ha-icon icon="mdi:weather-night"></ha-icon><div><b>Sover – for lidt lys</b><span>Inverteren slukker sig selv, når solen ikke giver nok strøm, og vågner igen af sig selv.</span></div></div>${relae2}`)
         : `<div class="mppts">${pv2}<div class="mppt"><div class="mh">AC ud</div><div class="mv">${v2('output_ac_power', 0)}</div><div class="ms"><span>i dag ${v2('today_production')}</span></div></div></div>

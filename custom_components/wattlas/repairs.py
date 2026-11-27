@@ -8,7 +8,10 @@ from homeassistant.core import HomeAssistant
 class Genstart(ConfirmRepairFlow):
     async def async_step_confirm(self, user_input=None):
         if user_input is not None:
-            await self.hass.services.async_call("homeassistant", "restart")
+            try:  # vent på svaret: en afvist genstart (fx "Another job is running" lige efter en opstart) må ikke fjerne reparationen
+                await self.hass.services.async_call("homeassistant", "restart", blocking=True)
+            except Exception as e:
+                return self.async_abort(reason="genstart_fejlede", description_placeholders={"fejl": str(e)[:200]})
             return self.async_create_entry(data={})
         return await super().async_step_confirm()  # viser teksten med reparationens pladsholdere (fx backup-mappen)
 

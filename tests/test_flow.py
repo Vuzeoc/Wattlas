@@ -569,6 +569,33 @@ async def main():
     print('S Sonnen ny adresse i Konfigurer: OK')
     await hass.async_stop(force=True)
 
+    # I: inverter 2 på GEN-porten med Deyes egen måling som effekt – det er ikke inverterens egen sensor, så Teknik får intet prefix.
+    #    Konfigurer → Inverter 2: dens egen sensor og relæet; filerne skrives igen, og der bedes om genstart
+    hass, cfg = await ny_hass('default_config:\n')
+    await opsaet(hass, 'deye', 'sensor.min_inverter_pv_power',
+                 {'inverter2_navn': 'Streng', 'inverter2_tilslutning': 'gen', 'inverter2_effekt': 'sensor.min_inverter_microinverter_power'})
+    styr = cfg / 'wattlas/dashboards/wattlas_styring.yaml'
+    entry = hass.config_entries.async_entries('wattlas')[0]
+    assert entry.data['inverter2']['prefix'] == '' and '\n        inverter2_prefix:' not in styr.read_text(encoding='utf-8'), entry.data['inverter2']
+    om = hass.config_entries.options
+    hass.data.pop(GENSTART, None); ir.async_delete_issue(hass, 'wattlas', 'genstart')
+    r = await om.async_init(entry.entry_id)
+    assert 'inverter2' in r['menu_options'], r
+    r = await om.async_configure(r['flow_id'], {'next_step_id': 'inverter2'})
+    r = await om.async_configure(r['flow_id'], {'inverter2_navn': 'Streng', 'inverter2_tilslutning': 'gen', 'inverter2_effekt': 'sensor.min_inverter_microinverter_power',
+                                                'inverter2_egen': 'sensor.streng_output_ac_power', 'inverter2_relae': 'switch.streng_relae'})
+    assert r['type'] == 'create_entry', r
+    tekst = styr.read_text(encoding='utf-8')
+    assert 'inverter2_prefix: streng_' in tekst and 'inverter2_relae: switch.streng_relae' in tekst, tekst
+    assert hass.config_entries.async_entries('wattlas')[0].data['inverter2']['prefix'] == 'streng' and issue(hass, 'genstart') is not None
+    r = await om.async_init(entry.entry_id)  # næste gang er den egne sensor udfyldt, så den ikke tabes, når fx kun navnet rettes
+    r = await om.async_configure(r['flow_id'], {'next_step_id': 'inverter2'})
+    forslag = {str(k): (k.description or {}).get('suggested_value') for k in r['data_schema'].schema}
+    assert forslag['inverter2_egen'] == 'sensor.streng_output_ac_power' and forslag['inverter2_relae'] == 'switch.streng_relae', forslag
+    om.async_abort(r['flow_id'])
+    print('I inverter 2 i Konfigurer: OK')
+    await hass.async_stop(force=True)
+
     # K: Konfigurer – felterne er udfyldt med de nuværende værdier, ændringer skrives til hjælperne og huskes i opsætningen
     hass, cfg = await ny_hass('default_config:\n')
     await opsaet(hass, 'deye', 'sensor.min_inverter_pv_power')
@@ -866,6 +893,28 @@ async def main():
         await W._forbered_opdatering(hass, entry)
         W.async_check_ha_config_file = rigtigt
         assert entry.data['version'] == '9.9.9' and 'ny-9.9.11' not in installeret.read_text(encoding='utf-8'), 'der blev ikke rullet tilbage'
+        # 7) genstartes der lige efter hentningen (før tjekket har nået det), lægges den på plads, mens HA lukker ned: stadig én genstart
+        hentet('9.9.12', '\n# ny-9.9.12\n', 10)
+        await W._forbered_opdatering(hass, entry)
+        assert entry.data['version'] == '9.9.9', 'filer, der kun har ligget stille i 10 s, må ikke lægges på plads af tjekket'
+        from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+        await hass.async_block_till_done()
+        assert entry.data['version'] == '9.9.12' and 'ny-9.9.12' in installeret.read_text(encoding='utf-8'), 'nedlukningen lagde ikke den nye version på plads'
+        # 8) reparationens genstartknap: en afvist genstart ("Another job is running") må ikke fjerne reparationen
+        from homeassistant.exceptions import HomeAssistantError
+        from custom_components.wattlas import repairs as R
+        genstartet = []
+        async def afvist(_call):
+            raise HomeAssistantError('Another job is running for job group home_assistant_core')
+        async def ok(_call):
+            genstartet.append(1)
+        for tj, forventet in ((afvist, 'abort'), (ok, 'create_entry')):
+            hass.services.async_register('homeassistant', 'restart', tj)
+            fl = R.Genstart(); fl.hass, fl.flow_id, fl.handler = hass, 'x', 'wattlas'
+            r = await fl.async_step_confirm({})
+            assert r['type'] == forventet, r
+        assert r and genstartet == [1]
         print('U én genstart ved opdatering: OK')
     finally:
         shutil.copytree(original, her, dirs_exist_ok=True)

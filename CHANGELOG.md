@@ -2,6 +2,21 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.7.3
+- **Rettet: to genstarter ved opdatering.** Wattlas lægger en ny versions filer på plads, før Home Assistant genstarter, men først når
+  filerne har ligget stille i 20 sekunder. Genstartede du hurtigere, skulle der genstartes én gang til. Nu sker det også, mens Home Assistant
+  lukker ned, så én genstart er nok. Det virker fra opdateringen *efter* 0.7.3, fordi det er den kørende version, der gør det
+- **Rettet: genstartknappen i Reparationer.** Blev genstarten afvist (fx *Another job is running* lige efter en opstart), forsvandt
+  reparationen alligevel, og de nye filer blev aldrig indlæst. Nu bliver den stående og siger, at du skal prøve igen om et minut
+- **Rettet: elbilens *Højeste strøm* og skønnene på fanen Elbil.** + kunne stadig trykkes over laderens grænse fra opsætningen (fx 32 A
+  med en 16 A-lader), og tallet sprang først tilbage efter op til 10 sekunder. Nu stopper + ved grænsen, og den står under feltet. Skønnene
+  (*starter ved … · fuld strøm ved …* og ladetiden) regnes nu med det samme ud fra ampere, i stedet for at vente på laderens næste melding
+- **Rettet: inverter 2 stod som *Svarer ikke* på Teknik**, selv om den kørte. Valgte man Deyes egen måling af GEN-porten som effekt,
+  ledte Teknik efter inverterens målinger under Deyes navn, hvor de ikke findes. Nu bruges hovedinverterens sensorer ikke til det, og under
+  *Konfigurer → Inverter 2* kan du vælge en af inverterens **egne** sensorer (så viser Teknik dens strenge og forbindelse) og relæet.
+  Finder Teknik slet ingen målinger, står der det i stedet for *Svarer ikke*
+- **Tydeligere: solanlæggene ved Sol på Live.** Der står nu kolon efter navnet (*Inverter 2: 174 W*), så navn og tal ikke læses som ét tal
+
 ## 0.7.2
 - **Elbil: *Kun sol* hedder nu *Solladning*, og du vælger selv blandingen.** Ny indstilling *Tilskud fra net/batteri* (W): så meget
   må bilen tage oven i solens overskud. 0 W er kun sol, som før. Med fx 3 kW starter en trefaset 11 kW-lader på 6 A allerede ved ca. 1,1 kW

@@ -172,6 +172,9 @@ assert k2['backup'] != k3['backup'], (k2['backup'], k3['backup'])  # k1 havde in
 I.rul_tilbage(k3)
 assert '?v=a2' in (pl / 'packages/wattlas/wattlas_frontend.yaml').read_text(encoding='utf-8'), 'tilbagerulningen lagde ikke den forrige version tilbage'
 shutil.rmtree(pl, ignore_errors=True)
+# inverter 2 gemt med hovedinverterens GEN-måling som "prefix" (0.7.2 og ældre): Teknik må ikke lede efter entiteter, der ikke findes
+I.installer(str(d), 'deye', 'mit_deye', {'navn': 'X', 'ac': False, 'effekt': 'sensor.mit_deye_microinverter_power', 'relae': '', 'prefix': 'mit_deye_microinverter'}, 't4')
+assert '\n        inverter2_prefix:' not in (d / 'wattlas/dashboards/wattlas_styring.yaml').read_text(encoding='utf-8'), 'hovedinverterens måling blev brugt som inverter 2'
 # afinstallation flytter til backup
 b = I.afinstaller(str(d))
 assert b and not (d / 'packages/wattlas').exists() and (pathlib.Path(b) / 'packages_wattlas').exists()

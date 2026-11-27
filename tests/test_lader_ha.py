@@ -367,7 +367,7 @@ async def main():
     assert not fysik['til'], ('uden tilskud: for lidt sol', st)
     await saet('input_number', 'input_number.wattlas_lader_tilskud_w', value=3000); st = await trin(40, sol=3000)
     assert fysik['til'] and st.attributes['ordre_a'] == 6, ('sol + tilskud = 6 A', st)
-    assert st.attributes['p_min_w'] == 6 * 3 * 230, st
+    assert (st.attributes['min_a'], st.attributes['graense_a'], st.attributes['w_pr_a']) == (6, 32, 3 * 230), st  # kortets skøn regnes af dem
     S('sensor.wattlas_lader_plan', 0); await saet('input_number', 'input_number.wattlas_lader_ladet', value=25)  # færdig: kun gratis sol
     await til('klar'); st = await trin(3, sol=3000)
     assert not fysik['til'], ('Klar til tid tager ikke tilskuddet', st)

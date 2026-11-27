@@ -15,6 +15,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
@@ -36,6 +37,7 @@ HER = Path(__file__).parent
 FORSOEGT = f"{DOMAIN}_forsoegt"  # hass.data: den version på disken, der er forsøgt lagt på plads før genstarten
 TJEK_S = 15  # så tit ses der efter en nyere version på disken
 RO_S = 20    # så længe skal integrationens filer have ligget urørt (Markedspladsen skriver dem én ad gangen)
+RO_STOP_S = 5  # … ved nedlukning: Markedspladsen er færdig, når der genstartes. Skrives der stadig (genstart midt i hentningen), springes det over
 YAML_PLATFORME = {"template", "integration", "utility_meter", "automation", "script", "input_boolean", "input_number",
                   "input_datetime", "input_text", "input_select", "mqtt"}
 
@@ -99,16 +101,17 @@ def _ny_installer():
     return ny
 
 
-async def _forbered_opdatering(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _forbered_opdatering(hass: HomeAssistant, entry: ConfigEntry, ro_s: float = RO_S) -> None:
     """Én genstart i stedet for to: er der hentet en nyere version (koden på disken er nyere end den, der kører), lægges dens
     filer på plads nu med dens egen installer og tjekkes. Efter genstarten passer kode og filer sammen, og der skal ikke
-    genstartes igen. Lykkes det ikke, sker opdateringen efter genstarten som før (to genstarter)."""
+    genstartes igen. Køres hvert TJEK_S og igen, når Home Assistant lukker ned (genstartes der, før tjekket har nået det).
+    Lykkes det ikke, sker opdateringen efter genstarten som før (to genstarter)."""
     version = await hass.async_add_executor_job(_paa_disk)
     if version in (None, VERSION, entry.data.get("version"), hass.data.get(FORSOEGT)):
         return
-    if await hass.async_add_executor_job(_ro) < RO_S:
+    if await hass.async_add_executor_job(_ro) < ro_s or hass.data.get(FORSOEGT) == version:  # igen efter ventetiden: tjek og nedlukning kan køre samtidig
         return
-    hass.data[FORSOEGT] = version  # ét forsøg pr. version
+    hass.data[FORSOEGT] = version  # ét forsøg pr. version (intet await mellem tjek og mærke)
     try:
         ny = await hass.async_add_executor_job(_ny_installer)
         kvit = await hass.async_add_executor_job(ny.opdater, hass.config.config_dir, dict(entry.data), version)
@@ -223,6 +226,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def tjek(_nu) -> None:
         await _forbered_opdatering(hass, entry)
     entry.async_on_unload(async_track_time_interval(hass, tjek, timedelta(seconds=TJEK_S)))
+
+    async def ved_stop(_e) -> None:  # genstartes der lige efter hentningen, nås det her i stedet: én genstart
+        await _forbered_opdatering(hass, entry, RO_STOP_S)
+    entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, ved_stop))
 
     async def tarif(_nu) -> None:
         await tariffer.opdater(hass, entry)
