@@ -193,11 +193,12 @@ async def main():
                       'script': f['script'], 'automation': auto}.items():
         assert await async_setup_component(hass, dom, {dom: conf}), dom
     svarer = {'ja': False}
+    doede = set()  # entiteter, der er utilgængelige og ikke reagerer
     skrevet = []  # ikke "kald": den første HA kører stadig og ville skrive i samme liste hvert 30. sekund
 
     async def inverter(call):  # en Deye-agtig inverter: skrivninger slår kun igennem, når den svarer
         skrevet.append((call.service, call.data.get('entity_id')))
-        for e in call.data.get('entity_id') or [] if svarer['ja'] else []:
+        for e in [x for x in call.data.get('entity_id') or [] if x not in doede] if svarer['ja'] else []:
             if call.domain == 'switch':
                 hass.states.async_set(e, 'on' if call.service == 'turn_on' else 'off')
             else:
@@ -342,6 +343,22 @@ async def main():
     await hass.services.async_call('script', 'emhass_skriv_tal', {'entitet': 'number.wattlas_program_1_soc', 'vaerdi': 30}, blocking=True)
     assert not skrevet and ladet(), f'Wattlas skrev, før den havde overtaget: {skrevet}'
     print('Startspærren nede: stop og tilbagelevering virker, og intet skrives før overtagelse: OK')
+    # i) selvforbrug: brugerens reserve gælder også her, en død programkontakt blokerer ikke tilbageleveringen, og solsalget slås til igen
+    svarer['ja'] = True; lader(); hass.states.async_set(KONF, 'on'); await boolsk(OVERTAGET, True)
+    hass.states.async_set('switch.emhass_netladning_p3', 'unavailable'); doede.add('switch.emhass_netladning_p3')
+    hass.states.async_set('input_number.wattlas_reserve', '50'); hass.states.async_set('switch.wattlas_solsalg', 'off')
+    hass.states.async_set('binary_sensor.wattlas_storm', 'on')
+    # mens Wattlas styrer (fx en gammel plan): stormens 80 % holdes, og solsalget røres ikke (det afgør solsalg-automationen efter prisen)
+    hass.states.async_set(STYRING, 'on')
+    await hass.services.async_call('script', 'emhass_selvforbrug', blocking=True)
+    assert float(hass.states.get('number.wattlas_program_1_soc').state) == 80, ('storm, mens Wattlas styrer', hass.states.get('number.wattlas_program_1_soc'))
+    assert hass.states.get('switch.wattlas_solsalg').state == 'off', 'solsalg må ikke slås til, mens Wattlas styrer (negativ pris: til/fra hvert 30. s)'
+    # Wattlas giver inverteren tilbage: brugerens reserve (ikke stormens 80 %, som ellers ville blive stående for altid), og solsalget slås til
+    hass.states.async_set(STYRING, 'off'); await hass.async_block_till_done()
+    await hass.services.async_call('script', 'emhass_selvforbrug', blocking=True)
+    assert float(hass.states.get('number.wattlas_program_1_soc').state) == 50, ('reserven gælder også i selvforbrug', hass.states.get('number.wattlas_program_1_soc'))
+    assert hass.states.get('switch.wattlas_solsalg').state == 'on', 'solsalget gives tilbage'
+    print('Selvforbrug: reserve, død programkontakt og solsalg: OK')
     await hass.async_stop(force=True)
 
 

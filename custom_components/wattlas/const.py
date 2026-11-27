@@ -9,7 +9,6 @@ import yaml
 DOMAIN = "wattlas"
 GENSTART = "wattlas_genstart_mangler"  # hass.data: nye filer ligger på disken, men HA kører stadig de gamle (væk ved genstart)
 EMHASS_SLUG = "5b918bf2_emhass"
-EMHASS_REPO = "https://github.com/davidusb-geek/emhass-add-on"
 
 # Knapper til det, der mangler (my.home-assistant.io åbner den rigtige side i brugerens egen HA)
 LINK = {

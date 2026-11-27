@@ -1,5 +1,27 @@
 # Installation
 
+## Før du starter: kan din maskine trække EMHASS?
+
+Wattlas bruger EMHASS-app'en til at lave planen. EMHASS er et stort program: målt på en Home Assistant Yellow bruger den ca. 430 MB
+hukommelse, bare den kører, og mere, mens den regner (hvert 5. minut).
+
+- **Anbefalet:** mindst **4 GB RAM** (fx Raspberry Pi 4 eller 5 med 4 GB, Home Assistant Green eller Yellow, en mini-PC) og gerne en
+  **SSD** i stedet for et SD-kort. Se din maskine under *Indstillinger → System → Hardware* og fri plads under *Indstillinger → System → Lagring*.
+- **1–2 GB RAM eller et næsten fuldt SD-kort:** EMHASS kan gøre Home Assistant langsom eller få den til at genstarte. Vælg i stedet
+  **Wattlas' lette hjerne** i opsætningen – den laver planen selv uden app og kører på alt, hvad Home Assistant kører på (målt: ca. 0,4 kr.
+  pr. døgn dyrere end EMHASS). Eller kør EMHASS på en anden maskine i huset (se nedenfor).
+- Wattlas' opsætning advarer, hvis maskinen ser for lille ud.
+
+### EMHASS på en anden maskine
+
+EMHASS kan køre i Docker på en PC, en NAS eller en anden Home Assistant – Wattlas bruger den bare over netværket:
+
+1. Installér EMHASS der efter [EMHASS' egen vejledning](https://emhass.readthedocs.io) (Docker), og sæt en API-nøgle.
+2. Tjek, at du kan åbne EMHASS' webside fra en anden computer: `http://<maskinens-ip>:5000`.
+3. I Wattlas' opsætning (eller *Konfigurer → Forbindelser*): skriv den adresse og nøglen ind i stedet for app'ens.
+
+Maskinen skal være tændt hele tiden. Er EMHASS væk, holder Wattlas op med at styre og sætter inverteren til selvforbrug, til den er tilbage.
+
 ## Den nemme vej – uden kommandoer (anbefalet)
 
 > **Se [BILLEDGUIDE.md](BILLEDGUIDE.md)** – hele forløbet med billeder af hver skærm.
@@ -48,6 +70,7 @@ Styringen kan ikke starte, før trin 6 er gjort færdigt. Den har en startspærr
 ## 0. Krav
 
 - Home Assistant 2026.11 (testet). Ældre versioner kan mangle `default_entity_id` i template-entiteter.
+- En maskine med mindst 4 GB RAM til EMHASS – eller EMHASS på en anden maskine (se *Før du starter* øverst).
 - En hybrid-inverter med batteri, som HA kan **både læse og skrive** (se [STYREKANALER.md](STYREKANALER.md)).
 - Adgang til `/config` (fx app'en *File editor*, *Studio Code Server* eller *Terminal & SSH*).
 - **Tag en backup af HA først** (Indstillinger → System → Sikkerhedskopier).

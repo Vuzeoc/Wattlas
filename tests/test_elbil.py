@@ -51,6 +51,7 @@ async def main():
     assert float(await lader(0, 600)) == 0 and float(await lader(-5000, 600)) == 0  # V2G: bilen forsyner huset
     assert float(await lader(11000, 5400)) == 0  # huset bruger under halvdelen: lader uden for målingen, eller sensoren hænger
     assert float(await lader(11000, 5500)) == 11000
+    assert float(await lader(-7000, 9000)) == 7000, 'omvendt strømtang: bilens forbrug, som laderen også regner med (abs)'
     for tilstand, enhed in (('unavailable', 'W'), ('unknown', 'W'), ('Charging', 'W'), (7000, 'A'), (7000, None), (7000, 'MW')):
         assert await lader(tilstand, 9000, enhed) == 'unavailable', (tilstand, enhed)
     assert await lader(7000, 'unavailable') == 'unavailable'

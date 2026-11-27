@@ -130,6 +130,11 @@ async def main():
     assert hus.async_render(v)['ferie'] == 0, 'en er kommet hjem'
     S('person.b', 'not_home', timestamp=time.time() - 3600); await opdater()
     assert hus.async_render(v)['ferie'] == 0, 'den sidste gik for under et døgn siden'
+    # en genstart af HA midt i fraværet nulstiller personernes last_changed – den gemte "alle væk siden" gælder stadig
+    await kald('input_datetime', 'set_datetime', entity_id='input_datetime.wattlas_alle_vaek_siden', timestamp=time.time() - 25 * 3600)
+    S('person.a', 'not_home'); S('person.b', 'not_home'); await opdater()
+    assert hus.async_render(v)['ferie'] == n and hass.states.get('binary_sensor.wattlas_ferie').state == 'on', 'efter en genstart: stadig væk et døgn'
+    await kald('input_datetime', 'set_datetime', entity_id='input_datetime.wattlas_alle_vaek_siden', timestamp=0)
     await kald('input_boolean', 'turn_off', entity_id='input_boolean.wattlas_ingen_hjemme')
     print('Ferie og ingen hjemme i husprognosen: OK')
 

@@ -117,6 +117,16 @@ målet i den billigste tredjedel af døgnets timer, og når solen sender over 1,
 - Ændrer du selv målet, mens det er hævet, er det dit nye ønske, og Wattlas sætter ikke noget tilbage.
 - Slået fra som standard. Beholder-feltet er låst, mens målet er hævet.
 
+**Boost** (fx varmepumper uden et mål, Wattlas kan hæve): vælg i stedet en kontakt (`switch`/`input_boolean`), en valgliste
+(`select`/`input_select`, fx *Hot water boost* med valget *engangsopvarmning*) eller en knap (`button`). I de samme timer tænder
+Wattlas kontakten, vælger dit **boost-valg** eller trykker på knappen.
+- Kontakten slukkes og valglisten sættes tilbage til det, den stod på, når timen ikke længere er billig (tidligst efter 30 min) –
+  men valglisten kun, hvis den stadig står på Wattlas' valg. En knap og en engangsopvarmning, der selv går tilbage, er én opvarmning.
+- Står den allerede på boost (fx din egen), starter Wattlas den ikke. Højst én opvarmning pr. 3 timer; en kontakt, Wattlas selv
+  har slukket, kan tændes igen efter 10 minutter. En kontakt slukkes altid ved stop.
+- Wattlas ved ikke, hvad pumpen gør under boosten (fx om en elpatron hjælper til). Har du allerede en automation, der starter
+  den samme boost, så brug kun én af dem.
+
 ### Fleksibel forbruger
 Lad EMHASS vælge de bedste timer til et apparat, der bare skal køre et vist antal timer pr. døgn: varmtvandsbeholder,
 pool, affugter eller elbil.

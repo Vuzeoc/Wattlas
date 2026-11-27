@@ -84,7 +84,7 @@ template:
         icon: mdi:calendar-check
         device_class: date
         availability: >-
-          {{ is_number(states('sensor.solcelle_sparet_i_alt')) and is_number(states('input_number.solcelle_investering'))
+          {{ is_number(states('sensor.solcelle_sparet_i_alt')) and states('input_number.solcelle_investering') | float(0) > 0
              and states('input_datetime.solcelle_start_dato') not in ['unknown', 'unavailable'] }}
         state: >-
           {% set tot = states('sensor.solcelle_sparet_i_alt') | float %}
@@ -287,7 +287,7 @@ automation:
             {% set dd = ugedage[strptime(dyr.d, '%Y-%m-%d').weekday()] %}
             Ugens energi: solcellerne producerede {{ pv | round(0) | int }} kWh og sparede {{ sp | round(0) | int }} kr.
             Strømkøbet var {{ kb | round(0) | int }} kr., dyreste dag {{ dd }} med {{ dyr.koeb | round(0) | int }} kr.
-            {%- set tb = states('sensor.solcelle_tilbagebetaling') %}{% if tb not in ['unknown', 'unavailable'] %} Anlægget er {{ state_attr('sensor.solcelle_tilbagebetaling', 'tjent_hjem_pct') | round(0) | int }} procent tjent hjem.{% endif %}
+            {%- set pct = state_attr('sensor.solcelle_tilbagebetaling', 'tjent_hjem_pct') %}{% if states('sensor.solcelle_tilbagebetaling') not in ['unknown', 'unavailable'] and pct is number %} Anlægget er {{ pct | round(0) | int }} procent tjent hjem.{% endif %}
       - action: script.wattlas_besked
         data:
           title: ⚡ Wattlas · ugens energi

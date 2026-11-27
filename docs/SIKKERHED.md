@@ -14,7 +14,9 @@ reglerne hos dit netselskab. Er du i tvivl om dine grænser, så spørg din elin
   Ellers bruges den gemte reserveplan (højst 2 timer gammel) eller selvforbrug.
 - **Friske målinger:** målinger ældre end 90 sekunder eller uden for gyldigt område stopper styringen.
 - **Fejl → selvforbrug:** mistes målinger, plan eller styrekanal, stoppes netladning, og inverteren sættes til selvforbrug.
-  Der kommer en besked, og Wattlas prøver automatisk igen.
+  Der kommer en besked, og Wattlas prøver automatisk igen. Det kræver, at Home Assistant kører: går HA selv ned, afhænger det af
+  inverteren. Huawei, Growatt, SolaX, Sofar og Solis har en nedtælling og går selv tilbage. **Deye, SunMate, Growatt SPF og Sonnen
+  har ikke**: de fortsætter med det sidste program (se [STYREKANALER.md](STYREKANALER.md)).
 - **Få skrivninger:** der skrives kun, når en værdi faktisk ændres (afrundet), for at skåne inverterens hukommelse.
 - **Tilsidesættelser udløber** altid (højst 24 timer).
 

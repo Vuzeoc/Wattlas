@@ -79,6 +79,22 @@ async def main():
     assert regn('fase_ok') is False
     print('faseloft og ladestrøm: OK')
 
+    # netladningens hovedbeslutning: fasetjek, batterispænding og målet skal alle sige ja
+    sæt('binary_sensor.wattlas_pv_maaling_ok', 'on')
+
+    def netlad(**k):
+        return Template(V['netladning'], hass).async_render({**dict(p_batt=-5000, p_net=5000, fase_ok=True, ladeamp=20, fuld_aktiv=False,
+                                                                      ts='lad', soc=50, maal=80), **k})
+    anlaeg(lader_a=20)
+    assert netlad() is True, 'alt i orden: netladning'
+    assert netlad(fase_ok=False) is False, 'fasetjekket siger nej'
+    assert netlad(soc=80) is False, 'målet er nået'
+    assert netlad(ladeamp=0) is False, 'ingen strøm tilbage'
+    anlaeg(v_bat=60, lader_a=20)
+    assert netlad() is False, 'batterispænding over 58 V'
+    anlaeg()
+    print('Netladningens beslutning: OK')
+
     # Huawei: et omvendt fortegn må aldrig få regnestykket til at gå op (ellers er fasegrænsen sat ud af kraft)
     def balance(kanal, **tal):
         tekst = (REPO / 'styrekanaler' / kanal / 'emhass_maalinger.yaml').read_text(encoding='utf-8')
@@ -285,6 +301,29 @@ async def main():
     hass.states.get('switch.min_inverter_battery_grid_charging').last_changed = __import__('datetime').datetime.now(__import__('datetime').timezone.utc) - __import__('datetime').timedelta(minutes=5)
     assert Template(vagt, hass).async_render() is False, 'slaven følger ikke masteren – styringen skal stoppe'
     print('Deye i parallel: deling, summer og status: OK')
+
+    # Deye (Solarman/ESPHome): HVER hurtig måling skal være frisk – en fastfrossen strømtang må ikke gemme sig bag de andre
+    import time as _time
+    maalekilde()
+    _s = sample('deye_esphome'); assert _s['source'] == 'ESPHome', {k: _s[k] for k in _s if k != 'times'}
+    st = hass.states.get('sensor.min_inverter_external_ct_l1_power')
+    hass.states.async_set(st.entity_id, st.state, st.attributes, timestamp=_time.time() - 120)
+    assert sample('deye_esphome')['source'] == 'Ingen', 'én strømtang er 2 min gammel: kilden må ikke bruges'
+    sæt('sensor.min_inverter_external_ct_l1_power', '500')
+    # fortegn: negativt husforbrug (omvendt strømtang) afviser kilden efter 2 min
+    sæt('sensor.min_inverter_load_totalpower', '-6000'); sæt('sensor.min_inverter_out_of_grid_total_power', '0')
+    s = sample('deye_esphome')
+    assert s['values']['load_w_totalpower'] < -200 and s['source'] == 'ESPHome' and s['fortegn_fejl_siden'] > 0, s
+    maalekilde(fortegn_fejl_siden=s['time'] - 130)
+    assert sample('deye_esphome')['source'] == 'Ingen', 'negativt husforbrug i over 2 min: kilden afvises'
+    s = sample('deye_esphome'); maalekilde(fortegn_fejl_siden=s['fortegn_fejl_siden'], fortegn_sidst=s['fortegn_sidst'])
+    sæt('sensor.min_inverter_load_totalpower', '1000'); sæt('sensor.min_inverter_out_of_grid_total_power', '500')
+    s = sample('deye_esphome')  # husforbruget er positivt igen, men kun lige: afvisningen holdes (ellers netladning på forkert fortegn igen og igen)
+    assert s['source'] == 'Ingen' and s['fortegn_fejl_siden'] > 0, ('fortegn: holdes 15 min', s)
+    maalekilde(fortegn_fejl_siden=s['fortegn_fejl_siden'], fortegn_sidst=s['time'] - 1000)  # 15 min uden negativt forbrug
+    s = sample('deye_esphome'); assert s['source'] == 'ESPHome' and s['fortegn_fejl_siden'] == 0, s
+    maalekilde()
+    print('Deye: friskhed pr. måling og fortegn: OK')
 
     # SolaX: elmålerens tal er POSITIVT ved salg (solax_modbus regner husforbrug = inverter − målt) og batteriets positivt ved
     # ladning. Til kernen: net og fasetal positive ved køb, batteri positivt ved afladning – ellers er fasegrænsen sat ud af kraft.

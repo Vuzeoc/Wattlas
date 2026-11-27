@@ -2,6 +2,67 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.8.0
+- **Ny: Wattlas' lette hjerne – Wattlas uden EMHASS-app'en.** Ved opsætningen (og senere under *Konfigurer → Hjerne*) vælger du, hvad
+  der laver planen: *EMHASS* som før, eller Wattlas' egen lille optimering. Den kræver ingen app og bruger under 0,1 MB hukommelse og ca.
+  0,02 sekunder pr. plan, så den kører på små maskiner, hvor EMHASS kan vælte Home Assistant. Den tager præcis samme bestilling og laver
+  planen i samme form, så kontrollen af planen, reguleringen, alle grænser, skygge, kortet og hvad-hvis er uændrede. Fleksible forbrugere
+  og elbilen lægges i deres billigste tidsrum. Sammenlignet med EMHASS 0.19 på de samme prognoser over 12 novemberdøgn kostede den ca.
+  0,4 kr. pr. døgn mere (152,8 mod 152,4 kr.). Ikke afprøvet med sommerens sol og salg endnu
+- Indeholder alt fra 0.7.4 (ikke udgivet særskilt):
+
+### 0.7.4
+- **Varmt vand: boost.** Har din beholder eller varmepumpe ikke et mål, Wattlas kan hæve, kan Wattlas nu i stedet starte dens boost:
+  tænde en kontakt, vælge et valg i en valgliste (fx *engangsopvarmning*) eller trykke på en knap. Kontakten slukkes og valglisten sættes
+  tilbage, når timen ikke længere er billig (mindst 30 min), men kun hvis den stadig står, som Wattlas satte den. Er boosten allerede i gang,
+  startes den ikke. Højst én opvarmning pr. 3 timer (en kontakt, Wattlas selv har slukket, tidligst igen efter 10 min), så en
+  engangsopvarmning ikke startes igen og igen. En kontakt slukkes altid ved stop, også hvis den endnu ikke viser, at den er tændt
+- **Varmt vand: forslag i feltet.** Beholder-feltet foreslår nu beholdere, kontakter og boost-valglister (du kan stadig skrive selv),
+  og valglistens valg vælges fra listen og gemmes ordret (nogle varmepumper har usynlige tegn i teksten, og valg som "1.50" forbliver tekst). Ingen kendt opsætning ændres: en `water_heater` eller `number` virker som før
+
+- **Små maskiner.** Opsætningen advarer, hvis maskinen har under ca. 3,5 GB RAM eller under 3 GB fri plads (EMHASS bruger ca. 0,5 GB
+  og kan gøre Home Assistant ustabil). Mangler EMHASS-app'en, kan du nu fortsætte og skrive adressen på en EMHASS, der kører på en anden
+  maskine. INSTALLATION.md beskriver kravene og EMHASS på en anden maskine
+
+**Rettet efter en gennemgang af hele Wattlas:**
+- **Elbil-lader, stop.**
+  - Et nødstop (laderen adlød ikke grænsen) holder nu en halv times pause i stedet for at starte igen efter få minutter.
+  - Et stop sender nu også den laveste strøm til ladere med kontakt/knap og 0 A til Easee, så en lader, der svarer OK uden at stoppe,
+    ikke kører videre på fuld strøm.
+  - Kommer en sænkning ikke igennem (fx et kort OCPP-udfald), sendes stop igen hvert 10. sekund, til det lykkes.
+  - Et OCPP-stop uden kendt transaktion, mens laderen lader (fx efter en genstart af HA), regnes ikke længere som udført.
+  - Genindlæses Wattlas, får en lader, der kun stoppes med 0 A, ikke længere fuld strøm. Den gives tilbage, når Wattlas fjernes.
+- **Elbil-lader, i øvrigt.**
+  - Et kort udfald nulstiller ikke længere bilens udgangspunkt.
+  - En målt effekt med omvendt fortegn ligner ikke "står stille".
+  - Et kort effekt-udfald giver ikke en halv times pause.
+- **Deye, Deye-kloner og SunMate.**
+  - Hver hurtig måling (fasernes strøm, net, husforbrug) skal nu være højst 90 s gammel, ikke kun den nyeste. Før kunne én fastfrossen
+    strømtang sætte fasegrænsen ud af kraft.
+  - Et negativt husforbrug i over 2 minutter (typisk en omvendt strømtang) afviser målingerne, også for Sonnen.
+  - Dokumentationen siger nu, at Deye og SunMate ikke selv går tilbage, hvis Home Assistant går ned under netladning.
+- **Tilbage til selvforbrug** (når målinger, plan eller kanal svigter).
+  - Brugerens reserve holdes nu i stedet for altid 15 %, og stormens 80 %, mens Wattlas styrer (ikke efter tilbagelevering).
+  - En utilgængelig programkontakt blokerer ikke længere.
+  - Mangler den målte batterispænding, bruges planens grænse.
+  - Solsalget slås til igen, når Wattlas giver inverteren tilbage, hvis Wattlas havde slået det fra ved negativ pris.
+- **Opdatering og installation.**
+  - Går selve konfigurationstjekket i stykker, rulles der nu tilbage alle steder (også ved opstart og i *Konfigurer*).
+  - *Konfigurer* afviser at lægge filer, når en nyere version er hentet, men ikke indlæst.
+  - En tilbagerulning skriver ikke `configuration.yaml` tilbage, hvis installationen ikke rettede den.
+  - En BOM (usynligt tegn i begyndelsen af filen) og en absolut packages-sti håndteres.
+  - En forberedt opdatering beder stadig om genstart efter *Genindlæs*.
+  - Vagten mod anden styring blokerer ikke længere Home Assistant i op til et par sekunder hver time.
+- **App og pakker.**
+  - Ny, slettet og tændt/slukket regel bliver nu faktisk gemt, og en fejl ved gem vises.
+  - Hvad-hvis' *Brug disse indstillinger* skriver kun de beregnede tal, og kun dem, der er ændret.
+  - Den fleksible forbruger tændes ikke i skyggedrift, og feltet er låst, mens den kører.
+  - Ugerapporten sendes også uden investering, og kortet viser "ikke sat" i stedet for "1 kr.".
+  - *Sparet i år* er nu i år.
+  - *Nu*-prisen og tariffen følger husets tidszone og kvarterpriser.
+  - "Ingen hjemme" starter ikke forfra ved en genstart.
+  - Fejlbanneret forsvinder, når hentningen lykkes.
+
 ## 0.7.3
 - **Rettet: to genstarter ved opdatering.** Wattlas lægger en ny versions filer på plads, før Home Assistant genstarter, men først når
   filerne har ligget stille i 20 sekunder. Genstartede du hurtigere, skulle der genstartes én gang til. Nu sker det også, mens Home Assistant

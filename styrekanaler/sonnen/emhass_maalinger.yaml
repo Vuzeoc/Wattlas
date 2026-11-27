@@ -154,11 +154,15 @@ template:
           {% if not is_number(m[k]) %}{% set ns.ok = false %}{% endif %}
         {% endfor %}
         {% set rapp = s.last_reported.timestamp() if s is not none and s.last_reported is not none else 0 %}
-        {% set ok = ns.ok and 0 <= t - rapp <= 90 %}
+        {# fortegn: husforbruget kan ikke være negativt (omvendt måler). Kilden afvises efter 2 min #}
+        {% set neg = m.load_w_totalpower | float(0) < -200 %}{% set gl_fejl = state_attr('sensor.emhass_maalekilde','fortegn_fejl_siden') | float(0) %}
+        {% set sidst = t if neg else state_attr('sensor.emhass_maalekilde','fortegn_sidst') | float(0) %}
+        {% set fejl_siden = (gl_fejl or t) if neg else (gl_fejl if gl_fejl and t - sidst < 900 else 0) %}
+        {% set ok = ns.ok and 0 <= t - rapp <= 90 and not (fejl_siden and t - fejl_siden >= 120) %}
         {% set tider = namespace(d={}) %}
         {% for k in m %}{% set tider.d = dict(tider.d, **{k: rapp}) %}{% endfor %}
         {{ dict(source=('Sonnen' if ok else 'Ingen'), values=(m if ok else {}), times=(tider.d if ok else {}),
-                maalekilde_ok=ok, sample_time=t) }}
+                maalekilde_ok=ok, fortegn_fejl_siden=fejl_siden, fortegn_sidst=sidst, sample_time=t) }}
   sensor:
   - name: EMHASS målekilde
     unique_id: emhass_maalekilde
@@ -168,6 +172,8 @@ template:
       values: '{{ sample[''values''] }}'
       raw_reported: '{{ sample[''times''] }}'
       sonnen_ok: '{{ sample[''maalekilde_ok''] }}'
+      fortegn_fejl_siden: '{{ sample[''fortegn_fejl_siden''] }}'
+      fortegn_sidst: '{{ sample[''fortegn_sidst''] }}'
       sample_time: '{{ sample[''sample_time''] }}'
 - sensor:
   - name: EMHASS måling load_w_totalpower

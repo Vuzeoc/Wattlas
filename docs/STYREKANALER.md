@@ -52,6 +52,11 @@ med Solarman som reserve. Uden den bruges Solarman.
 **Sunsynk / Sol-Ark og andre Deye-kloner** bruger typisk samme Modbus-registre. Hedder dine Solarman-entiteter det samme
 (efter prefix), virker Deye-kanalen direkte. Ellers kopiér den og ret navnene.
 
+**Ingen nedtælling.** Netladningen ligger i Deyes egne tidsprogrammer. Går Home Assistant ned under netladning, bliver
+programmet stående: inverteren lader fra nettet i programmets tidsrum, også de næste nætter, til målet er nået – uden Wattlas'
+fasegrænse. Sæt inverterens egen grænse for køb fra nettet, hvis din model har en, og slå netladningen fra i Deyes app, hvis HA er
+nede længe. Det samme gælder de to andre Deye-kanaler og SunMate.
+
 ## To Deye i parallel (`styrekanaler/deye_parallel`) – eksperimentel
 
 Til to ens Deye-hybrid-invertere i master/slave med fælles batteri, hver med sin egen Solarman-logger i ha-solarman.
@@ -93,6 +98,8 @@ SunMate har ikke dagstællere for køb, salg og forbrug. Dem laver kanalen selv 
 
 Kanalen er bygget ud fra en SunMate-opsætning, der kørte med Wattlas' forgænger, men den **er ikke testet** med denne version.
 Følg den nøje den første dag, og meld gerne tilbage.
+
+**Ingen nedtælling:** som Deye (se ovenfor). Går Home Assistant ned under netladning, bliver SunMates tidsprogram stående.
 
 ## Huawei (`styrekanaler/huawei`) – ikke kørt i drift
 

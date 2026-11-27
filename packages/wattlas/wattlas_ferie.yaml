@@ -19,6 +19,42 @@ input_datetime:
     name: Wattlas · hjem igen
     has_date: true
     has_time: true
+  # hvornår den sidste gik (sættes af automationen nedenfor): personernes last_changed nulstilles ved hver genstart af HA, så
+  # "væk et døgn" ville ellers starte forfra. shortcut: installeres Wattlas, mens alle er væk, gælder personernes tid den første gang
+  wattlas_alle_vaek_siden:
+    name: Wattlas · alle væk siden
+    has_date: true
+    has_time: true
+
+automation:
+  - id: wattlas_alle_vaek
+    alias: Wattlas · alle væk siden
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: template
+        value_template: >-
+          {{ states.person | rejectattr('state', 'in', ['unknown', 'unavailable']) | list | count > 0
+             and states.person | selectattr('state', 'eq', 'home') | list | count == 0 }}
+        id: vaek
+      - trigger: template
+        value_template: "{{ states.person | selectattr('state', 'eq', 'home') | list | count > 0 }}"
+        id: hjemme
+      - trigger: homeassistant
+        event: start
+        id: hjemme
+    actions:
+      - choose:
+          - conditions: "{{ trigger.id == 'vaek' and (state_attr('input_datetime.wattlas_alle_vaek_siden', 'timestamp') or 0) <= 0 }}"
+            sequence:
+              - action: input_datetime.set_datetime
+                target: {entity_id: input_datetime.wattlas_alle_vaek_siden}
+                data: {timestamp: "{{ as_timestamp(now()) }}"}
+          - conditions: "{{ states.person | selectattr('state', 'eq', 'home') | list | count > 0 }}"
+            sequence:
+              - action: input_datetime.set_datetime
+                target: {entity_id: input_datetime.wattlas_alle_vaek_siden}
+                data: {timestamp: 0}
 
 template:
   - binary_sensor:
@@ -31,8 +67,9 @@ template:
           {% set t = as_timestamp(now()) %}
           {% set fra = state_attr('input_datetime.wattlas_ferie_fra', 'timestamp') | float(0) %}{% set til = state_attr('input_datetime.wattlas_ferie_til', 'timestamp') | float(0) %}
           {% set p = states.person | rejectattr('state', 'in', ['unknown', 'unavailable']) | list %}
+          {% set lc = as_timestamp(p | map(attribute='last_changed') | max) if p | count > 0 else t %}{% set hs = state_attr('input_datetime.wattlas_alle_vaek_siden', 'timestamp') | float(0) %}
           {% set vaek = is_state('input_boolean.wattlas_ingen_hjemme', 'on') and p | count > 0 and p | selectattr('state', 'eq', 'home') | list | count == 0
-             and t - as_timestamp(p | map(attribute='last_changed') | max) >= 86400 %}
+             and t - (hs if 0 < hs <= lc else lc) >= 86400 %}
           {{ vaek or (is_state('input_boolean.wattlas_ferie', 'on') and 0 < fra <= t < til) }}
         attributes:
           # perioden, planen regner med standby i (fremtiden tæller med, så hjemkomsten ses i planen)
@@ -45,8 +82,9 @@ template:
           # alle har været væk et døgn: standby i hele planen, til nogen kommer hjem (planen regnes om hvert 5. minut)
           ingen_hjemme: >-
             {% set p = states.person | rejectattr('state', 'in', ['unknown', 'unavailable']) | list %}
+            {% set lc = as_timestamp(p | map(attribute='last_changed') | max) if p | count > 0 else 0 %}{% set hs = state_attr('input_datetime.wattlas_alle_vaek_siden', 'timestamp') | float(0) %}
             {{ is_state('input_boolean.wattlas_ingen_hjemme', 'on') and p | count > 0 and p | selectattr('state', 'eq', 'home') | list | count == 0
-               and as_timestamp(now()) - as_timestamp(p | map(attribute='last_changed') | max) >= 86400 }}
+               and as_timestamp(now()) - (hs if 0 < hs <= lc else lc) >= 86400 }}
           # en ferie, der er begyndt, springes over i historikken – også når kontakten er slået fra igen, og når næste ferie er skrevet ind
           # (den forrige huskes, til den er 9 døgn gammel)
           udeluk_fra: >-

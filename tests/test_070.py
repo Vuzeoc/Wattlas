@@ -77,6 +77,7 @@ async def main():
     print('Hvad-hvis med andet batteri og dagsplan: OK')
     await vagt_test()
     await varmtvand_test()
+    await boost_test()
     await systemtest_test()
     await sommertid_test()
     ladetid_test()
@@ -294,6 +295,144 @@ async def varmtvand_test():
     print('Varmt vand på billig strøm: OK')
 
 
+async def boost_test():
+    """Varmt vand med boost: valgliste (valget ordret, med usynlig bindestreg), kontakt og knap. Starter kun i billige timer, mens Wattlas
+    styrer, aldrig oven i en igangværende, sættes tilbage som den stod (valglisten kun, hvis den stadig står på Wattlas' valg), og en
+    engangsopvarmning/et knaptryk giver 3 timers pause."""
+    import time
+    from homeassistant.setup import async_setup_component
+    hass, _ = await ny_hass('')
+    S = hass.states.async_set
+    pk = load_yaml(str(REPO / 'packages/wattlas/wattlas_varmtvand.yaml'))
+    for dom in ('input_boolean', 'input_text', 'input_number', 'input_datetime', 'automation'):
+        assert await async_setup_component(hass, dom, {dom: pk[dom]}), dom
+    kald = []
+
+    def eid(call):
+        e = call.data['entity_id']; return e[0] if isinstance(e, list) else e
+
+    async def vaelg(call):
+        e = eid(call); kald.append(('valg', call.data['option'])); S(e, call.data['option'], hass.states.get(e).attributes)
+
+    langsom = [False]  # en cloud-kontakt, der først viser "on" ved næste aflæsning
+
+    async def taend(call):
+        kald.append(('on', eid(call)))
+        if not langsom[0]:
+            S(eid(call), 'on')
+
+    async def sluk(call):
+        kald.append(('off', eid(call))); S(eid(call), 'off')
+
+    async def tryk(call):
+        kald.append(('tryk', eid(call)))
+    hass.services.async_register('select', 'select_option', vaelg)
+    hass.services.async_register('switch', 'turn_on', taend)
+    hass.services.async_register('switch', 'turn_off', sluk)
+    hass.services.async_register('button', 'press', tryk)
+    aut = next(e for e in hass.states.async_entity_ids('automation') if hass.states.get(e).attributes.get('id') == 'wattlas_varmtvand')
+
+    async def k(dom, tj, **d):
+        await hass.services.async_call(dom, tj, d, blocking=True); await hass.async_block_till_done()
+
+    async def koer():
+        await k('automation', 'trigger', entity_id=aut, skip_condition=False, variables={'vent_s': 1})
+        await asyncio.sleep(1.2); await hass.async_block_till_done()
+
+    def aeld():  # som om boosten startede for en halv time siden
+        st = hass.states.get('input_datetime.wattlas_varmtvand_boost_slut')
+        S(st.entity_id, st.state, {**st.attributes, 'timestamp': time.time() - 2000})
+
+    def genstart_foer():  # efter en genstart er hjælperens last_changed = genstarten
+        st = hass.states.get('input_text.wattlas_varmtvand_foer')
+        S(st.entity_id, st.state + 'x', st.attributes); S(st.entity_id, st.state, st.attributes)
+
+    async def pause(s):  # den sidste boost sluttede for s sekunder siden
+        await k('input_datetime', 'set_datetime', entity_id='input_datetime.wattlas_varmtvand_boost_slut', timestamp=time.time() - s)
+    foer = lambda: hass.states.get('input_text.wattlas_varmtvand_foer').state.replace('unknown', '')  # noqa: E731 – ny hjælper uden værdi er "unknown"
+    vp = lambda: hass.states.get('select.vp_boost').state  # noqa: E731
+    BOOST, OPT = 'One-time in\u00adcrease', {'options': ['Off', 'One-time in\u00adcrease', '3 hr']}
+    S('select.vp_boost', 'Off', OPT); S('sensor.wattlas_prisniveau', 'billig'); S('binary_sensor.emhass_ui_data_frisk', 'on')
+    S('sensor.emhass_m_grid_out_total_power', '500'); S('input_boolean.emhass_styring_aktiv', 'on'); S('input_boolean.emhass_har_overtaget', 'on')
+    await k('input_text', 'set_value', entity_id='input_text.wattlas_varmtvand_entitet', value='select.vp_boost')
+    await k('input_text', 'set_value', entity_id='input_text.wattlas_varmtvand_boost', value='One-time increase')  # skrevet af, uden den usynlige bindestreg
+    await k('input_boolean', 'turn_on', entity_id='input_boolean.wattlas_varmtvand'); await pause(99999); await koer()
+    assert not kald and foer() == '', ('valget skal være ordret', kald)
+    await k('input_text', 'set_value', entity_id='input_text.wattlas_varmtvand_boost', value=BOOST); await koer()
+    assert kald == [('valg', BOOST)] and foer() == 'Off', ('billig: boost', kald, foer())
+    await koer(); assert len(kald) == 1, 'i gang: intet nyt'
+    # engangsopvarmning: pumpen går selv tilbage = færdig, og så 3 timers pause
+    S('select.vp_boost', 'Off', OPT); aeld(); await koer()
+    assert foer() == '' and len(kald) == 1, ('færdig af sig selv', kald, foer())
+    await koer(); assert len(kald) == 1, 'pause: ikke straks igen'
+    await pause(1000); await koer(); assert len(kald) == 1, 'pause: 3 timer for en valgliste, ikke 10 min'
+    await pause(11000); await koer(); assert kald[-1] == ('valg', BOOST) and len(kald) == 2, ('efter pausen', kald)
+    # dyr time: holdes 30 min, så sættes valget tilbage til det, det var
+    S('sensor.wattlas_prisniveau', 'normal'); await koer(); assert vp() == BOOST, 'holdes mindst 30 min'
+    aeld(); genstart_foer(); await koer()  # en genstart midt i boosten forlænger ikke de 30 min
+    assert vp() == 'Off' and foer() == '' and kald[-1] == ('valg', 'Off'), ('tilbage', kald)
+    # brugeren vælger selv noget andet imens: det står
+    await pause(11000); S('sensor.wattlas_prisniveau', 'billig'); await koer(); assert vp() == BOOST
+    S('select.vp_boost', '3 hr', OPT); S('sensor.wattlas_prisniveau', 'normal'); aeld(); await koer()
+    assert vp() == '3 hr' and foer() == '', 'brugerens valg står'
+    # allerede i boost (brugerens egen): Wattlas starter ikke, og sætter derfor heller intet tilbage
+    await pause(11000); S('select.vp_boost', BOOST, OPT); n = len(kald); S('sensor.wattlas_prisniveau', 'billig'); await hass.async_block_till_done(); await koer()
+    assert len(kald) == n and foer() == '', ('allerede i gang: intet', kald[n:], foer(), vp())
+    # skygge stopper straks, også inden for de 30 min
+    S('select.vp_boost', 'Off', OPT); await koer(); assert vp() == BOOST and foer() == 'Off'
+    S('input_boolean.emhass_har_overtaget', 'off'); await koer(); assert vp() == 'Off' and foer() == '', 'skygge: tilbage'
+    S('input_boolean.emhass_har_overtaget', 'on')
+    # utilgængelig: intet, og når den svarer igen, sættes den tilbage
+    await pause(11000); await koer(); assert vp() == BOOST
+    S('select.vp_boost', 'unavailable', OPT); await k('input_boolean', 'turn_off', entity_id='input_boolean.wattlas_varmtvand'); await koer()
+    assert foer() == 'Off', 'utilgængelig: husket'
+    S('select.vp_boost', BOOST, OPT); await koer(); assert vp() == 'Off' and foer() == '', 'tilbage, når den svarer (også slået fra)'
+    await k('input_boolean', 'turn_on', entity_id='input_boolean.wattlas_varmtvand')
+    # kontakt: tændes og slukkes, 10 min pause
+    await k('input_text', 'set_value', entity_id='input_text.wattlas_varmtvand_entitet', value='switch.elpatron'); S('switch.elpatron', 'off')
+    await pause(700); await koer(); assert hass.states.get('switch.elpatron').state == 'on' and foer() == 'off', 'kontakt tændt'
+    S('sensor.wattlas_prisniveau', 'normal'); aeld(); await koer()
+    assert hass.states.get('switch.elpatron').state == 'off' and foer() == '', 'kontakt slukket'
+    # en kontakt, der selv slukker (tanken er varm): én opvarmning, så 3 timers pause – ikke en ny hvert 15. min
+    S('sensor.wattlas_prisniveau', 'billig'); await pause(700); await koer(); assert hass.states.get('switch.elpatron').state == 'on'
+    S('switch.elpatron', 'off'); aeld(); await koer(); assert foer() == '', 'kontakt slukket af sig selv: færdig'
+    st = hass.states.get('input_datetime.wattlas_varmtvand_boost_slut')  # et kvarter senere
+    S(st.entity_id, st.state, {**st.attributes, 'timestamp': st.attributes['timestamp'] - 1000})
+    n = len(kald); await koer(); assert len(kald) == n, ('selvslukket kontakt: 3 timers pause, ikke 10 min', kald[n:])
+    # en langsom kontakt, der endnu ikke viser "on", slukkes alligevel ved stop (ellers kunne en elpatron blive stående tændt)
+    await pause(99999); langsom[0] = True; await koer()
+    assert foer() == 'off' and hass.states.get('switch.elpatron').state == 'off', ('langsom kontakt: husket', foer())
+    S('sensor.wattlas_prisniveau', 'normal'); aeld(); await koer()
+    assert kald[-1] == ('off', 'switch.elpatron') and foer() == '', ('langsom kontakt: slukket', kald[-3:])
+    langsom[0] = False
+    # knap: ét tryk (også en knap, der aldrig er trykket på), intet at sætte tilbage, så 3 timers pause
+    await k('input_text', 'set_value', entity_id='input_text.wattlas_varmtvand_entitet', value='button.vp_boost'); S('button.vp_boost', 'unknown')
+    S('sensor.wattlas_prisniveau', 'billig'); await pause(11000); n = len(kald); await koer()
+    assert kald[n:] == [('tryk', 'button.vp_boost')] and foer() == 'tryk', ('knap', kald[n:])
+    await koer(); aeld(); await koer(); await koer()
+    assert len(kald) == n + 1 and foer() == '', ('ét tryk, så pause', kald[n:], foer())
+    # Wattlas fjernes under en boost: valglisten sættes tilbage
+    await k('input_text', 'set_value', entity_id='input_text.wattlas_varmtvand_entitet', value='select.vp_boost'); S('select.vp_boost', 'Off', OPT)
+    await pause(11000); await koer(); assert vp() == BOOST
+    from custom_components.wattlas import _varmtvand_tilbage
+    await _varmtvand_tilbage(hass); await hass.async_block_till_done()
+    assert vp() == 'Off' and foer() == '' and hass.states.get('input_boolean.wattlas_varmtvand').state == 'off', 'fjernet: tilbage'
+    # … men har brugeren selv valgt noget andet imens, står det
+    await k('input_boolean', 'turn_on', entity_id='input_boolean.wattlas_varmtvand'); await pause(11000); await koer(); assert vp() == BOOST
+    S('select.vp_boost', '3 hr', OPT); await _varmtvand_tilbage(hass); await hass.async_block_till_done()
+    assert vp() == '3 hr' and foer() == '', 'fjernet: brugerens valg står'
+    # valg, der ligner tal ("1.50", "2"): HA gør dem ellers til tal, så de gemmes og sættes tilbage ordret
+    await k('input_boolean', 'turn_on', entity_id='input_boolean.wattlas_varmtvand'); S('sensor.wattlas_prisniveau', 'billig')
+    S('select.tal', '1.50', {'options': ['1.50', '2', 'Boost']})
+    await k('input_text', 'set_value', entity_id='input_text.wattlas_varmtvand_entitet', value='select.tal')
+    await k('input_text', 'set_value', entity_id='input_text.wattlas_varmtvand_boost', value='2')
+    await pause(11000); await koer(); assert hass.states.get('select.tal').state == '2' and foer() == '1.50', ('tal: boost', foer())
+    S('sensor.wattlas_prisniveau', 'normal'); aeld(); await koer()
+    assert hass.states.get('select.tal').state == '1.50' and foer() == '', ('tal: tilbage', hass.states.get('select.tal').state)
+    await hass.async_stop()
+    print('Varmt vand med boost: OK')
+
+
 async def systemtest_test():
     """Systemtesten starter kun under de rigtige forhold, går gennem tilsidesættelsen og slutter altid med "ingen"."""
     from homeassistant.setup import async_setup_component
@@ -431,6 +570,18 @@ def ladetid_test():
                                     f'lader også uden sol · fuld strøm ved 6,0{nb}kW overskud', 'lader med fuld strøm, også uden sol', '',
                                     f'starter ved ca. 4,1{nb}kW overskud · fuld strøm ved 11,0{nb}kW'], p.stdout
     print('Solladning-skøn: OK')
+    # varmt vand: listen viser beholdere og boost-entiteter, men aldrig Wattlas' egne eller fx rumtermostaters forvalg
+    fn = re.search(r"\n  const vvBoost = .*?\n  const vvGyldig = .*?\n.*?\n  const vvKandidater = .*?\.sort\(\); \};\n", kort, re.S)
+    assert fn, 'vvKandidater findes ikke i kortet'
+    js = fn.group(0) + """const S = {'water_heater.tank': {attributes: {}}, 'select.vp_hot_water_boost': {attributes: {}}, 'switch.relae_3': {attributes: {friendly_name: 'Elpatron'}},
+      'number.klima_stue_preset_eco_temp': {attributes: {}}, 'input_text.wattlas_varmtvand_entitet': {attributes: {}}, 'input_boolean.wattlas_varmtvand': {attributes: {}},
+      'switch.lys_1': {attributes: {}}, 'sensor.hot_water_top': {attributes: {}}, 'button.pumpe_x': {attributes: {}}};
+console.log(JSON.stringify([vvKandidater(S, ''), vvKandidater(S, 'button.pumpe_x'), vvBoost('button'), vvBoost('number')]));"""
+    p = subprocess.run([node, '-'], input=js, capture_output=True, text=True, encoding='utf-8')
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout) == [['select.vp_hot_water_boost', 'switch.relae_3', 'water_heater.tank'],
+                                    ['button.pumpe_x', 'select.vp_hot_water_boost', 'switch.relae_3', 'water_heater.tank'], True, False], p.stdout
+    print('Varmt vand-liste: OK')
 
 
 asyncio.run(main())

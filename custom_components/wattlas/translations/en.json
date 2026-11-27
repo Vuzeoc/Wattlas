@@ -3,9 +3,10 @@
     "step": {
       "user": {
         "title": "Wattlas – vælg inverter-type",
-        "description": "Wattlas styrer dit batteri efter elprisen med EMHASS. Vælg, hvordan Home Assistant taler med din inverter.\n\n**Growatt** (eksperimentel): kun trefasede hybrid-invertere med Growatt-elmåler og lokal forbindelse via *solax_modbus* – ikke Growatts sky. Sæt *VPP Status* til *Enabled* i solax_modbus først.\n\n**SolaX, Sofar og Solis** (eksperimentelle): kun trefasede hybrid-invertere lokalt via *solax_modbus*. SolaX: slå først *Grid Voltage L1–L3* til i solax_modbus. Solis: vælg plugin *solis_fb00*.",
+        "description": "Wattlas styrer dit batteri efter elprisen med EMHASS. Vælg, hvordan Home Assistant taler med din inverter.\n\n**Growatt** (eksperimentel): kun trefasede hybrid-invertere med Growatt-elmåler og lokal forbindelse via *solax_modbus* – ikke Growatts sky. Sæt *VPP Status* til *Enabled* i solax_modbus først.\n\n**SolaX, Sofar og Solis** (eksperimentelle): kun trefasede hybrid-invertere lokalt via *solax_modbus*. SolaX: slå først *Grid Voltage L1–L3* til i solax_modbus. Solis: vælg plugin *solis_fb00*.\n\n**Hjerne:** *EMHASS* er den fulde optimering (kræver EMHASS-app'en og helst 4 GB RAM). *Wattlas' lette hjerne* laver planen selv uden app – til mindre maskiner som en Raspberry Pi med 2 GB. Målt på 12 døgn var den kun ca. 0,4 kr. pr. døgn dyrere end EMHASS. Du kan skifte senere under Konfigurer.",
         "data": {
-          "kanal": "Inverter"
+          "kanal": "Inverter",
+          "hjerne": "Hjerne (det, der laver planen)"
         }
       },
       "inverter": {
@@ -218,6 +219,12 @@
         "gen": "På Deyes GEN-/mikroinverter-port",
         "ac": "I eltavlen (AC-koblet)"
       }
+    },
+    "hjerne": {
+      "options": {
+        "emhass": "EMHASS (fuld optimering, kræver EMHASS-app'en)",
+        "let": "Wattlas' lette hjerne (ingen app, til små maskiner)"
+      }
     }
   },
   "issues": {
@@ -322,6 +329,7 @@
         "title": "Ret Wattlas",
         "description": "Vælg, hvad du vil rette. Ændringerne bruges med det samme – du skal ikke genstarte.\n\nVil du skifte inverter, så fjern Wattlas og tilføj den igen (dine tal bevares).",
         "menu_options": {
+          "hjerne": "Hjerne: EMHASS eller Wattlas' lette hjerne",
           "forbindelser": "Forbindelser og prognoser (EMHASS, solprognose, vejr)",
           "batteri": "Batteri og inverter (kWh, effekter og strømme i A)",
           "elnet": "Elnet og sikringer (fasegrænse, importloft, eksport)",
@@ -344,6 +352,15 @@
           "priser_uden_moms": "Nordpools priser er uden moms",
           "vejr": "Vejr",
           "udetemperatur": "Udetemperatur (valgfri – ellers bruges vejrets)"
+        }
+      },
+      "hjerne": {
+        "title": "Hjerne",
+        "description": "**Hjerne:** *EMHASS* er den fulde optimering (kræver EMHASS-app'en og helst 4 GB RAM). *Wattlas' lette hjerne* laver planen selv uden app – til mindre maskiner som en Raspberry Pi med 2 GB. Målt på 12 døgn var den kun ca. 0,4 kr. pr. døgn dyrere end EMHASS. Skiftet gælder fra næste plan (højst 5 minutter). Vælger du EMHASS, skal adressen og API-nøglen fra EMHASS-app'en udfyldes (tom nøgle = behold den nuværende).",
+        "data": {
+          "hjerne": "Hjerne",
+          "emhass_adresse": "EMHASS-adresse",
+          "emhass_noegle": "EMHASS API-nøgle"
         }
       },
       "batteri": {

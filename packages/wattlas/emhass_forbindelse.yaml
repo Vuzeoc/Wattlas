@@ -615,30 +615,44 @@ script:
     - condition: template
       value_template: "{{ not (is_state('input_boolean.wattlas_skygge', 'on') and not is_state('input_boolean.emhass_har_overtaget', 'on')) }}"
     - action: script.emhass_netopladning_fra
+    # en utilgængelig programkontakt tæller som slukket: ellers ville én død entitet efterlade alle programmer med Wattlas' sidste værdier.
+    # Svarer inverteren slet ikke (kontakterne står stadig "on"), stoppes der her, og oprydningen prøver igen hvert minut
     - wait_template: |-
         {% set ns = namespace(ok=is_state('switch.wattlas_netladning','off')) %} {% for i in range(1,7) %}
-          {% if not is_state('switch.emhass_netladning_p' ~ i,'off') %}
+          {% if states('switch.emhass_netladning_p' ~ i) not in ['off', 'unavailable', 'unknown'] %}
             {% set ns.ok=false %}
           {% endif %}
         {% endfor %} {{ ns.ok }}
       timeout: 00:00:15
       continue_on_timeout: false
+    - variables:
+        # brugerens reserve (og stormens 80 %) gælder også i fejlsituationen
+        min_soc: "{{ [[15, states('input_number.wattlas_reserve') | float(15), 80 if is_state('binary_sensor.wattlas_storm', 'on') and is_state('input_boolean.emhass_styring_aktiv', 'on') else 0] | max, 100] | min | int }}"
+        # den målte grænse – eller, når batterispændingen er ukendt, planens (fast spænding). 0 W må aldrig skrives (se nedenfor)
+        aflad_w: "{{ (states('sensor.emhass_ui_afladegraense_w') | float(0)) or (states('sensor.emhass_ui_plan_afladegraense_w') | float(0)) }}"
     - repeat:
         count: 6
         sequence:
         - action: script.emhass_skriv_tal
           data:
             entitet: number.wattlas_program_{{ repeat.index }}_soc
-            vaerdi: 15
+            vaerdi: '{{ min_soc }}'
         # Grænsen står kortvarigt på 0 ved genstart. 0 W må ikke skrives, for ved fuldt batteri lukker Deye så for solen.
         - if:
           - condition: template
-            value_template: "{{ states('sensor.emhass_ui_afladegraense_w') | float(0) > 0 }}"
+            value_template: "{{ aflad_w | float(0) > 0 }}"
           then:
           - action: script.emhass_skriv_tal
             data:
               entitet: number.wattlas_program_{{ repeat.index }}_power
-              vaerdi: '{{ states(''sensor.emhass_ui_afladegraense_w'')|float(0)|int }}'
+              vaerdi: '{{ aflad_w | float(0) | int }}'
+    # solsalg tilbage, når Wattlas giver inverteren tilbage (styringen er slået fra): Wattlas slår det fra ved negativ pris, og ingen anden vej
+    # slår det til igen. Mens Wattlas styrer, afgør solsalg-automationen det efter prisen (ellers til/fra hvert 30. sekund ved negativ pris)
+    - if: "{{ is_state('switch.wattlas_solsalg', 'off') and is_state('input_boolean.emhass_styring_aktiv', 'off') }}"
+      then:
+      - action: switch.turn_on
+        continue_on_error: true
+        target: {entity_id: switch.wattlas_solsalg}
   emhass_reguler:
     alias: EMHASS – reguler aktiv periode
     mode: single

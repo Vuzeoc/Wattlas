@@ -39,6 +39,7 @@ MAAL_V = 230.0
 I_GANG = {"charging", "suspendedev", "suspendedevse"}
 HVILER = {"available", "preparing", "finishing"}
 NOEGLE = f"{DOMAIN}_lader"  # hass.data: den kørende styring
+EGEN = f"{DOMAIN}_lader_efterladt"  # hass.data: laderen, en lukket styring efterlod (opsætning, egen strøm, stoppet?) – til den næste eller til fjernelse
 
 
 def _tal(s) -> float | None:
@@ -82,10 +83,14 @@ class Entiteter:
             await self._kontakt(True)
 
     async def stop(self) -> None:
-        if any(self.d.get(k) for k in ("til_fra", "stop")):
-            await self._kontakt(False)
-        else:
+        if not any(self.d.get(k) for k in ("til_fra", "stop")):
             await self.graense(0)  # opsætningen tillader det kun, når tallet kan sættes til 0
+            return
+        try:
+            await self._kontakt(False)
+        finally:  # accepteret er ikke udført: også strømmen ned til tallets laveste, så en lader, der ikke adlyder stop, ikke kører på fuld strøm
+            if (e := self.d.get("strom")) and (s := self.hass.states.get(e)) is not None:
+                await self.graense(int(max(0.0, float(s.attributes.get("min") or 0))))
 
     async def slip(self) -> None:
         if self.egen is not None and self.d.get("strom"):
@@ -136,6 +141,8 @@ class Ocpp(Entiteter):
         self._transaktion()
         if self.tx:
             await self.graense(0)
+        elif self.d.get("status") and self._status() == "charging":  # lader uden kendt transaktion (fx efter en genstart): ikke "stoppet" – prøv igen
+            raise HomeAssistantError("ingen transaktion at stoppe")
 
     async def slip(self) -> None:
         if self._transaktion():  # en 0 A-grænse gælder resten af transaktionen: giv laderen dens strøm tilbage
@@ -152,7 +159,10 @@ class Easee(Entiteter):
         await self._kald("easee", "action_command", {"device_id": self.d["enhed"], "action_command": "resume" if til else "pause"})
 
     async def stop(self) -> None:
-        await self._kontakt(False)
+        try:
+            await self._kontakt(False)
+        finally:  # også 0 A, hvis "pause" accepteres uden at blive udført
+            await self.graense(0)
 
     async def slip(self) -> None:
         await self.graense(32)  # tjenestens højeste: laderens egne faste grænser gælder så igen
@@ -168,13 +178,15 @@ class Styring:
         self.lader = SLAGS[self.d["slags"]](hass, self.d)
         self.husk, self.vagt, self.laas = logik.Husk(), logik.Vagt(), asyncio.Lock()
         self.sendt: int | None = None       # det, laderen sidst fik besked om (None = Wattlas styrer den ikke)
-        self.fejl, self.tom, self.pause, self.udenfor = 0, None, None, None
+        self.fejl, self.tom, self.pause, self.udenfor, self.uden_effekt = 0, None, None, None, None
         self.rest, self.foer, self.tilstand, self.meldt = 0.0, None, None, None
         self.tilsluttet_foer: bool | None = None
         self.af: list = []
         self.soc: tuple = (None, 0.0)  # bilens seneste procent og det, der var ladet, da den kom
         self.pause_grund = ""
         self.lukket = False
+        self.efterladt = False  # lukket med laderen stoppet, men ikke givet tilbage
+        self.skylder_stop = False  # en ordre fejlede: stop skal sendes, til det kommer igennem
         self.sendt_nu, self.sendt_tid = -1e9, dt_util.utcnow()
         self.frist = None  # den seneste "klar kl."
 
@@ -200,7 +212,7 @@ class Styring:
             return 0.0
         if v is None:
             return None
-        return v * (1000 if s.attributes.get("unit_of_measurement") == "kW" else 1)
+        return abs(v) * (1000 if s.attributes.get("unit_of_measurement") == "kW" else 1)  # abs: en omvendt strømtang må ikke ligne "står stille"
 
     def _tilsluttet(self) -> bool | None:
         if not (e := self.d.get("status")):
@@ -236,8 +248,11 @@ class Styring:
         d = self.d
         v = self._v(d.get("bil_soc") or "")
         hjemme = not d.get("bil_stik") or self.hass.states.is_state(d["bil_stik"], "on")  # en gæst i laderen er ikke brugerens bil
-        if v is None or not 0 <= v <= 100 or not d.get("bil_kwh") or tilsluttet is not True or not hjemme:
+        ude = bool(d.get("bil_stik")) and self.hass.states.is_state(d["bil_stik"], "off")  # bevisligt ude (et kort sky-udfald nulstiller ikke)
+        if tilsluttet is False or ude or not d.get("bil_kwh"):
             self.soc = (None, 0.0)
+            return None, None, None
+        if v is None or not 0 <= v <= 100 or tilsluttet is None or not hjemme:  # kort udfald: udgangspunktet huskes
             return None, None, None
         if self.soc[0] != v:
             self.soc = (v, ladet)
@@ -321,7 +336,7 @@ class Styring:
         ordre, grund = self._undtagelser(nu, ordre, grund, effekt, egen, tilsluttet)
         skygge = self.hass.states.is_state("input_boolean.wattlas_skygge", "on")
         await self._udfoer(nu, None if skygge else ordre, effekt, antal, volt)  # skygge: laderen slippes (som "fra") og vises kun
-        await self._reserve(0 if skygge or ordre is None or grund in ("bilen tager ikke imod", "effekten mangler", "hviler") else logik._oensket(ind), ordre or 0)
+        await self._reserve(0 if skygge or ordre is None or grund in ("bilen tager ikke imod", "effekten mangler", "hviler", "over grænsen") else logik._oensket(ind), ordre or 0)
         self._meld({"grund": grund, "ordre_a": ordre, "effekt_w": None if effekt is None else round(effekt), "plads_a": None if rum is None else round(rum, 1),
                     "tilsluttet": tilsluttet, "rest_kwh": round(rest, 1), "bil_soc": soc, "bil_km": self._v(self.d.get("bil_km") or "") if soc is not None else None, "klar": klar, "p_maks_w": round(maks * antal_e * volt), "min_a": mini, "graense_a": graense, "w_pr_a": round(antal_e * volt), "noed": noed and tilstand == "klar",
                     "skygge": skygge, "fejl": self.fejl, "fast_a": fast, "hold_kan": self.hold_kan})
@@ -342,7 +357,8 @@ class Styring:
             self.udenfor = None
         if tilsluttet is False:
             self.pause = None
-        if effekt is None and self.sendt and ordre == 0:
+        self.uden_effekt = (self.uden_effekt or nu) if effekt is None else None
+        if effekt is None and self.sendt and ordre == 0 and nu - self.uden_effekt >= logik.VENT_DATA_S:  # ikke et kort udfald
             self.pause, self.pause_grund = nu, "effekten mangler"
         if ordre and effekt is not None and effekt < logik.TOMGANG_W and self.sendt:
             self.tom = nu if self.tom is None else self.tom
@@ -373,10 +389,11 @@ class Styring:
         if besked == "nødstop":
             self._problem("lader_over_graense")
             self._nulstil(nu)
+            self.pause, self.pause_grund = nu, "over grænsen"  # ikke start igen efter hvilen: den adlød ikke grænsen
             ordre = 0
         elif besked == "stopper ikke":
             self._problem("lader_stopper_ikke")
-        if ordre == self.sendt and besked is None:
+        if ordre == self.sendt and besked is None and not (ordre == 0 and self.skylder_stop):
             return
         if ordre == 0 and self.sendt is None and effekt is not None and effekt < logik.TOMGANG_W:
             self.sendt = 0  # står beviseligt stille: ingen grund til at skrive (ukendt effekt = stop sendes)
@@ -384,11 +401,13 @@ class Styring:
         start = ordre > 0 and not self.sendt
         self.sendt_nu, self.sendt_tid = nu, dt_util.utcnow()
         if await self._proev(self.lader.lad(ordre, start) if ordre else self.lader.stop()):
-            self.sendt = ordre
+            self.sendt, self.skylder_stop = ordre, False
         elif ordre:
-            if self.sendt and ordre < self.sendt:  # en sænkning, der ikke kom igennem: stop i stedet for at vente på vagten
-                await self._proev(self.lader.stop())
             self._nulstil(nu)  # kunne ikke sættes: så regnes den som stoppet, og vagten holder øje med det målte
+            # ukendt, om laderen fik ordren (fx en sænkning under et udfald): en sænkning stoppes med det samme, og ellers – eller lykkes det
+            # ikke – sendes stop igen hvert trin, til det kommer igennem. Ellers kunne den køre videre på den gamle strøm
+            saenk = bool(self.sendt) and ordre < self.sendt
+            self.skylder_stop = not (saenk and await self._proev(self.lader.stop()))
             self.sendt = 0
 
     async def _proev(self, kald) -> bool:
@@ -440,34 +459,69 @@ class Styring:
             self.meldt = noegle
             self.hass.bus.async_fire("wattlas_lader", d)
 
-    async def luk(self, _ev=None) -> None:
+    async def luk(self, _ev=None, fjern: bool = False) -> None:
         """Home Assistant lukker, eller Wattlas fjernes: en bil må ikke lade uden fasevagt. Når HA lukker, når det ikke altid frem (OCPP lukker
         forbindelsen først – set i test-VM'en). Laderens egen maksstrøm er bagstopper."""
         kun_strom = self.d["slags"] == "ocpp" or self.d["slags"] == "entiteter" and not (self.d.get("til_fra") or self.d.get("stop"))
         self.lukket = True
         async with self.laas:
-            if self.sendt or self.husk.sat:  # også et trin, der blev afbrudt midt i en start
+            if self.sendt or self.husk.sat or self.skylder_stop:  # også et trin, der blev afbrudt midt i en start, og et stop, der mangler
                 await self._proev(self.lader.stop())
-            # HA lukker: en lader, der kun stoppes med 0 A, ville starte på brugerens strøm uden fasevagt. Når Wattlas fjernes, gives den tilbage
-            if self.sendt is not None and not (_ev is not None and kun_strom):
+            # HA lukker eller Wattlas genindlæses: en lader, der kun stoppes med 0 A, ville starte på brugerens strøm uden fasevagt. Kun når
+            # Wattlas fjernes, gives den tilbage – ellers overtager den næste styring den stoppede lader (aktiver)
+            slip = self.sendt is not None and (fjern or not kun_strom)
+            self.efterladt = self.sendt is not None and not slip
+            if slip:
                 await self._proev(self.lader.slip())
             self.sendt = None
 
 
+def _samme(a: dict, b: dict) -> bool:
+    return all(a.get(k) == b.get(k) for k in ("slags", "strom", "til_fra", "stop", "devid", "enhed", "transaktion"))
+
+
+async def _slip(hass: HomeAssistant, gl: dict) -> None:
+    try:
+        lader = SLAGS[gl["d"]["slags"]](hass, gl["d"])
+        lader.egen = gl.get("egen")
+        await lader.slip()
+    except Exception as e:  # noqa: BLE001 – fjernelsen/skiftet skal gennemføres alligevel
+        _LOGGER.warning("Wattlas: laderen kunne ikke gives tilbage: %s", e)
+
+
 async def aktiver(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """(Gen)starter styringen efter opsætningen. Den gamle slipper laderen først."""
+    """(Gen)starter styringen efter opsætningen. En lader, den gamle styring efterlod stoppet (genindlæsning, gemte indstillinger), overtages:
+    den nye ved, at den står på 0 A, og slipper den i "fra". Er det en anden lader (eller ingen), gives den gamle tilbage først."""
     await afslut(hass)
-    if (entry.data.get("lader") or {}).get("slags") not in SLAGS:
+    ny = entry.data.get("lader") or {}
+    gl = hass.data.pop(EGEN, None)
+    if gl and (ny.get("slags") not in SLAGS or not _samme(gl["d"], ny)):
+        await _slip(hass, gl)
+        gl = None
+    if ny.get("slags") not in SLAGS:
         return
     s = Styring(hass, entry)
+    if gl:
+        s.lader.egen = gl.get("egen")
+        if gl.get("efterladt"):
+            s.sendt = 0
     s.af = [async_track_time_interval(hass, s.trin, timedelta(seconds=TRIN_S), cancel_on_shutdown=True), hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, s.luk)]
     hass.data[NOEGLE] = s
 
 
-async def afslut(hass: HomeAssistant) -> None:
+async def afslut(hass: HomeAssistant, fjern: bool = False) -> None:
     for p in PROBLEMER:
         ir.async_delete_issue(hass, DOMAIN, p)
     if s := hass.data.pop(NOEGLE, None):
         for af in s.af:
             af()
-        await s.luk()
+        await s.luk(fjern=fjern)
+        if not fjern and (s.efterladt or s.lader.egen is not None):
+            hass.data[EGEN] = {"d": s.d, "egen": s.lader.egen, "efterladt": s.efterladt}
+
+
+async def slip_ved_fjernelse(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Wattlas fjernes (styringen er allerede lukket ved unload): laderen får sin egen strøm tilbage."""
+    gl = hass.data.pop(EGEN, None) or {"d": entry.data.get("lader") or {}}
+    if gl["d"].get("slags") in SLAGS:
+        await _slip(hass, gl)

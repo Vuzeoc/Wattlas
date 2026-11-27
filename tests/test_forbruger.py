@@ -60,7 +60,7 @@ async def main():
         hus()
 
     assert hass.states.get(AUTO), [s.entity_id for s in hass.states.async_all('automation')]
-    for e in ('input_boolean.wattlas_forbruger1_aktiv', 'input_boolean.emhass_styring_aktiv'):
+    for e in ('input_boolean.wattlas_forbruger1_aktiv', 'input_boolean.emhass_styring_aktiv', 'input_boolean.emhass_har_overtaget'):
         sæt(e, 'on')
     sæt('binary_sensor.emhass_ui_planfejl', 'off')
     for e, v in (('fase_graense_a', 20), ('import_graense_w', 13000)):
@@ -172,6 +172,10 @@ async def main():
     await forfra(tændt=True); sæt('input_boolean.emhass_styring_aktiv', 'off')
     assert (await kør())[0] == 'off'
     sæt('input_boolean.emhass_styring_aktiv', 'on')
+    # skygge: Wattlas har ikke overtaget – kontakten tændes ikke (og en, der kører, slukkes)
+    await forfra(); sæt('input_boolean.emhass_har_overtaget', 'off')
+    assert (await kør())[0] == 'off', 'skygge: forbrugeren må ikke tændes'
+    sæt('input_boolean.emhass_har_overtaget', 'on')
     # 12) slås forbrugeren fra, røres kontakten ikke, men reserven ryddes
     await forfra(tændt=True); await tal('reserve', 9000); sæt('input_boolean.wattlas_forbruger1_aktiv', 'off')
     assert await kør() == ('on', 0)

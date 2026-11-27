@@ -154,6 +154,50 @@ async def main():
     await genindlaes(hass, genstart=True)
     assert issue(hass, 'genstart') is None and ('input_number', 'set_value', 'input_number.wattlas_batteri_kwh', 20) in kald
     print('A tilføjet igen uden genstart: OK')
+    # lille maskine: opsætningen advarer om RAM og plads (EMHASS kan vælte HA), men man kan fortsætte (fx EMHASS på en anden maskine)
+    CF = sys.modules['custom_components.wattlas.config_flow']
+    rigtig_maskine, CF._maskine = CF._maskine, lambda _d: (1.8, 2.0)
+    lille, _ = await ny_hass('default_config:\n')
+    lille.states.async_set('sensor.min_inverter_pv_power', '0')
+    fm = lille.config_entries.flow
+    r = await fm.async_init('wattlas', context={'source': 'user'})
+    r = await fm.async_configure(r['flow_id'], {'kanal': 'deye'})
+    r = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.min_inverter_pv_power', 'inverter2': False})
+    liste = (r.get('description_placeholders') or {}).get('liste', '')
+    assert r['step_id'] == 'tjek' and '1.8 GB RAM' in liste and '2.0 GB fri plads' in liste and 'forstaaet' in str(r['data_schema'].schema), r
+    fm.async_abort(r['flow_id'])
+    CF._maskine = rigtig_maskine
+    await lille.async_stop(force=True)
+    print('A advarsel om lille maskine: OK')
+    # den lette hjerne: ingen EMHASS-app, -adresse eller -nøgle i opsætningen; i Konfigurer kan der skiftes til EMHASS (så kræves adresse og nøgle)
+    let, _ = await ny_hass('default_config:\n')
+    let.states.async_set('sensor.min_inverter_pv_power', '0')
+    fm = let.config_entries.flow
+    r = await fm.async_init('wattlas', context={'source': 'user'})
+    r = await fm.async_configure(r['flow_id'], {'kanal': 'deye', 'hjerne': 'let'})
+    r = await fm.async_configure(r['flow_id'], {'inverter': 'sensor.min_inverter_pv_power', 'inverter2': False})
+    assert r['step_id'] == 'tjek' and 'lette hjerne' in r['description_placeholders']['liste'], r
+    r = await fm.async_configure(r['flow_id'], {'forstaaet': True})
+    assert r['step_id'] == 'forbindelser' and 'emhass_adresse' not in str(r['data_schema'].schema), r
+    r = await fm.async_configure(r['flow_id'], {'solprognose': 'sensor.helios_power_now', 'vejr': 'weather.test'})
+    for t in ('batteri', 'elnet', 'netselskab', 'priser'):
+        assert r.get('step_id') == t, r
+        r = await fm.async_configure(r['flow_id'], TAL[t])
+    assert r['type'] == 'create_entry', r
+    e = let.config_entries.async_entries('wattlas')[0]
+    assert e.data['hjerne'] == 'let' and not e.data.get('emhass_noegle'), e.data
+    om = let.config_entries.options
+    r = await om.async_init(e.entry_id)
+    assert 'hjerne' in r['menu_options'], r
+    r = await om.async_configure(r['flow_id'], {'next_step_id': 'hjerne'})
+    fejl = await om.async_configure(r['flow_id'], {'hjerne': 'emhass'})
+    assert fejl['type'] == 'form' and fejl['errors'], ('EMHASS uden adresse og nøgle skal afvises', fejl)
+    r = await om.async_configure(r['flow_id'], {'hjerne': 'emhass', 'emhass_adresse': 'http://emhass:5000', 'emhass_noegle': 'hemmelig123'})
+    assert r['type'] == 'create_entry', r
+    e = let.config_entries.async_entries('wattlas')[0]
+    assert e.data['hjerne'] == 'emhass' and e.data['emhass_noegle'] == 'hemmelig123', e.data
+    await let.async_stop(force=True)
+    print('A let hjerne i opsætningen og skift i Konfigurer: OK')
     await hass.async_stop(force=True)
 
     # B: Deye + ekstra AC-koblet inverter → opdatering → opdatering der fejler
@@ -183,14 +227,23 @@ async def main():
 
     async def tjek_fejler(_hass):
         return types.SimpleNamespace(errors=[types.SimpleNamespace(message='testfejl')])
-    rigtigt_tjek, W.async_check_ha_config_file = W.async_check_ha_config_file, tjek_fejler
+    CF = sys.modules['custom_components.wattlas.config_flow']  # tjekket ligger i den fælles laeg_paa_plads
+    rigtigt_tjek, CF.async_check_ha_config_file = CF.async_check_ha_config_file, tjek_fejler
     await asyncio.sleep(1.1)  # backup-mappen navngives pr. sekund
     fil.write_text('# gammel\n', encoding='utf-8')
     hass.config_entries.async_update_entry(entry, data={**entry.data, 'version': '0.0.1'})
     entry = await genindlaes(hass, genstart=True)
     assert 'gammel' in fil.read_text(encoding='utf-8'), 'den gamle version skal lægges tilbage'
     assert entry.data['version'] == '0.0.1' and issue(hass, 'opdatering_fejlede') is not None
-    W.async_check_ha_config_file = rigtigt_tjek
+    # … også når selve tjekket går i stykker ved opstarten (før: ukontrolleret YAML på disken, og loggen sagde "rullet tilbage")
+    async def tjek_i_stykker(_hass):
+        raise OSError('tjekket kunne ikke køre')
+    CF.async_check_ha_config_file = tjek_i_stykker
+    await asyncio.sleep(1.1)
+    fil.write_text('# gammel2\n', encoding='utf-8')
+    entry = await genindlaes(hass, genstart=True)
+    assert 'gammel2' in fil.read_text(encoding='utf-8') and entry.data['version'] == '0.0.1', 'opstarten rullede ikke tilbage, da tjekket fejlede'
+    CF.async_check_ha_config_file = rigtigt_tjek
     print('B opdatering der fejler: OK')
     await hass.async_stop(force=True)
 
@@ -606,7 +659,7 @@ async def main():
     entry = hass.config_entries.async_entries('wattlas')[0]
     om = hass.config_entries.options
     r = await om.async_init(entry.entry_id)
-    assert r['type'] == 'menu' and set(r['menu_options']) == {'forbindelser', 'batteri', 'elnet', 'netselskab', 'priser', 'elbil', 'lader'}, r
+    assert r['type'] == 'menu' and set(r['menu_options']) == {'hjerne', 'forbindelser', 'batteri', 'elnet', 'netselskab', 'priser', 'elbil', 'lader'}, r
     r = await om.async_configure(r['flow_id'], {'next_step_id': 'elnet'})
     standard = {str(k): k.default() for k in r['data_schema'].schema if callable(getattr(k, 'default', None))}
     assert standard.get('fase_graense_a') == 16.0, standard  # den nuværende værdi, ikke opsætningens
@@ -864,7 +917,7 @@ async def main():
         await W._forbered_opdatering(hass, entry)
         assert entry.data['version'] == '9.9.9' and 'ny-9.9.9' in installeret.read_text(encoding='utf-8'), entry.data['version']
         assert '?v=9.9.9' in (cfg / 'packages/wattlas/wattlas_frontend.yaml').read_text(encoding='utf-8')
-        assert issue(hass, 'genstart') is not None, 'brugeren skal bedes om (én) genstart'
+        assert issue(hass, 'genstart') is not None and hass.data.get(GENSTART), 'brugeren skal bedes om (én) genstart, også efter "Genindlæs"'
         # 3) efter genstarten kører den nye kode: filerne passer allerede, så der installeres ikke igen og bedes ikke om genstart
         n = backups()
         rigtig, W.VERSION = W.VERSION, '9.9.9'
@@ -888,10 +941,11 @@ async def main():
         # 6) selve konfigurationstjekket går i stykker: også da rulles der tilbage
         async def i_stykker(_hass):
             raise OSError('tjekket kunne ikke køre')
-        rigtigt, W.async_check_ha_config_file = W.async_check_ha_config_file, i_stykker
+        CF = sys.modules['custom_components.wattlas.config_flow']
+        rigtigt, CF.async_check_ha_config_file = CF.async_check_ha_config_file, i_stykker
         hentet('9.9.11', '\n# ny-9.9.11\n', 100)
         await W._forbered_opdatering(hass, entry)
-        W.async_check_ha_config_file = rigtigt
+        CF.async_check_ha_config_file = rigtigt
         assert entry.data['version'] == '9.9.9' and 'ny-9.9.11' not in installeret.read_text(encoding='utf-8'), 'der blev ikke rullet tilbage'
         # 7) genstartes der lige efter hentningen (før tjekket har nået det), lægges den på plads, mens HA lukker ned: stadig én genstart
         hentet('9.9.12', '\n# ny-9.9.12\n', 10)
@@ -901,6 +955,9 @@ async def main():
         hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
         await hass.async_block_till_done()
         assert entry.data['version'] == '9.9.12' and 'ny-9.9.12' in installeret.read_text(encoding='utf-8'), 'nedlukningen lagde ikke den nye version på plads'
+        # Konfigurer (fx Sonnen eller inverter 2), mens en nyere version ligger på disken: den gamle installer må ikke lægge filer oven i den
+        tekst = await CF._laeg_filer(hass, dict(entry.data))
+        assert tekst and 'Genstart' in tekst and 'ny-9.9.12' in installeret.read_text(encoding='utf-8'), tekst
         # 8) reparationens genstartknap: en afvist genstart ("Another job is running") må ikke fjerne reparationen
         from homeassistant.exceptions import HomeAssistantError
         from custom_components.wattlas import repairs as R

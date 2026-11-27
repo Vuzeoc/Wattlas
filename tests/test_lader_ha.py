@@ -137,17 +137,22 @@ async def main():
     await trin(3)
     assert fysik['a'] == 16
     await til('stop'); await trin()
-    assert not fysik['til'] and kald[-1][:2] == ('homeassistant', 'turn_off')
+    assert not fysik['til'] and ('homeassistant', 'turn_off', 'switch.lader', None) in kald[-2:] and fysik['a'] == 0, ('stop: kontakt fra og strøm ned', kald[-2:])
     await ny(); fysik['a'] = 6; S('number.lader_a', 6); await til('lad_nu'); await trin()
     assert [k[0] for k in kald] == ['number', 'homeassistant'], ('strømmen før start', kald)
     print('Fra, lad nu, faserne, op langsomt, stop: OK')
 
-    # laderen siger ja, men stopper ikke
+    # laderen siger ja til stop, men kontakten slukker ikke: strømmen sættes også ned, så den står stille alligevel
     await ny(); await til('lad_nu'); await trin(2)
     fysik['adlyd'] = False
+    await til('stop'); await trin(3)
+    assert fysik['a'] == 0 and not problem('lader_stopper_ikke'), ('stop sænker også strømmen', fysik)
+    # … adlyder den heller ikke strømmen, meldes det, og stop sendes igen
+    await ny(); await til('lad_nu'); await trin(2)
+    fysik['adlyd'] = fysik['adlyd_a'] = False
     await til('stop'); await trin(12)
     assert problem('lader_stopper_ikke') and sum(k[1] == 'turn_off' for k in kald) >= 3, kald
-    fysik['adlyd'] = True
+    fysik['adlyd'] = fysik['adlyd_a'] = True
     await trin(5)
     assert not fysik['til']
     # grænsen accepteres, men holdes ikke
@@ -155,6 +160,8 @@ async def main():
     fysik['adlyd_a'] = False
     await trin(8, hus=2400)
     assert problem('lader_over_graense') and not fysik['til'], ('nødstop på det målte', fysik)
+    n = len(kald); await trin(40, hus=2400)
+    assert not any(k[1] == 'turn_on' for k in kald[n:]), ('nødstop: ikke start igen efter hvilen', kald[n:])
     # brugeren (eller bilen) starter selv, mens Wattlas siger stop
     await ny(); await til('stop'); await trin(2)
     await trin(1, til=True); await trin(5)
@@ -302,6 +309,11 @@ async def main():
     await trin(60)  # 10 min: 1,8 kWh, og bilens procent har ikke rørt sig
     rest = (await trin(6)).attributes['rest_kwh']
     assert 17.5 < rest < 18.5, rest
+    s = hass.data[M.NOEGLE]; foer = s.soc; s._bil(None, 99.0)  # 30 s OCPP-udfald (status ukendt): udgangspunktet huskes
+    assert s.soc == foer, ('kort udfald nulstiller ikke bilens udgangspunkt', s.soc, foer)
+    S('binary_sensor.bil_stik', 'unavailable'); s._bil(True, 99.0)  # bilens sky falder kort ud
+    assert s.soc == foer, ('bilens sky-udfald nulstiller ikke', s.soc, foer)
+    S('binary_sensor.bil_stik', 'on')
     S('sensor.bil_soc', 80); st = await trin(3)
     assert not fysik['til'] and st.state == 'færdig', st
     for e, s in (('binary_sensor.bil_stik', 'off'), ('sensor.bil_soc', 'unavailable'), ('sensor.bil_soc', 150)):
@@ -443,6 +455,20 @@ async def main():
     await trin(1, hus=2400)
     fysik['fejl'] = False
     assert ('homeassistant', 'turn_off', 'switch.lader', None) in kald and hass.data[M.NOEGLE].sendt == 0, kald
+    # … og kommer stoppet heller ikke igennem (et udfald), sendes det igen, så snart laderen svarer
+    await ny(); await til('lad_nu'); await trin(2); fysik['fejl'] = True
+    await trin(1, hus=2400); fysik['fejl'] = False; n = len(kald)
+    await trin(1)
+    assert ('homeassistant', 'turn_off', 'switch.lader', None) in kald[n:], ('stop igen efter udfaldet', kald[n:])
+    # OCPP uden kendt transaktion (fx efter en genstart), mens laderen lader: ikke "stoppet" – fejl, så det prøves igen
+    o = M.Ocpp(hass, {'status': 'sensor.ocpp_st', 'transaktion': 'sensor.ocpp_tx', 'devid': 'lader'})
+    S('sensor.ocpp_tx', '0'); S('sensor.ocpp_st', 'Charging')
+    try:
+        await o.stop(); raise AssertionError('OCPP-stop uden transaktion skal fejle, mens den lader')
+    except HomeAssistantError:
+        pass
+    S('sensor.ocpp_st', 'Available'); await o.stop()  # står stille: intet at stoppe
+    S('sensor.ocpp_st', 'SuspendedEVSE'); await o.stop()  # pausen efter 0 A: ingen falsk fejl
     # én fase på en trefaset lader: "klar" regner ud fra det målte (11 A × 230 V, ikke × 3)
     await ny(); await til('lad_nu'); await trin(2)
     S('sensor.lader_w', 16 * 230, {'unit_of_measurement': 'W'}); st = await trin_raa()
@@ -451,6 +477,8 @@ async def main():
     await ny(slags='easee', enhed='dev1', strom=None, til_fra=None); fysik['easee'] = []
     await til('lad_nu'); await trin(); await til('stop'); await trin(); await til('fra'); await trin()
     assert fysik['easee'][:2] == [('set_charger_dynamic_limit', 16), ('action_command', 'resume')] and ('action_command', 'pause') in fysik['easee'] and fysik['easee'][-1] == ('set_charger_dynamic_limit', 32), fysik['easee']
+    i = fysik['easee'].index(('action_command', 'pause'))
+    assert fysik['easee'][i + 1] == ('set_charger_dynamic_limit', 0), ('Easee-stop: også 0 A', fysik['easee'])
     # brugerens egen strøm gives tilbage; HA lukker midt i ladning
     await ny(); S('number.lader_a', 13); fysik['a'] = 13; await til('lad_nu'); await trin(2)
     assert fysik['a'] == 16
@@ -468,8 +496,23 @@ async def main():
     await hass.data[M.NOEGLE].luk(object())
     assert fysik['a'] == 0, ('ingen fuld strøm uden fasevagt ved genstart', fysik)
     await ny(til_fra=None); S('number.lader_a', 13); fysik['a'] = 13; await til('lad_nu'); await trin(2); await til('stop'); await trin(2)
-    await hass.data[M.NOEGLE].luk()
+    await M.afslut(hass)  # genindlæsning (unload): ingen fuld strøm uden fasevagt
+    assert fysik['a'] == 0, ('genindlæst: bliver på 0 A', fysik)
+    # … men den nye styring overtager den stoppede lader: i "fra" gives den tilbage (før: den stod på 0 A for altid)
+    await til('fra'); await M.aktiver(hass, types.SimpleNamespace(data={'lader': {**KONF, 'til_fra': None}})); await trin()
+    assert fysik['a'] == 13, ('genindlæst i "fra": laderen gives tilbage', fysik)
+    # fjernelse efter en genindlæsning: brugerens egen strøm tilbage
+    await til('lad_nu'); await trin(2); await til('stop'); await trin(2)
+    assert fysik['a'] == 0
+    await M.afslut(hass)
+    await M.slip_ved_fjernelse(hass, types.SimpleNamespace(data={'lader': {**KONF, 'til_fra': None}}))
     assert fysik['a'] == 13, 'fjernet: brugerens strøm tilbage'
+    # HA lukker, mens et stop mangler (fx efter et udfald): stop sendes
+    await ny(); await til('lad_nu'); await trin(2)
+    s = hass.data[M.NOEGLE]; s.sendt, s.husk.sat, s.skylder_stop = 0, 0, True; n = len(kald)
+    await s.luk(object())
+    assert ('homeassistant', 'turn_off', 'switch.lader', None) in kald[n:], ('luk: stop, der mangler', kald[n:])
+    await ny()
     # sommertid: lørdag 22:00 før skiftet til kl. 07 er 8 rigtige timer, ikke 9
     from datetime import datetime
     from zoneinfo import ZoneInfo

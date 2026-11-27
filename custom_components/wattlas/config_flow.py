@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -217,8 +218,10 @@ def _kilder(hass, ui: dict) -> dict[str, str]:
     return fejl
 
 
-def _forbindelse_fejl(hass, ui: dict, kraev_noegle: bool) -> dict[str, str]:
+def _forbindelse_fejl(hass, ui: dict, kraev_noegle: bool, emhass: bool = True) -> dict[str, str]:
     fejl = _kilder(hass, ui)
+    if not emhass:  # den lette hjerne: ingen EMHASS-adresse eller -nøgle
+        return fejl
     if not re.match(r"https?://", ui.get("emhass_adresse") or ""):
         fejl["emhass_adresse"] = "adresse"
     noegle = ui.get("emhass_noegle") or ""
@@ -346,18 +349,66 @@ def _inverter2_skema(g: dict) -> vol.Schema:
     })
 
 
+def _hjerne_vaelger():
+    """EMHASS (den fulde optimering, kræver EMHASS-app'en og en større maskine) eller Wattlas' lette hjerne (ingen app, kører på alt)."""
+    return sel.SelectSelector(sel.SelectSelectorConfig(options=["emhass", "let"], translation_key="hjerne", mode=sel.SelectSelectorMode.LIST))
+
+
+def _maskine(config_dir: str) -> tuple[float | None, float | None]:
+    """(RAM i GB, fri plads i GB) – None, hvor det ikke kan ses (fx uden /proc). EMHASS bruger ca. 0,5 GB RAM (målt på en Yellow)."""
+    ram = fri = None
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            ram = next((int(l.split()[1]) / 1024 ** 2 for l in f if l.startswith("MemTotal:")), None)
+    except (OSError, ValueError):
+        pass
+    try:
+        fri = shutil.disk_usage(config_dir).free / 1024 ** 3
+    except OSError:
+        pass
+    return ram, fri
+
+
+def paa_disk() -> str | None:
+    """Versionen i manifestet på disken (en nyere kan være hentet, men endnu ikke indlæst)."""
+    try:
+        return json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+class TjekFejl(Exception):
+    """Home Assistants konfigurationstjek fejlede (filerne er rullet tilbage)."""
+
+
+async def laeg_paa_plads(hass, inst, d: dict, version: str) -> dict:
+    """De samme fire trin alle steder: installerens opdater → HA's konfigurationstjek → tilbagerulning ved ENHVER fejl (også når tjekket
+    selv fejler) → token skjules i backuppen. inst er installer-modulet (den kørende eller den nyere på disken). Returnerer kvitteringen."""
+    kvit = await hass.async_add_executor_job(inst.opdater, hass.config.config_dir, dict(d), version)
+    try:
+        res = await async_check_ha_config_file(hass)
+        if res.errors:
+            raise TjekFejl("; ".join(str(e.message) for e in res.errors[:3]))
+    except Exception:
+        await hass.async_add_executor_job(inst.rul_tilbage, kvit)
+        raise
+    await hass.async_add_executor_job(inst.skjul_token, kvit["backup"])
+    return kvit
+
+
 async def _laeg_filer(hass, d: dict) -> str | None:
     """Lægger Wattlas' filer på plads for opsætningen d og tjekker konfigurationen (rulles tilbage ved fejl).
     Returnerer en fejltekst – eller None: filerne ligger der, og Home Assistant skal genstartes (reparationen oprettes)."""
+    if (ny := await hass.async_add_executor_job(paa_disk)) not in (VERSION, None):  # den nye version lægger selv sine filer ved genstarten
+        return f"Wattlas {ny} er hentet, men ikke indlæst endnu. Genstart Home Assistant først, og prøv så igen."
     try:
-        kvit = await hass.async_add_executor_job(installer.opdater, hass.config.config_dir, dict(d), VERSION)
+        await laeg_paa_plads(hass, installer, d, VERSION)
     except installer.InstallFejl as e:
         return str(e)
-    res = await async_check_ha_config_file(hass)
-    if res.errors:
-        await hass.async_add_executor_job(installer.rul_tilbage, kvit)
-        return "Home Assistants konfigurationstjek fejlede, alt er rullet tilbage: " + "; ".join(str(e.message) for e in res.errors[:3])
-    await hass.async_add_executor_job(installer.skjul_token, kvit["backup"])
+    except TjekFejl as e:
+        return "Home Assistants konfigurationstjek fejlede, alt er rullet tilbage: " + str(e)
+    except Exception as e:  # noqa: BLE001 – fx at selve tjekket ikke kunne køre: filerne er rullet tilbage
+        return f"Filerne kunne ikke lægges på plads, alt er rullet tilbage: {e}"
     hass.data[GENSTART] = True
     ir.async_create_issue(hass, DOMAIN, "genstart", is_fixable=True, is_persistent=True,
                           severity=ir.IssueSeverity.WARNING, translation_key="genstart")
@@ -390,12 +441,14 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
                 "fejl": f"Wattlas er lige blevet opdateret til {VERSION}. Genstart Home Assistant, og sæt Wattlas op bagefter."})
         if user_input is not None:
             self.d["kanal"] = user_input["kanal"]
+            self.d["hjerne"] = user_input.get("hjerne") or "emhass"
             if self.d["kanal"] in EGNE:
                 return await getattr(self, f"async_step_{self.d['kanal']}")()
             return await self.async_step_inverter()
         return self.async_show_form(step_id="user", data_schema=vol.Schema({
             vol.Required("kanal", default="deye"): sel.SelectSelector(sel.SelectSelectorConfig(
-                options=["deye", "deye_parallel", "deye_esphome", "sunmate", "huawei", "growatt", "solax", "sofar", "solis", "spf", "sonnen"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST))}))
+                options=["deye", "deye_parallel", "deye_esphome", "sunmate", "huawei", "growatt", "solax", "sofar", "solis", "spf", "sonnen"], translation_key="kanal", mode=sel.SelectSelectorMode.LIST)),
+            vol.Required("hjerne", default="emhass"): _hjerne_vaelger()}))
 
     # 2 – vælg inverteren (de fleste har kun én)
     async def async_step_inverter(self, user_input=None) -> ConfigFlowResult:
@@ -509,15 +562,26 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_tjek(self, user_input=None) -> ConfigFlowResult:
         hass = self.hass
         blok, adv = [], []
-        tilstand, adresse = _emhass(hass)
+        let = self.d.get("hjerne") == "let"
+        tilstand, adresse = (None, None) if let else _emhass(hass)
         self.d["emhass_adresse"] = adresse
-        if tilstand == "mangler":
-            blok.append(f"❌ **EMHASS-app'en** er ikke installeret – [installér den her]({LINK['emhass']}). Start den bagefter.")
+        if let:
+            info_let = ["ℹ️ Wattlas' **lette hjerne** laver planen – EMHASS-app'en skal ikke installeres."]
+        elif tilstand == "mangler":  # EMHASS kan køre på en anden maskine (små maskiner): så skrives dens adresse i næste trin
+            adv.append(f"⚠️ **EMHASS-app'en** er ikke installeret her – [installér den her]({LINK['emhass']}) og start den. "
+                       "Kører EMHASS på en anden maskine, så sæt kryds nedenfor og skriv dens adresse i næste trin.")
         elif tilstand not in (None, "started"):
             blok.append(f"❌ **EMHASS-app'en** er installeret, men kører ikke – [åbn den]({LINK['emhass']}) og tryk Start.")
         elif tilstand is None:
             adv.append("⚠️ Kan ikke se apps på denne installation – sørg selv for, at EMHASS kører.")
-        info = []
+        ram, fri = await hass.async_add_executor_job(_maskine, hass.config.config_dir)
+        if ram is not None and ram < 3.5 and not let:
+            adv.append(f"⚠️ Maskinen har kun {ram:.1f} GB RAM. EMHASS bruger ca. 0,5 GB og kan gøre Home Assistant langsom eller få den til "
+                       "at genstarte. Anbefalet er mindst 4 GB – vælg i stedet Wattlas' lette hjerne (gå et trin tilbage), eller kør EMHASS på en "
+                       "anden maskine (se INSTALLATION.md).")
+        if fri is not None and fri < 3:
+            adv.append(f"⚠️ Der er kun {fri:.1f} GB fri plads. EMHASS-app'en og Home Assistants historik skal have plads – ryd op først.")
+        info = info_let if let else []
         self.d["omdoeb"] = {}
         for ønsket, platform, navn, link, hjælp in [
                 ("sensor.energi_data_service", "energidataservice", "Energi Data Service", None, "Indstillinger → Markedsplads → søg *Energi Data Service* (eller *Nordpool*) → Installér, genstart og tilføj den med priser inkl. moms."),
@@ -576,13 +640,14 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_forbindelser(self, user_input=None) -> ConfigFlowResult:
         fejl: dict[str, str] = {}
         if user_input is not None:
-            fejl = _forbindelse_fejl(self.hass, user_input, kraev_noegle=True)
+            fejl = _forbindelse_fejl(self.hass, user_input, kraev_noegle=True, emhass=self.d.get("hjerne") != "let")
             if not fejl:
                 self.d.update(user_input)
                 return await self.async_step_batteri()
         return self.async_show_form(step_id="forbindelser", errors=fejl, data_schema=vol.Schema({
-            vol.Required("emhass_adresse", default=self.d.get("emhass_adresse") or "http://homeassistant.local:5000"): sel.TextSelector(),
-            vol.Required("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)),
+            **({} if self.d.get("hjerne") == "let" else {
+                vol.Required("emhass_adresse", default=self.d.get("emhass_adresse") or "http://homeassistant.local:5000"): sel.TextSelector(),
+                vol.Required("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD))}),
             vol.Required("solprognose"): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", **_kilde_filter(self.hass, "sol", self.d.get("solprognose")))),
             vol.Optional("priser", description={"suggested_value": self.d.get("priser") or _nordpool(self.hass)}): sel.EntitySelector(
                 sel.EntitySelectorConfig(domain="sensor", **_kilde_filter(self.hass, "pris", self.d.get("priser")))),
@@ -634,7 +699,7 @@ class WattlasConfigFlow(ConfigFlow, domain=DOMAIN):
         for gammel, ny in omdoeb.items():
             if reg.async_get(gammel) and not reg.async_get(ny):
                 reg.async_update_entity(gammel, new_entity_id=ny)
-        data = {k: v for k, v in self.d.items() if k != "emhass_adresse_fundet"}
+        data = dict(self.d)
         data["version"] = VERSION
         return self.async_create_entry(title="Wattlas", data=data)
 
@@ -644,7 +709,7 @@ class WattlasOptionsFlow(OptionsFlow):
     Inverteren (styrekanalen) skiftes ved at fjerne Wattlas og tilføje den igen."""
 
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="init", menu_options=["forbindelser", "batteri", "elnet", "netselskab", "priser", "elbil", "lader"]
+        return self.async_show_menu(step_id="init", menu_options=["hjerne", "forbindelser", "batteri", "elnet", "netselskab", "priser", "elbil", "lader"]
                                     + (["sonnen"] if self.config_entry.data.get("kanal") == "sonnen" else [])
                                     + (["inverter2"] if self.config_entry.data.get("inverter2") else []))
 
@@ -661,6 +726,28 @@ class WattlasOptionsFlow(OptionsFlow):
                 self.hass.config_entries.async_update_entry(self.config_entry, data=ny)
                 return self.async_create_entry(data={})
         return self.async_show_form(step_id="inverter2", errors=fejl, data_schema=_inverter2_skema(d.get("inverter2") or {}))
+
+    async def async_step_hjerne(self, user_input=None) -> ConfigFlowResult:
+        """Skift mellem EMHASS og den lette hjerne. Ingen filer skrives om: tjenesten wattlas.emhass ser valget ved næste plan (højst 5 min)."""
+        d = self.config_entry.data
+        fejl: dict[str, str] = {}
+        if user_input is not None:
+            hjerne = user_input["hjerne"]
+            ny = {**d, "hjerne": hjerne}
+            if hjerne == "emhass":
+                fejl = _forbindelse_fejl(self.hass, {**user_input, "solprognose": None}, kraev_noegle=not d.get("emhass_noegle"))
+                fejl = {k: v for k, v in fejl.items() if k in ("emhass_adresse", "emhass_noegle")}
+                ny |= {k: user_input[k] for k in GAMLE if user_input.get(k)}
+            if not fejl:
+                self.hass.config_entries.async_update_entry(self.config_entry, data=ny)
+                if hjerne == "let" or ny.get("emhass_noegle"):
+                    ir.async_delete_issue(self.hass, DOMAIN, "noegle_mangler")
+                return self.async_create_entry(data={})
+        return self.async_show_form(step_id="hjerne", errors=fejl, data_schema=vol.Schema({
+            vol.Required("hjerne", default=d.get("hjerne") or "emhass"): _hjerne_vaelger(),
+            vol.Optional("emhass_adresse", description={"suggested_value": d.get("emhass_adresse") or "http://homeassistant.local:5000"}): sel.TextSelector(),
+            vol.Optional("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)),
+        }))
 
     async def async_step_sonnen(self, user_input=None) -> ConfigFlowResult:
         """Sonnen: ny adresse (fx ny IP fra routeren) eller nyt token. Kanalens filer skrives igen, og HA skal genstartes."""
@@ -698,7 +785,7 @@ class WattlasOptionsFlow(OptionsFlow):
     async def async_step_forbindelser(self, user_input=None) -> ConfigFlowResult:
         fejl: dict[str, str] = {}
         if user_input is not None:
-            fejl = _forbindelse_fejl(self.hass, user_input, kraev_noegle=False)
+            fejl = _forbindelse_fejl(self.hass, user_input, kraev_noegle=False, emhass=self.config_entry.data.get("hjerne") != "let")
             if not fejl:
                 for k, h in TEKST.items():
                     await self.hass.services.async_call("input_text", "set_value",
@@ -717,8 +804,9 @@ class WattlasOptionsFlow(OptionsFlow):
         moms = _faktor_med_moms(nu.get("pris") or "")
         d = lambda k: {"default": nu[k]} if nu.get(k) else {}  # noqa: E731
         return self.async_show_form(step_id="forbindelser", errors=fejl, data_schema=vol.Schema({
-            vol.Required("emhass_adresse", **d("emhass_adresse")): sel.TextSelector(),
-            vol.Optional("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)),
+            **({} if self.config_entry.data.get("hjerne") == "let" else {
+                vol.Required("emhass_adresse", **d("emhass_adresse")): sel.TextSelector(),
+                vol.Optional("emhass_noegle"): sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD))}),
             vol.Required("solprognose", **d("solprognose")): sel.EntitySelector(sel.EntitySelectorConfig(domain="sensor", **_kilde_filter(self.hass, "sol", nu.get("solprognose")))),
             vol.Optional("priser", description={"suggested_value": (nu.get("pris") or "").split("|")[0] or None}): sel.EntitySelector(
                 sel.EntitySelectorConfig(domain="sensor", **_kilde_filter(self.hass, "pris", (nu.get("pris") or "").split("|")[0] or None))),

@@ -175,6 +175,18 @@ shutil.rmtree(pl, ignore_errors=True)
 # inverter 2 gemt med hovedinverterens GEN-måling som "prefix" (0.7.2 og ældre): Teknik må ikke lede efter entiteter, der ikke findes
 I.installer(str(d), 'deye', 'mit_deye', {'navn': 'X', 'ac': False, 'effekt': 'sensor.mit_deye_microinverter_power', 'relae': '', 'prefix': 'mit_deye_microinverter'}, 't4')
 assert '\n        inverter2_prefix:' not in (d / 'wattlas/dashboards/wattlas_styring.yaml').read_text(encoding='utf-8'), 'hovedinverterens måling blev brugt som inverter 2'
+# en BOM foran "homeassistant:" må ikke give en blok mere nederst
+assert I.tilfoej_packages('\ufeffhomeassistant:\n  name: Hjem\n') == 'homeassistant:\n  packages: !include_dir_named packages\n  name: Hjem\n'
+# absolut sti til packages (fx "/config/packages") er den samme mappe, ikke config/config/packages
+ab = ny('x'); (ab / 'configuration.yaml').write_text(f"homeassistant:\n  packages: !include_dir_named {str(ab).replace(chr(92), '/')}/packages\n", encoding='utf-8')
+assert I.packages_mappe(str(ab)) == 'packages', I.packages_mappe(str(ab))
+shutil.rmtree(ab, ignore_errors=True)
+# tilbagerulning skriver kun configuration.yaml tilbage, hvis installationen selv rettede den – brugerens egne ændringer imens bevares.
+# Navnene og nøglen er de samme, som ældre versioner kalder (ny.rul_tilbage(kvit), ny.skjul_token(kvit["backup"])): ret dem aldrig
+kv = I.opdater(str(d), {'kanal': 'deye', 'prefix': 'min_inverter'}, 't5')
+(d / 'configuration.yaml').write_text((d / 'configuration.yaml').read_text(encoding='utf-8') + '# brugerens rettelse\n', encoding='utf-8')
+I.skjul_token(kv["backup"]); I.rul_tilbage(kv)
+assert '# brugerens rettelse' in (d / 'configuration.yaml').read_text(encoding='utf-8'), 'tilbagerulningen overskrev configuration.yaml'
 # afinstallation flytter til backup
 b = I.afinstaller(str(d))
 assert b and not (d / 'packages/wattlas').exists() and (pathlib.Path(b) / 'packages_wattlas').exists()

@@ -76,6 +76,7 @@ template:
          {% if k in fast %}
           {% if is_number(states(di)) %}{% set ns.dh=[ns.dh,dt]|max %}{% endif %}
           {% if is_number(states(si)) %}{% set ns.sh=[ns.sh,st]|max %}{% endif %}
+          {% if not 0<=t-st<=90 %}{% set ns.s=false %}{% endif %}
           {% if not 0<=t-dt<=90 %}{% set ns.d=false %}{% endif %}
          {% endif %}
         {% endfor %}
@@ -84,9 +85,15 @@ template:
         {% set old=state_attr('sensor.emhass_maalekilde','deye_siden')|float(0) %}
         {% set since=(old if old>0 and old<=t and trigger.platform!='homeassistant' else t) if ns.d else 0 %}
         {% set chosen='Deye' if ns.d and (t-since>=60 or not ns.s) else 'ESPHome' if ns.s else 'Ingen' %}
+        {# fortegn: husforbruget kan ikke være negativt – en omvendt strømtang ser sådan ud (især under netladning). Kilden afvises efter 2 min #}
+        {% set lv=((ns.values_d if chosen=='Deye' else ns.values_s).get('load_w_totalpower')|float(0)) if chosen!='Ingen' else 0 %}
+        {% set gl_fejl=state_attr('sensor.emhass_maalekilde','fortegn_fejl_siden')|float(0) %}{% set gl_neg=state_attr('sensor.emhass_maalekilde','fortegn_sidst')|float(0) %}
+        {% set sidst=t if lv<-200 else gl_neg %}
+        {% set fejl_siden=(gl_fejl or t) if lv<-200 else (gl_fejl if gl_fejl and t-sidst<900 else 0) %}
+        {% set chosen='Ingen' if fejl_siden and t-fejl_siden>=120 else chosen %}
         {{ dict(source=chosen,values=ns.values_d if chosen=='Deye' else ns.values_s if chosen=='ESPHome' else {},
          times=ns.times_d if chosen=='Deye' else ns.times_s if chosen=='ESPHome' else {},
-         deye_ok=ns.d,solarman_ok=ns.s,deye_siden=since,solarman_heartbeat=ns.sh,time=t) }}
+         fortegn_fejl_siden=fejl_siden,fortegn_sidst=sidst,deye_ok=ns.d,solarman_ok=ns.s,deye_siden=since,solarman_heartbeat=ns.sh,time=t) }}
   sensor:
   - name: EMHASS målekilde
     unique_id: emhass_maalekilde
@@ -95,6 +102,8 @@ template:
     attributes:
       values: '{{ sample[''values''] }}'
       raw_reported: '{{ sample[''times''] }}'
+      fortegn_fejl_siden: '{{ sample[''fortegn_fejl_siden''] }}'
+      fortegn_sidst: '{{ sample[''fortegn_sidst''] }}'
       deye_ok: '{{ sample[''deye_ok''] }}'
       solarman_ok: '{{ sample[''solarman_ok''] }}'
       deye_siden: '{{ sample[''deye_siden''] }}'

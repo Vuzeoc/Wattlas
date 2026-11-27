@@ -7,6 +7,7 @@ switch, button, time) eller selve enheden. Kun det, der står fast i automatione
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from homeassistant.components import automation, script
 from homeassistant.core import HomeAssistant, callback
@@ -21,14 +22,22 @@ SKRIV = ("number", "select", "switch", "button", "time")
 ISSUE = "anden_styring"
 
 
+@lru_cache(maxsize=2)
+def _navne(kendt: str) -> tuple[frozenset[str], frozenset[str]]:
+    """(scriptnavne, automations-id'er) i Wattlas' filer – læst én gang, ikke én søgning i ~800 KB pr. automation (blokerede HA)."""
+    return (frozenset(re.findall(r"^  ([^\s:#]+):", kendt, re.M)),
+            frozenset(re.findall(r"^\s*-?\s*id: (\S+)\s*$", kendt, re.M)))  # ikke unique_id
+
+
 def _egen(hass: HomeAssistant, entity_id: str, kendt: str) -> bool:
     """Wattlas' egne: står i Wattlas' installerede filer – scripts efter navn, automationer efter id (navnet følger aliasset)."""
+    scripts, ids = _navne(kendt)
     dom, navn = entity_id.split(".", 1)
     if dom == "script":
-        return re.search(rf"^  {re.escape(navn)}:", kendt, re.M) is not None
+        return navn in scripts
     s = hass.states.get(entity_id)
     aid = str(s.attributes.get("id") or "") if s else ""
-    return bool(aid) and re.search(rf"^\s*-?\s*id: {re.escape(aid)}\s*$", kendt, re.M) is not None  # ikke unique_id
+    return bool(aid) and aid in ids
 
 
 @callback

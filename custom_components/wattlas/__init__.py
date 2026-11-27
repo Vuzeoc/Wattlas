@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
 import logging
 import re
 import time
@@ -19,12 +18,12 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.helpers.check_config import async_check_ha_config_file
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.start import async_at_started
 
 from . import emhass, installer, lader, tariffer, vagt
-from .config_flow import VERSION, priser_fejl
+from .config_flow import VERSION, laeg_paa_plads, priser_fejl
+from .config_flow import paa_disk as _paa_disk
 from .const import DOMAIN, GAMLE, GENSTART, GYLDIG, STANDARD, TEKST
 
 _LOGGER = logging.getLogger(__name__)
@@ -77,14 +76,6 @@ def _ryd_efterladte(hass: HomeAssistant, tekst: str, kendt: str) -> list[str]:
     return ryddet
 
 
-def _paa_disk() -> str | None:
-    """Versionen i manifestet på disken."""
-    try:
-        return json.loads((HER / "manifest.json").read_text(encoding="utf-8"))["version"]
-    except (OSError, ValueError, KeyError):
-        return None
-
-
 def _ro() -> float:
     """Sekunder siden en af integrationens filer sidst blev ændret."""
     try:
@@ -114,19 +105,12 @@ async def _forbered_opdatering(hass: HomeAssistant, entry: ConfigEntry, ro_s: fl
     hass.data[FORSOEGT] = version  # ét forsøg pr. version (intet await mellem tjek og mærke)
     try:
         ny = await hass.async_add_executor_job(_ny_installer)
-        kvit = await hass.async_add_executor_job(ny.opdater, hass.config.config_dir, dict(entry.data), version)
-        try:
-            res = await async_check_ha_config_file(hass)
-            if res.errors:
-                raise RuntimeError("; ".join(str(e.message) for e in res.errors[:3]))
-        except Exception:  # også når selve tjekket fejler
-            await hass.async_add_executor_job(ny.rul_tilbage, kvit)
-            raise
-        await hass.async_add_executor_job(ny.skjul_token, kvit["backup"])
+        await laeg_paa_plads(hass, ny, entry.data, version)
     except Exception as e:  # installeren ruller selv tilbage ved fejl undervejs
         _LOGGER.warning("Wattlas: %s kunne ikke lægges på plads før genstarten (%s). Det sker efter genstarten i stedet.", version, e)
         return
     hass.config_entries.async_update_entry(entry, data={**entry.data, "version": version})
+    hass.data[GENSTART] = True  # "Genindlæs" før genstarten må ikke rydde reparationen eller registreringerne med de nye filer
     _LOGGER.info("Wattlas %s er lagt på plads. Én genstart af Home Assistant fuldfører opdateringen.", version)
     ir.async_create_issue(hass, DOMAIN, "genstart", is_fixable=True, is_persistent=True,
                           severity=ir.IssueSeverity.WARNING, translation_key="genstart")
@@ -153,12 +137,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # endnu nyere, som først indlæses ved genstart, er dens filer allerede lagt på plads (eller bliver det efter genstarten).
     if d.get("version") != VERSION and await hass.async_add_executor_job(_paa_disk) in (VERSION, None):
         try:
-            kvit = await hass.async_add_executor_job(installer.opdater, hass.config.config_dir, dict(d), VERSION)
-            res = await async_check_ha_config_file(hass)
-            if res.errors:  # den nye version passer ikke til denne HA: læg den gamle tilbage
-                await hass.async_add_executor_job(installer.rul_tilbage, kvit)
-                raise RuntimeError("; ".join(str(e.message) for e in res.errors[:3]))
-            await hass.async_add_executor_job(installer.skjul_token, kvit["backup"])
+            await laeg_paa_plads(hass, installer, d, VERSION)  # passer den nye version ikke til denne HA, lægges den gamle tilbage
             hass.config_entries.async_update_entry(entry, data={**entry.data, "version": VERSION})
             ir.async_delete_issue(hass, DOMAIN, "opdatering_fejlede")
             hass.data[GENSTART] = True
@@ -188,7 +167,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for gl in GAMLE.values():  # de gamle hjælpere; en levende (brugerens egen) røres ikke
             if (e := reg.async_get(gl)) and e.platform == "input_text" and not _lever(hass, gl):
                 reg.async_remove(gl)
-        if all(entry.data.get(k) for k in GAMLE):
+        if entry.data.get("hjerne") == "let" or all(entry.data.get(k) for k in GAMLE):  # den lette hjerne bruger ingen EMHASS-nøgle
             ir.async_delete_issue(hass, DOMAIN, "noegle_mangler")
         else:
             ir.async_create_issue(hass, DOMAIN, "noegle_mangler", is_fixable=False, is_persistent=False,
@@ -258,6 +237,10 @@ async def _varmtvand_tilbage(hass: HomeAssistant) -> None:
         await hass.services.async_call("input_boolean", "turn_off", {"entity_id": VARMTVAND}, blocking=True)
     gemt = _tal(s.state) if (s := hass.states.get("input_number.wattlas_varmtvand_brugerens")) else 0.0
     ent = s.state if (s := hass.states.get("input_text.wattlas_varmtvand_entitet")) else ""
+    foer = s.state if (s := hass.states.get("input_text.wattlas_varmtvand_foer")) and s.state not in ("unknown", "unavailable") else ""
+    if foer and re.fullmatch(r"(switch|input_boolean|select|input_select)\.[a-z0-9_]+", ent):
+        await _boost_tilbage(hass, ent, foer)
+        return
     if gemt <= 0 or not re.fullmatch(r"(water_heater|number)\.[a-z0-9_]+", ent):
         return
     vh = ent.startswith("water_heater.")
@@ -273,6 +256,26 @@ async def _varmtvand_tilbage(hass: HomeAssistant) -> None:
         await hass.services.async_call("persistent_notification", "create", {
             "notification_id": "wattlas_varmtvand", "title": "Sæt varmtvandsbeholderen tilbage",
             "message": f"Wattlas havde hævet målet på `{ent}` og kunne ikke sætte det tilbage ({e}). Sæt det selv til {gemt:g} °C."}, blocking=True)
+
+
+async def _boost_tilbage(hass: HomeAssistant, ent: str, foer: str) -> None:
+    """Boost i gang: kontakten slukkes, valglisten sættes tilbage – men kun hvis den stadig står på Wattlas' valg."""
+    dom = ent.split(".", 1)[0]
+    st = hass.states.get(ent)
+    valg = s.state if (s := hass.states.get("input_text.wattlas_varmtvand_boost")) else ""
+    try:
+        if st is None or st.state in ("unavailable", "unknown"):
+            raise RuntimeError("den svarer ikke")
+        if dom in ("switch", "input_boolean"):  # også en, der endnu ikke viser "on"
+            await hass.services.async_call(dom, "turn_off", {"entity_id": ent}, blocking=True)
+        elif dom in ("select", "input_select") and st.state == valg and foer in (st.attributes.get("options") or []):
+            await hass.services.async_call(dom, "select_option", {"entity_id": ent, "option": foer}, blocking=True)
+        await hass.services.async_call("input_text", "set_value", {"entity_id": "input_text.wattlas_varmtvand_foer", "value": ""}, blocking=True)
+    except Exception as e:  # noqa: BLE001 – fjernelsen skal gennemføres alligevel; brugeren får besked
+        _LOGGER.warning("Wattlas: kunne ikke stoppe varmtvands-boost på %s: %s", ent, e)
+        await hass.services.async_call("persistent_notification", "create", {
+            "notification_id": "wattlas_varmtvand", "title": "Stop varmtvands-boost",
+            "message": f"Wattlas havde startet en boost på `{ent}` og kunne ikke stoppe den ({e}). Sæt den selv tilbage til {foer}."}, blocking=True)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -293,6 +296,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # stadig "overtaget": inverteren svarede ikke (fx offline), så den står i det sidste program
     selvforbrug = not hass.states.is_state("input_boolean.emhass_har_overtaget", "on")
     await _varmtvand_tilbage(hass)
+    await lader.slip_ved_fjernelse(hass, entry)
     backup = await hass.async_add_executor_job(installer.afinstaller, hass.config.config_dir)
     for i in ("genstart", "opdatering_fejlede", "noegle_mangler", "priser_dobbelt", "tarif_fejl", vagt.ISSUE):
         ir.async_delete_issue(hass, DOMAIN, i)

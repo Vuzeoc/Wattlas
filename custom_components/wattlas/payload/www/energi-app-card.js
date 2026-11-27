@@ -24,6 +24,13 @@ if (!customElements.get('emhass-plan-card')) import('./emhass-plan-card.js' + ne
   const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const pd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
   const addD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  // varmt vand: mål (water_heater/number) eller boost (kontakt/valgliste/knap)
+  const vvBoost = dom => ['select', 'input_select', 'switch', 'input_boolean', 'button'].includes(dom);
+  const vvGyldig = e => /^(water_heater|number|select|input_select|switch|input_boolean|button)[.][a-z0-9_]+$/.test(e);
+  // valglisten: alle water_heater + entiteter, hvis id eller navn ligner varmt vand, og den valgte (aldrig Wattlas' egne)
+  const vvKandidater = (states, valgt) => { const ord = /vand|water|tank|dhw|boiler|beholder|elpatron|heater|varm/i;
+    return Object.keys(states).filter(e => e === valgt || (vvGyldig(e) && !e.split('.')[1].startsWith('wattlas_')
+      && (e.startsWith('water_heater.') || ord.test(e) || ord.test(states[e].attributes?.friendly_name || '')))).sort(); };
   // elbil: ca. ladetid ved laderens fulde effekt (W), rundet op til 10 min. Kun et skøn: faserne og husets forbrug kan skrue strømmen ned
   // Solladning: ved hvor meget soloverskud laderen starter og når fuld strøm, når tilskuddet t (W) lægges oven i. pmin/pmax = laveste/fulde effekt (W)
   const solstart = (pmin, pmax, t) => { if (!(pmin > 0) || !(pmax >= pmin)) return ''; t = t > 0 ? t : 0; const kw = w => (Math.max(0, w - t) / 1000).toFixed(1).replace('.', ',') + ' kW';
@@ -152,7 +159,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         if (el.dataset.r) { const [i, k] = el.dataset.r.split('|'); const r = this._reglerUdkast()[Number(i)]; r[k] = k === 'soc' ? Number(el.value) : el.value; this._rDirty = true; this._last = 0; this._render(); return; }
         if (!el.dataset.set) return;
         const [dom, id] = el.dataset.set.split('|');
-        if (dom === 'text') this._hass.callService('input_text', 'set_value', {entity_id: id, value: el.value.trim()});
+        if (dom === 'text') this._hass.callService('input_text', 'set_value', {entity_id: id, value: id === 'input_text.wattlas_varmtvand_boost' ? el.value : el.value.trim()});  // et valg gemmes ordret
         if (dom === 'time') this._hass.callService('input_datetime', 'set_datetime', {entity_id: id, time: el.value + ':00'});
         if (dom === 'dt' && el.value) this._hass.callService('input_datetime', 'set_datetime', {entity_id: id, datetime: el.value.replace('T', ' ').slice(0, 16) + ':00'}); });
     }
@@ -199,7 +206,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         const nu = new Date(), m0 = new Date(nu); m0.setHours(0, 0, 0, 0);
         const st = await this._hass.callWS({type: 'recorder/statistics_during_period', start_time: m0.toISOString(),
           statistic_ids: ['sensor.emhass_solproduktion_samlet', 'sensor.emhass_m_load_w_totalpower'], period: '5minute', types: ['mean']});
-        this._idag = st; this._idagT = Date.now();
+        this._idag = st; this._idagT = Date.now(); this._fejl = null;
       } catch (e) { this._fejl = String(e?.message || e); this._dage = this._dage || []; }
       this._loading = false; this._last = 0; this._render();
       setTimeout(() => { this._dage = null; }, 10 * 60 * 1000); // genindlæs historik hvert 10. min.
@@ -230,19 +237,20 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       else if (a === 'tsoc') this._tsoc = Number(v);
       else if (a === 'ts') { this._tilsidesaet(v); return; }
       else if (a === 'hhset') { const [k, d] = v.split('|'), lim = {reserve: [15, 80], slut_soc: [15, 100], max_net_kw: [0, Math.max(1, (this.n('input_number.wattlas_maks_netimport_w') || 50000) / 1000)], slid: [0, 1], batteri_kwh: [0, 100]}[k];
-        this._hh[k] = Math.max(lim[0], Math.min(lim[1], Math.round((this._hh[k] + Number(d)) * 100) / 100)); }
-      else if (a === 'hhfb') this._hh.forbruger = !this._hh.forbruger;
-      else if (a === 'rny') { this._reglerUdkast().push({navn: 'Ny regel', aktiv: false, type: 'gem', dage: 'hverdage', fra: '16:00', til: '21:00', soc: 80}); }
-      else if (a === 'rdel') { this._reglerUdkast().splice(Number(v), 1); }
-      else if (a === 'rtog') { const r = this._reglerUdkast()[Number(v)]; r.aktiv = !r.aktiv; }
-      else if (a === 'rgem') { this._hass.callWS({type: 'fire_event', event_type: 'wattlas_regler_gem', event_data: {regler: this._reglerUdkast()}}).then(() => { this._rDirty = false; this._last = 0; this._render(); }); return; }
+        this._hh[k] = Math.max(lim[0], Math.min(lim[1], Math.round((this._hh[k] + Number(d)) * 100) / 100)); this._hhKoert = false; }
+      else if (a === 'hhfb') { this._hh.forbruger = !this._hh.forbruger; this._hhKoert = false; }
+      else if (a === 'rny') { this._reglerUdkast().push({navn: 'Ny regel', aktiv: false, type: 'gem', dage: 'hverdage', fra: '16:00', til: '21:00', soc: 80}); this._rDirty = true; }
+      else if (a === 'rdel') { this._reglerUdkast().splice(Number(v), 1); this._rDirty = true; }
+      else if (a === 'rtog') { const r = this._reglerUdkast()[Number(v)]; r.aktiv = !r.aktiv; this._rDirty = true; }
+      else if (a === 'rgem') { this._hass.callWS({type: 'fire_event', event_type: 'wattlas_regler_gem', event_data: {regler: this._reglerUdkast()}})
+        .then(() => { this._rDirty = false; this._last = 0; this._render(); }, e => alert('Reglerne blev ikke gemt: ' + (e?.message || e))); return; }
       else if (a === 'rfortryd') { this._rUdkast = null; this._rDirty = false; }
       else if (a === 'systest') { if (!confirm('Batteriet lader et par minutter fra elnettet og bruger sig derefter selv til huset (højst ca. 10 minutter). Start?')) return;
         this._hass.callService('script', 'wattlas_systemtest', {}); return; }
       else if (a === 'hhrun') { this._hass.callService('script', 'wattlas_hvadhvis', {...this._hh}); this._hhKoert = true; this._hhKoertMed = {...this._hh}; return; }
-      else if (a === 'hhapply') { if (!confirm('Brug disse indstillinger i den rigtige styring?')) return;
-        [['reserve', 'wattlas_reserve'], ['slut_soc', 'wattlas_slut_soc'], ['max_net_kw', 'wattlas_max_net_kw'], ['slid', 'wattlas_slid']]
-          .forEach(([k, id]) => this._hass.callService('input_number', 'set_value', {entity_id: 'input_number.' + id, value: this._hh[k]})); return; }
+      else if (a === 'hhapply') { const B = this._hhKoertMed, S0 = this._hhStart || {}; if (!B || !this._hhKoert || !confirm('Brug disse indstillinger i den rigtige styring?')) return;
+        [['reserve', 'wattlas_reserve'], ['slut_soc', 'wattlas_slut_soc'], ['max_net_kw', 'wattlas_max_net_kw'], ['slid', 'wattlas_slid']].filter(([k]) => B[k] !== S0[k])
+          .forEach(([k, id]) => this._hass.callService('input_number', 'set_value', {entity_id: 'input_number.' + id, value: B[k]})); return; }
       else if (a === 'lt') { this._hass.callService('input_select', 'select_option', {entity_id: 'input_select.wattlas_lader_tilstand', option: v}); this._last = 0; return; }
       else if (a === 'ln') { this._hass.callService('input_number', 'set_value', {entity_id: 'input_number.wattlas_lader_ladet', value: 0}); this._last = 0; return; }
       else if (a === 'num') { const [id, d, loft] = v.split('|'), s = this.st(id); if (!s) return;  // loft: fx laderens grænse fra opsætningen
@@ -401,7 +409,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
         ${extras}${labels}</svg>`;
       const fraNet = Math.min(lastD, Math.max(0, ind - ch)), fraBat = Math.max(0, Math.min(dis, lastD - fraNet)), fraSol = Math.max(0, lastD - fraNet - fraBat);
       const tot = lastD || 1, autark = load > 0 ? 100 * (solHus + batHus) / load : 0;
-      const priser = this.priserIdag(), nuP = priser.find(p => p.h === new Date().getHours());
+      const priser = this.priserIdag(), nuP = priser.filter(p => p.t <= new Date()).pop();  // den seneste, der er startet (også kvarterpriser)
       const billig = priser.length ? priser.reduce((x, y) => y.buy < x.buy ? y : x) : null, dyr = priser.length ? priser.reduce((x, y) => y.buy > x.buy ? y : x) : null;
       const gns = priser.length ? priser.reduce((x, y) => x + y.buy, 0) / priser.length : null;
       const ser = this._idag || {};
@@ -448,17 +456,18 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       if (!pr.length) return '';
       const nu = new Date().getHours(), sorted = pr.map(p => p.buy).sort((x, y) => x - y), lo = sorted[Math.floor(pr.length / 3)], hi = sorted[Math.floor(2 * pr.length / 3)];
       const hl = pr.findIndex(p => p.d === 0 && p.h === nu);
-      return bars({labels: pr.map(p => (p.d ? '' : '') + String(p.h).padStart(2, '0')), series: [{name: 'Købspris', values: pr.map(p => p.buy), color: v => v <= lo ? C.lav : v <= hi ? C.hoej : C.spids}],
+      return bars({labels: pr.map(p => String(p.h).padStart(2, '0')), series: [{name: 'Købspris', values: pr.map(p => p.buy), color: v => v <= lo ? C.lav : v <= hi ? C.hoej : C.spids}],
         unit: 'kr./kWh', fmt: v => nf(v, 2), highlight: hl, height: 170, W: this.w('full'), every: 2})
         + `<div class="legend"><span><i style="background:${C.lav}"></i>billigste tredjedel</span><span><i style="background:${C.hoej}"></i>mellem</span><span><i style="background:${C.spids}"></i>dyreste</span>${pr.some(p => p.d) ? '<span>· i morgen fra midten</span>' : '<span>· morgendagens priser kommer ca. kl. 13</span>'}</div>`;
     }
     hvadHvis() {
       if (!this.avanceret()) return '';
       const v = id => parseFloat(this.st(id)?.state);
-      if (!this._hh) this._hh = {reserve: v('input_number.wattlas_reserve') || 15, slut_soc: v('input_number.wattlas_slut_soc') || 30,
-        max_net_kw: v('input_number.wattlas_max_net_kw') || (v('input_number.wattlas_maks_netimport_w') || 0) / 1000, slid: v('input_number.wattlas_slid') ?? 0.25, forbruger: false, batteri_kwh: v('input_number.wattlas_batteri_kwh') || 0};
+      const slid = Number.isFinite(v('input_number.wattlas_slid')) ? v('input_number.wattlas_slid') : 0.25;  // 0 er et gyldigt valg (som i den rigtige plan)
+      if (!this._hh) { this._hh = {reserve: v('input_number.wattlas_reserve') || 15, slut_soc: v('input_number.wattlas_slut_soc') || 30,
+        max_net_kw: v('input_number.wattlas_max_net_kw') || (v('input_number.wattlas_maks_netimport_w') || 0) / 1000, slid, forbruger: false, batteri_kwh: v('input_number.wattlas_batteri_kwh') || 0}; this._hhStart = {...this._hh}; }
       const H = this._hh, status = (this.st('input_text.wattlas_hvadhvis_status')?.state || '').replace(/^(unknown|unavailable)$/, ''), koerer = this.st('script.wattlas_hvadhvis')?.state === 'on' || status.startsWith('beregner');
-      const base = this.planKr('', v('input_number.wattlas_slid') || 0.25), alt = this.planKr('hh_', H.slid);
+      const base = this.planKr('', slid), alt = this.planKr('hh_', H.slid);
       const frisk = alt && status.startsWith('ok') && this._hhKoert;
       // andet batteri: procenter kan ikke sammenlignes, så batteriet vises i kWh
       const ka = v('input_number.wattlas_batteri_kwh') || 0, kn = this._hhKoertMed?.batteri_kwh ?? ka, andet = Math.abs(kn - ka) > 0.01;
@@ -498,7 +507,7 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
       if (!this.avanceret() && !on) return '<div></div>';
       return this.card('Fleksibel forbruger', `<p class="note" style="margin:0 0 8px">Wattlas lægger fx varmtvandsbeholder, pool eller elbil i de bedste timer (sol og pris). EMHASS planlægger kørslen sammen med batteriet, og en kontakt i HA tændes og slukkes efter planen. Uden frisk plan er kontakten slukket.</p>
         <div class="set"><div><b>Navn</b></div><input class="inp" data-set="text|input_text.wattlas_forbruger1_navn" value="${esc(v('input_text.wattlas_forbruger1_navn') || '')}" placeholder="fx Varmtvandsbeholder"></div>
-        <div class="set"><div><b>Kontakt</b><span>${gyldig ? (es ? `nu: ${es.state}` : '<b style="color:#fb7185">findes ikke</b>') : 'switch.…, light.… eller input_boolean.…'}</span></div><input class="inp" data-set="text|input_text.wattlas_forbruger1_entitet" value="${esc(ent)}" placeholder="switch.varmtvand"></div>
+        <div class="set"><div><b>Kontakt</b><span>${gyldig ? (es ? `nu: ${es.state}` : '<b style="color:#fb7185">findes ikke</b>') : 'switch.…, light.… eller input_boolean.…'}</span></div><input class="inp" data-set="text|input_text.wattlas_forbruger1_entitet" value="${esc(ent)}" placeholder="switch.varmtvand" ${on && es?.state === 'on' ? 'disabled title="låst, mens den kører – ellers ville den gamle kontakt blive stående tændt"' : ''}></div>
         ${'' /* effekt og timer */}<div class="set"><div><b>Effekt</b><span>det, den bruger, når den kører (typeskilt), fx varmtvand 3000 W. Planen regner med præcis den effekt. Under 100 W planlægges den ikke</span></div><div class="stp"><button data-a="num" data-v="input_number.wattlas_forbruger1_effekt|-100">−</button><em>${nf(parseFloat(v('input_number.wattlas_forbruger1_effekt')))} W</em><button data-a="num" data-v="input_number.wattlas_forbruger1_effekt|100">+</button></div></div>
         <div class="set"><div><b>Faser</b><span>3 for fx en 11 kW-lader. Er du i tvivl, så 1 – så holdes der mest plads. Forbrugeren tændes kun, når fasegrænsen og importloftet har plads</span></div><div class="stp"><button data-a="num" data-v="input_number.wattlas_forbruger1_faser|-2">−</button><em>${nf(parseFloat(v('input_number.wattlas_forbruger1_faser')) || 1)}</em><button data-a="num" data-v="input_number.wattlas_forbruger1_faser|2">+</button></div></div>
         <div class="set"><div><b>Timer pr. døgn</b><span>inden færdig-tidspunktet · kørt ${nf(parseFloat(v('input_number.wattlas_forbruger1_koert')), 1)} t i denne periode</span></div><div class="stp"><button data-a="num" data-v="input_number.wattlas_forbruger1_timer|-0.5">−</button><em>${nf(parseFloat(v('input_number.wattlas_forbruger1_timer')), 1)} t</em><button data-a="num" data-v="input_number.wattlas_forbruger1_timer|0.5">+</button></div></div>
@@ -770,28 +779,33 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
     }
 
     priserIdag(dag = 'raw_today') {
-      return (this.a('sensor.wattlas_spotpris', dag) || []).map(r => { const d = new Date(r.hour); const p = Number(r.price);
-        return {h: d.getHours(), t: d, spot: p, buy: buy(p, d.getHours()), sell: sell(p)}; }).filter(r => !isNaN(r.spot));
+      // husets tidszone, ikke browserens: nettariffens spidslast er kl. 17–21 i Danmark, også når appen ses fra udlandet
+      const tz = this._hass?.config?.time_zone, time = d => Number(d.toLocaleString('en-GB', {hour: '2-digit', hour12: false, timeZone: tz})) % 24;
+      return (this.a('sensor.wattlas_spotpris', dag) || []).map(r => { const d = new Date(r.hour); const p = Number(r.price), h = time(d);
+        return {h, t: d, spot: p, buy: buy(p, h), sell: sell(p)}; }).filter(r => !isNaN(r.spot));
     }
 
     // ---------- ØKONOMI ----------
     okonomi() {
       const S = this.sparetDage(), maal = this.maal(), nu = new Date(), idag = ymd(nu);
-      const inv = this.n('input_number.solcelle_investering') || 1, total = this.n('sensor.solcelle_sparet_i_alt') || 0;
+      const inv = this.n('input_number.solcelle_investering') || 0, total = this.n('sensor.solcelle_sparet_i_alt') || 0;
       const sum = (fra, til) => Object.entries(S).filter(([d]) => d >= fra && d <= til).reduce((a, [, v]) => a + v, 0);
       const man = monday(nu), uge = sum(ymd(man), idag), mFra = ymd(new Date(nu.getFullYear(), nu.getMonth(), 1)), md = sum(mFra, idag);
       const dageIUge = (nu.getDay() + 6) % 7 + 1, dageIMd = nu.getDate();
       const dag0 = pd(START), dageAlt = Math.max(1, Math.round((nu - dag0) / 864e5));
-      const rate = total / dageAlt, rest = Math.max(0, inv - total), aar = rate > 0 ? rest / rate / 365 : null;
+      const aarFra = `${nu.getFullYear()}-01-01`, iAar = START >= aarFra ? total : sum(aarFra, idag);
+      const dageAar = START >= aarFra ? dageAlt : Math.max(1, Math.round((nu - pd(aarFra)) / 864e5));
+      // ingen investering sat (0): ingen procenter eller tilbagebetaling, ikke "1 kr." og titusinder af procent
+      const harInv = inv > 1, rate = total / dageAlt, rest = Math.max(0, inv - total), aar = harInv && rate > 0 ? rest / rate / 365 : null;
       const i = S[idag];
       let h = `<div class="grid kpis">
         ${this.kpi('Sparet i dag', i !== undefined ? kr(i) : '–', 'mdi:calendar-today', i >= maal ? C.ok : C.err, {bar: (i || 0) / maal, sub: `mål ${kr(maal)}`})}
         ${this.kpi('Sparet denne uge', kr(uge), 'mdi:chart-line', uge >= maal * dageIUge ? C.ok : C.err, {bar: uge / (maal * dageIUge), sub: `mål ${kr(maal * dageIUge)}`})}
         ${this.kpi('Sparet denne måned', kr(md), 'mdi:trending-up', md >= maal * dageIMd ? C.ok : C.err, {bar: md / (maal * dageIMd), sub: `mål ${kr(maal * dageIMd)}`})}
-        ${this.kpi('Sparet i år', kr(total), 'mdi:rocket-launch', C.ok, {bar: total / (maal * dageAlt), sub: 'anlægget startede ' + pdFmt(pd(START))})}
-        ${this.kpi('Samlede besparelser', kr(total), 'mdi:piggy-bank', C.warn, {bar: total / inv, sub: `${nf(100 * total / inv, 1)} % af investeringen`})}
-        ${this.kpi('Samlet investering', kr(inv), 'mdi:briefcase', C.blue, {info: 'input_number.solcelle_investering', sub: 'tryk for at rette'})}
-        ${this.kpi('Tjent hjem', nf(100 * total / inv, 1) + ' %', 'mdi:calendar-check', C.goal, {bar: total / inv, sub: aar !== null ? `${nf(aar, 1)} år tilbage · ${pdFmt(addD(nu, rest / rate))}` : ''})}
+        ${this.kpi('Sparet i år', kr(iAar), 'mdi:rocket-launch', C.ok, {bar: iAar / (maal * dageAar), sub: START >= aarFra ? 'anlægget startede ' + pdFmt(pd(START)) : 'siden 1. januar'})}
+        ${this.kpi('Samlede besparelser', kr(total), 'mdi:piggy-bank', C.warn, {bar: harInv ? total / inv : 0, sub: harInv ? `${nf(100 * total / inv, 1)} % af investeringen` : 'investeringen er ikke sat'})}
+        ${this.kpi('Samlet investering', harInv ? kr(inv) : 'ikke sat', 'mdi:briefcase', C.blue, {info: 'input_number.solcelle_investering', sub: 'tryk for at rette'})}
+        ${this.kpi('Tjent hjem', harInv ? nf(100 * total / inv, 1) + ' %' : '–', 'mdi:calendar-check', C.goal, {bar: harInv ? total / inv : 0, sub: aar !== null ? `${nf(aar, 1)} år tilbage · ${pdFmt(addD(nu, rest / rate))}` : ''})}
       </div>`;
       // Overblik mål: akkumuleret faktisk + prognose til 2041 + investering
       const sorted = Object.entries(S).sort(), pts = [[dag0.getTime(), 0]].concat(FOER_NOV && FOER_DATO ? [[pd(FOER_DATO).getTime(), FOER_NOV]] : []);
@@ -980,14 +994,23 @@ FROM h WHERE date(ts, 'unixepoch', 'localtime') >= '${start}' GROUP BY 1 ORDER B
     varmtvand() {
       const st = id => { const x = this.st(id)?.state; return ['unknown', 'unavailable', undefined].includes(x) ? '' : x; };
       const on = st('input_boolean.wattlas_varmtvand') === 'on', ent = st('input_text.wattlas_varmtvand_entitet'), gemt = parseFloat(st('input_number.wattlas_varmtvand_brugerens')) || 0;
-      if (!this.st('input_boolean.wattlas_varmtvand') || (!this.avanceret() && !on && !gemt)) return '';
-      const gyldig = /^(water_heater|number)[.][a-z0-9_]+$/.test(ent), es = gyldig ? this.st(ent) : null;
-      const maal = es ? parseFloat(ent.startsWith('water_heater.') ? es.attributes.temperature : es.state) : NaN, ekstra = parseFloat(st('input_number.wattlas_varmtvand_ekstra')) || 0;
-      const status = gemt ? `hævet fra ${nf(gemt, 1)} til ${nf(maal, 1)} °C` : on ? `venter på billig strøm eller sol · mål nu ${isNaN(maal) ? '–' : nf(maal, 1) + ' °C'}` : 'slået fra';
-      return this.card('Varmt vand på billig strøm', `<p class="note" style="margin:0 0 8px">I den billigste tredjedel af døgnets timer, eller når solen sender over 1,5 kW ud på nettet, hæves beholderens mål. Bagefter sættes dit eget mål tilbage. Ændrer du selv målet imens, gælder dit. Aldrig over beholderens maksimum eller 75 °C, og kun når Wattlas styrer (ikke i skyggedrift).</p>
-        <div class="set"><div><b>Beholder</b><span>${gyldig ? (es ? `nu: ${isNaN(maal) ? es.state : nf(maal, 1) + ' °C'}` : '<b style="color:#fb7185">findes ikke</b>') : 'water_heater.… eller number.… (målet)'}${gemt ? ' · låst, mens målet er hævet' : ''}</span></div><input class="inp" data-set="text|input_text.wattlas_varmtvand_entitet" value="${esc(ent)}" placeholder="water_heater.varmtvand" ${gemt ? 'disabled' : ''}></div>
-        <div class="set"><div><b>Ekstra grader</b></div><div class="stp"><button data-a="num" data-v="input_number.wattlas_varmtvand_ekstra|-1">−</button><em>${nf(ekstra)} °C</em><button data-a="num" data-v="input_number.wattlas_varmtvand_ekstra|1">+</button></div></div>
-        <div class="set"><div><b>Wattlas hæver målet</b><span>${status}</span></div><button class="sw ${on ? 'on' : ''}" data-a="tog" data-v="input_boolean.wattlas_varmtvand" ${(gyldig && es) || on ? '' : 'disabled'}><i></i></button></div>`, {icon: 'mdi:water-boiler'});
+      const foer = st('input_text.wattlas_varmtvand_foer'), valg = st('input_text.wattlas_varmtvand_boost'), laast = gemt || foer;
+      if (!this.st('input_boolean.wattlas_varmtvand') || (!this.avanceret() && !on && !laast)) return '';
+      const dom = ent.split('.')[0], boost = vvBoost(dom), es = vvGyldig(ent) ? this.st(ent) : null;
+      const maal = es && !boost ? parseFloat(dom === 'water_heater' ? es.attributes.temperature : es.state) : NaN, ekstra = parseFloat(st('input_number.wattlas_varmtvand_ekstra')) || 0;
+      const opts = dom === 'select' || dom === 'input_select' ? (es?.attributes.options || []) : null, klar = es && (!opts || opts.includes(valg));
+      const navn = e => esc(this.st(e)?.attributes.friendly_name || e);
+      const muligt = vvKandidater(this._hass?.states || {}, ent);
+      const kører = es && (opts ? es.state === valg : ['switch', 'input_boolean'].includes(dom) && es.state === 'on');  // står allerede på boost (ikke Wattlas')
+      const status = gemt ? `hævet fra ${nf(gemt, 1)} til ${nf(maal, 1)} °C` : foer ? `boost i gang · før: ${esc(foer === 'tryk' ? 'knap trykket' : foer)}` : !on ? 'slået fra'
+        : kører ? 'står allerede på boost – Wattlas starter først, når den er tilbage' : boost ? 'venter på billig strøm eller sol' : `venter på billig strøm eller sol · mål nu ${isNaN(maal) ? '–' : nf(maal, 1) + ' °C'}`;
+      const nuTekst = !ent ? (muligt.length ? 'beholder (mål), kontakt, boost-valg eller knap' : '<b style="color:#fb7185">ingen fundet</b>')
+        : !es ? '<b style="color:#fb7185">findes ikke</b>' : boost ? `nu: ${esc(es.state)}` : `nu: ${isNaN(maal) ? esc(es.state) : nf(maal, 1) + ' °C'}`;
+      return this.card('Varmt vand på billig strøm', `<p class="note" style="margin:0 0 8px">I den billigste tredjedel af døgnets timer, eller når solen sender over 1,5 kW ud på nettet, hæves beholderens mål, eller Wattlas starter dens boost (tænder en kontakt, vælger fx en engangsopvarmning eller trykker på en knap). Bagefter sættes alt tilbage. Ændrer du selv noget imens, gælder dit. Aldrig over beholderens maksimum eller 75 °C, højst én opvarmning pr. 3 timer, og kun når Wattlas styrer (ikke i skyggedrift).</p>
+        <div class="set"><div><b>Beholder</b><span>${nuTekst}${laast ? ' · låst, mens Wattlas har den' : ''}</span></div><input class="inp" list="vv-liste" data-set="text|input_text.wattlas_varmtvand_entitet" value="${esc(ent)}" placeholder="vælg eller skriv" ${laast ? 'disabled' : ''}><datalist id="vv-liste">${muligt.map(e => `<option value="${esc(e)}" label="${navn(e)}"></option>`).join('')}</datalist></div>
+        ${opts ? `<div class="set"><div><b>Boost-valg</b><span>det, Wattlas vælger, når strømmen er billig</span></div><select class="inp" data-set="text|input_text.wattlas_varmtvand_boost" ${laast ? 'disabled' : ''}><option value="">– vælg –</option>${opts.map(o => `<option value="${esc(o)}" ${o === valg ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>` : ''}
+        ${boost ? '' : `<div class="set"><div><b>Ekstra grader</b></div><div class="stp"><button data-a="num" data-v="input_number.wattlas_varmtvand_ekstra|-1">−</button><em>${nf(ekstra)} °C</em><button data-a="num" data-v="input_number.wattlas_varmtvand_ekstra|1">+</button></div></div>`}
+        <div class="set"><div><b>${boost ? 'Wattlas starter boost' : 'Wattlas hæver målet'}</b><span>${status}</span></div><button class="sw ${on ? 'on' : ''}" data-a="tog" data-v="input_boolean.wattlas_varmtvand" ${klar || on ? '' : 'disabled'}><i></i></button></div>`, {icon: 'mdi:water-boiler'});
     }
     planVirkelighed() {
       const s = this.st('sensor.wattlas_dagsplan');

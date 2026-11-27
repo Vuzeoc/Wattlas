@@ -2,6 +2,10 @@
 # hæves varmtvandsbeholderens mål (højst til beholderens eget maksimum og aldrig over 75 °C) og holdes mindst 30 min. Bagefter sættes
 # brugerens eget mål tilbage – også efter en genstart, når funktionen eller Wattlas' styring slås fra (eller står i skygge), når
 # målingerne er gamle, og når importloftet er nået. Ændrer brugeren selv målet undervejs, er det det nye ønske. Slået fra som standard.
+# Boost (0.7.4): har beholderen intet mål at hæve, kan Wattlas i stedet tænde en kontakt (switch/input_boolean), vælge et valg i en
+# valgliste (select/input_select, fx "engangsopvarmning") eller trykke på en knap. Kontakt og valgliste sættes tilbage som de stod, når
+# timen ikke længere er billig (mindst 30 min); en knap og en valgliste eller kontakt, der selv går tilbage, er én opvarmning. Ny boost
+# tidligst 3 timer efter en opvarmning (10 min efter at Wattlas selv slukkede en kontakt) – så den ikke startes hvert 5. min.
 # shortcut: skiftes beholderen (entiteten), mens målet er hævet, sættes den gamle ikke tilbage – kortet låser feltet, mens det er hævet.
 input_boolean:
   wattlas_varmtvand:
@@ -13,6 +17,23 @@ input_text:
     name: Wattlas · varmtvandsbeholder
     max: 255
     icon: mdi:water-boiler
+  # boost: det valg i valglisten, Wattlas vælger (kopieret ordret fra entitetens valg – nogle indeholder usynlige bindestreger)
+  wattlas_varmtvand_boost:
+    name: Wattlas · varmt vand boost-valg
+    max: 255
+    icon: mdi:water-boiler-alert
+  # boost: hvordan entiteten stod, før Wattlas startede (tom = ingen boost i gang). Sættes kun af automationen
+  wattlas_varmtvand_foer:
+    name: Wattlas · varmt vand før boost
+    max: 255
+
+input_datetime:
+  # boost: hvornår den nuværende startede, eller (når ingen kører) hvornår den sidste sluttede. De 30 minutter og pausen regnes
+  # herfra, så en genstart ikke forlænger dem. Sættes kun af automationen
+  wattlas_varmtvand_boost_slut:
+    name: Wattlas · varmt vand sidste boost
+    has_date: true
+    has_time: true
 
 input_number:
   wattlas_varmtvand_ekstra:
@@ -56,11 +77,26 @@ automation:
     conditions:
       - condition: template
         value_template: >-
-          {{ states('input_text.wattlas_varmtvand_entitet') | regex_match('^(water_heater|number)[.][a-z0-9_]+$')
-             and (is_state('input_boolean.wattlas_varmtvand', 'on') or states('input_number.wattlas_varmtvand_brugerens') | float(0) > 0) }}
+          {{ states('input_text.wattlas_varmtvand_entitet') | regex_match('^(water_heater|number|select|input_select|switch|input_boolean|button)[.][a-z0-9_]+$')
+             and (is_state('input_boolean.wattlas_varmtvand', 'on') or states('input_number.wattlas_varmtvand_brugerens') | float(0) > 0
+                  or states('input_text.wattlas_varmtvand_foer') not in ['', 'unknown', 'unavailable']) }}
     actions:
       - variables:
           ent: "{{ states('input_text.wattlas_varmtvand_entitet') }}"
+          dom: "{{ ent.split('.')[0] }}"
+          boost: "{{ dom in ['select', 'input_select', 'switch', 'input_boolean', 'button'] }}"
+          kontakt: "{{ dom in ['switch', 'input_boolean'] }}"
+          valgliste: "{{ dom in ['select', 'input_select'] }}"
+          # tekster som en ordbog: ellers gør HA "1" og "1.50" fra en valgliste til tal, som så hverken kan sammenlignes eller sættes tilbage
+          tx: >-
+            {{ {'st': states(ent), 'valg': states('input_text.wattlas_varmtvand_boost'),
+                'foer': states('input_text.wattlas_varmtvand_foer') if states('input_text.wattlas_varmtvand_foer') not in ['unknown', 'unavailable'] else ''} }}
+          svarer: "{{ tx.st != 'unavailable' and (dom == 'button' or tx.st != 'unknown') }}"  # en knap, der aldrig er trykket på, er "unknown"
+          # sekunder siden boosten startede (mens en kører) eller siden den sidste sluttede (ukendt = længe siden)
+          # shortcut: en ny input_datetime starter på i dag kl. 00:00, så den allerførste boost efter installationen tidligst kommer kl. 03 (valgliste/knap); kun én gang
+          siden_b: "{{ as_timestamp(now()) - (state_attr('input_datetime.wattlas_varmtvand_boost_slut', 'timestamp') or 0) }}"
+          # boost i gang lige nu (kontakten tændt / valget valgt)
+          paa: "{{ tx.st == 'on' if kontakt else (tx.st == tx.valg if valgliste else false) }}"
           vh: "{{ ent.startswith('water_heater.') }}"
           nu: "{{ (state_attr(ent, 'temperature') if vh else states(ent)) | float(none) }}"
           # beholderens maksimum, men aldrig over 75 °C (en number-entitet uden rigtigt maksimum har 100)
@@ -73,17 +109,65 @@ automation:
           net: "{{ states('sensor.emhass_m_grid_out_total_power') | float(0) }}"
           # stop med det samme: slået fra, Wattlas styrer ikke (hovedafbryder/skygge), gamle målinger, importloftet
           maa: >-
-            {{ is_state('input_boolean.wattlas_varmtvand', 'on') and ekstra > 0 and maks is not none and is_state('binary_sensor.emhass_ui_data_frisk', 'on')
+            {{ is_state('input_boolean.wattlas_varmtvand', 'on') and (boost or ekstra > 0 and maks is not none) and is_state('binary_sensor.emhass_ui_data_frisk', 'on')
                and is_state('input_boolean.emhass_styring_aktiv', 'on') and is_state('input_boolean.emhass_har_overtaget', 'on') and (graense <= 0 or net < graense) }}
-          # billig time eller soloverskud – og et hævet mål holdes mindst 30 min (beholderens eget forbrug æder overskuddet)
-          oensket: "{{ maa and (is_state('sensor.wattlas_prisniveau', 'billig') or net < -1500 or (gemt > 0 and siden < 1800)) }}"
+          # billig time eller soloverskud – og et hævet mål/en boost holdes mindst 30 min (beholderens eget forbrug æder overskuddet)
+          oensket: "{{ maa and (is_state('sensor.wattlas_prisniveau', 'billig') or net < -1500 or (gemt > 0 and siden < 1800) or (tx.foer != '' and siden_b < 1800)) }}"
           hoej: "{{ [nu + ekstra, maks] | min if maks is not none and nu is not none else none }}"
       - condition: template  # beholderen svarer ikke: intet ændres (er der hævet, sættes det tilbage, når den er tilbage)
-        value_template: "{{ nu is not none }}"
+        value_template: "{{ svarer if boost else nu is not none }}"
       - choose:
+          # boost start: aldrig hvis den allerede er i gang (fx brugerens egen), og først efter pausen. "før" gemmes først, når
+          # entiteten viser boosten (eller efter 2 min): så kan et stop ikke komme, før Wattlas ved, at den er i gang
+          - conditions: >-
+              {{ boost and oensket and tx.foer == '' and not paa and siden_b > (600 if kontakt else 10800)
+                 and (not valgliste or tx.valg in (state_attr(ent, 'options') or [])) }}
+            sequence:
+              - action: "{{ dom ~ ('.turn_on' if kontakt else '.select_option' if valgliste else '.press') }}"
+                target: {entity_id: "{{ ent }}"}
+                data: "{{ {'option': tx.valg} if valgliste else {} }}"
+              - if: "{{ dom != 'button' }}"
+                then:
+                  - wait_template: "{{ states(ent) == ('on' if kontakt else tx.valg) }}"
+                    timeout: "{{ vent_s | default(120) }}"  # vent_s kun i testen
+              - action: input_datetime.set_datetime
+                target: {entity_id: input_datetime.wattlas_varmtvand_boost_slut}
+                data: {timestamp: "{{ as_timestamp(now()) }}"}
+              - action: input_text.set_value
+                target: {entity_id: input_text.wattlas_varmtvand_foer}
+                data: "{{ {'value': tx.st if valgliste or kontakt else 'tryk'} }}"
+          # boost stop: kontakten slukkes altid (også en, der endnu ikke viser "on"); valglisten sættes tilbage, men kun hvis den
+          # stadig står på Wattlas' valg
+          - conditions: "{{ boost and tx.foer != '' and not oensket }}"
+            sequence:
+              - if: "{{ kontakt }}"
+                then:
+                  - action: "{{ dom ~ '.turn_off' }}"
+                    target: {entity_id: "{{ ent }}"}
+              - if: "{{ valgliste and paa and tx.foer in (state_attr(ent, 'options') or []) }}"
+                then:
+                  - action: "{{ dom ~ '.select_option' }}"
+                    target: {entity_id: "{{ ent }}"}
+                    data: "{{ {'option': tx.foer} }}"
+              - action: input_datetime.set_datetime
+                target: {entity_id: input_datetime.wattlas_varmtvand_boost_slut}
+                data: {timestamp: "{{ as_timestamp(now()) }}"}
+              - action: input_text.set_value
+                target: {entity_id: input_text.wattlas_varmtvand_foer}
+                data: {value: ""}
+          # boost færdig af sig selv: valglisten/kontakten er gået tilbage (engangsopvarmning, en kontakt der slukker, når tanken
+          # er varm, eller brugeren selv), eller knappen blev trykket for en halv time siden. Så 3 timers pause – også for en kontakt
+          - conditions: "{{ boost and tx.foer != '' and siden_b > 1800 and (dom == 'button' or not paa) }}"
+            sequence:
+              - action: input_datetime.set_datetime
+                target: {entity_id: input_datetime.wattlas_varmtvand_boost_slut}
+                data: {timestamp: "{{ as_timestamp(now()) + (10200 if kontakt else 0) }}"}
+              - action: input_text.set_value
+                target: {entity_id: input_text.wattlas_varmtvand_foer}
+                data: {value: ""}
           # hæv: brugerens mål gemmes først (aldrig et hævet mål – gemt er 0, når intet er hævet). Mindst 10 min efter sidste
           # tilbagesætning, så en beholder, der først viser det nye mål ved næste aflæsning, ikke får det hævede gemt som brugerens
-          - conditions: "{{ oensket and gemt == 0 and nu < maks - 0.4 and siden > 600 }}"
+          - conditions: "{{ not boost and oensket and gemt == 0 and nu < maks - 0.4 and siden > 600 }}"
             sequence:
               - action: input_number.set_value
                 target: {entity_id: input_number.wattlas_varmtvand_brugerens}
@@ -104,13 +188,13 @@ automation:
                     data: {value: "{{ (state_attr(ent, 'temperature') if vh else states(ent)) | float(hoej) }}"}
           # brugeren har selv ændret målet, mens det var hævet: det er det nye ønske. Viser beholderen stadig brugerens
           # gamle mål, er den bare ikke opdateret endnu
-          - conditions: "{{ gemt > 0 and (nu - states('input_number.wattlas_varmtvand_sat') | float(0)) | abs > 0.4 and (nu - gemt) | abs > 0.4 }}"
+          - conditions: "{{ not boost and gemt > 0 and (nu - states('input_number.wattlas_varmtvand_sat') | float(0)) | abs > 0.4 and (nu - gemt) | abs > 0.4 }}"
             sequence:
               - action: input_number.set_value
                 target: {entity_id: input_number.wattlas_varmtvand_brugerens}
                 data: {value: 0}
           # sæt tilbage
-          - conditions: "{{ gemt > 0 and not oensket }}"
+          - conditions: "{{ not boost and gemt > 0 and not oensket }}"
             sequence:
               - action: "{{ 'water_heater.set_temperature' if vh else 'number.set_value' }}"
                 target: {entity_id: "{{ ent }}"}

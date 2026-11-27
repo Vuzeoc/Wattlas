@@ -41,7 +41,10 @@ def packages_mappe(config_dir: str) -> str | None:
     """Relativ sti til packages-mappen, hvis configuration.yaml allerede bruger packages."""
     tekst = (Path(config_dir) / "configuration.yaml").read_text(encoding="utf-8")
     m = PKG_RE.search(tekst)
-    return m.group(1).strip("/") if m else None
+    if not m:
+        return None
+    sti, cfg = m.group(1).strip(), str(config_dir).replace("\\", "/").rstrip("/")
+    return sti[len(cfg) + 1:].strip("/") if sti.startswith(cfg + "/") else sti.strip("/")  # også "!include_dir_named /config/packages"
 
 
 def installeret_tekst(config_dir: str) -> str:
@@ -58,7 +61,8 @@ def kendt_tekst() -> str:
 
 def tilfoej_packages(tekst: str) -> str | None:
     """Ny configuration.yaml med packages-linjen, eller None hvis filens form er usikker at rette i."""
-    nl = "\r\n" if "\r\n" in tekst else "\n"
+    tekst = tekst.removeprefix("\ufeff")  # en BOM foran "homeassistant:" ville give en blok mere nederst
+    nl ="\r\n" if "\r\n" in tekst else "\n"
     linjer = tekst.split(nl)
     top = [i for i, l in enumerate(linjer) if re.match(r"homeassistant:", l)]
     if not top:  # ingen homeassistant:-nøgle – tilføj en ny blok nederst
@@ -155,7 +159,8 @@ def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, versi
     backup = _ny_backup(cfg)
     flyttet: list = []
     nye = [pkg / "wattlas", pkg / "wattlas_kanal", cfg / "www" / "wattlas", cfg / "wattlas"]
-    kvit = {"conf": str(conf), "gammel_conf": gammel_conf, "nye": [str(p) for p in nye], "flyttet": flyttet, "backup": str(backup)}
+    # gammel_conf kun, når configuration.yaml rettes: ellers ville en tilbagerulning skrive en ældre udgave oven i brugerens egne ændringer
+    kvit = {"conf": str(conf), "gammel_conf": gammel_conf if ny_conf is not None else None, "nye": [str(p) for p in nye], "flyttet": flyttet, "backup": str(backup)}
     try:
         for p, navn in zip(nye, ["packages_wattlas", "packages_wattlas_kanal", "www_wattlas", "wattlas"]):
             _flyt(p, backup, navn, flyttet)
@@ -223,7 +228,9 @@ def installer(config_dir: str, kanal: str, prefix: str, inv2: dict | None, versi
 
 def opdater(config_dir: str, data: dict, version: str) -> dict:
     """Fast indgang til opdateringer. Tager hele opsætningen (config entry-data), så en ældre, kørende version kan kalde en
-    nyere versions installer fra disken uden at kende dens parametre. Skift ikke navn eller parametre på denne funktion."""
+    nyere versions installer fra disken uden at kende dens parametre. Skift ikke navn eller parametre på denne funktion.
+    Den gamle version kalder også ny.rul_tilbage(kvit) og ny.skjul_token(kvit["backup"]) (0.4.2–): de navne og nøglen "backup" er
+    lige så faste (tests/test_installer.py kalder dem præcis sådan)."""
     return installer(config_dir, data["kanal"], data["prefix"], data.get("inverter2"), version, data.get("ekstra"), data.get("sonnen"))
 
 
@@ -234,7 +241,8 @@ def rul_tilbage(kvit: dict) -> None:
     for fra, til in reversed(kvit["flyttet"]):
         Path(til).parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(fra), str(til))
-    Path(kvit["conf"]).write_text(kvit["gammel_conf"], encoding="utf-8", newline="")
+    if kvit.get("gammel_conf") is not None:
+        Path(kvit["conf"]).write_text(kvit["gammel_conf"], encoding="utf-8", newline="")
     b = Path(kvit["backup"])
     if b.exists() and not any(b.iterdir()):
         b.rmdir()

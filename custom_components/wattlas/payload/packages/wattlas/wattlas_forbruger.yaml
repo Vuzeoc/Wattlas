@@ -78,7 +78,8 @@ automation:
           # (navnet deles, så Spook ikke melder en ukendt entitet – sensoren findes først, når forbrugeren er slået til)
           oensket: >-
             {% set plan = states['sensor.' ~ 'p_deferrable0'] %}
-            {{ aktiv and is_state('input_boolean.emhass_styring_aktiv', 'on') and not is_state('binary_sensor.emhass_ui_planfejl', 'on')
+            {{ aktiv and is_state('input_boolean.emhass_styring_aktiv', 'on') and is_state('input_boolean.emhass_har_overtaget', 'on')
+               and not is_state('binary_sensor.emhass_ui_planfejl', 'on')
                and plan is not none and (now() - plan.last_reported).total_seconds() < 720 and plan.state | float(0) > 50 and tilbage | float(0) > 0 }}
           # mere, end én fase kan bære, kan kun være trefaset
           p_fase: >-

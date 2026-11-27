@@ -43,7 +43,8 @@ at ringe til. Wattlas kræver, at du selv sætter dine grænser og holder øje d
 ## Hvad Wattlas gør
 
 - **Lægger en plan for de næste 24–48 timer.** Planen regnes af [EMHASS](https://emhass.readthedocs.io/) ud fra
-  spotpriser, nettarif, solprognose og husets forbrug. Den regnes om hvert 5. minut.
+  spotpriser, nettarif, solprognose og husets forbrug. Den regnes om hvert 5. minut. På små maskiner kan Wattlas' **lette hjerne**
+  regne planen i stedet – uden EMHASS-app'en og næsten lige så godt (ca. 0,4 kr. pr. døgn fra EMHASS i en sammenligning på 12 døgn).
 - **Lader billigt, bruger dyrt.** Batteriet lades fra nettet i de billigste timer og dækker huset i de dyre. Overskydende
   sol gemmes, og sælges kun, når salgsprisen efter gebyrer er positiv.
 - **Deler huset mellem batteri og elnet.** Batteriet behøver ikke dække hele huset. Rækker det ikke til alle de dyre timer,
