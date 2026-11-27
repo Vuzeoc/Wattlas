@@ -22,21 +22,22 @@ gamle, regner Wattlas det ladede med.
 
 **To grænser i *Klar til tid*** (når bilen er i Home Assistant): *Lad til* gælder strøm fra nettet, *Sol op til* gratis sol – fx 80 % fra nettet og
 100 % på sol. *Sol op til* er aldrig lavere end *Lad til*. Gratis sol er det, huset ikke selv bruger, og som planen ikke lader husbatteriet med.
-**100 % til næste tur** løfter målet til 100 % og slår fra af sig selv, når bilen er fuld eller kobles fra. *Kun sol* lader som før, til bilen selv stopper.
+**100 % til næste tur** løfter målet til 100 % og slår fra af sig selv, når bilen er fuld eller kobles fra. *Solladning* lader som før, til bilen selv stopper.
 
 ## Tilstande
 | Tilstand | Hvad den gør |
 |---|---|
 | **Lad nu** | fuld strøm med det samme |
 | **Klar til tid** | så mange kWh, du vælger, i de billigste timer og færdig til klokkeslættet. Nås det ikke ellers, lades der uanset prisen. Imellem lader den på gratis sol (overskud, der ellers sælges), når der er nok til laveste strøm. Ved *Energi* står, hvor længe det cirka tager ved fuld strøm |
-| **Kun sol** | kun strøm, huset ikke selv bruger. Kræver overskud til laderens laveste strøm (6 A: ca. 1,4 kW på én fase, 4,1 kW på tre) |
+| **Solladning** | strøm, huset ikke selv bruger, plus det **tilskud fra net/batteri**, du vælger (0 W = kun sol). Uden tilskud kræver den overskud til laderens laveste strøm (6 A: ca. 1,4 kW på én fase, 4,1 kW på tre). Med 3 kW tilskud starter en trefaset lader ved ca. 1,1 kW overskud. Appen viser, hvornår den starter og når fuld strøm. **Er tilskuddet større end laderens laveste effekt, lader den også uden sol** – til den pris, strømmen har. Vil du have de billige timer, så brug *Klar til tid*. Lader bilen kun på én fase, regnes solen efter den fase, når ladningen er i gang |
 | **Stop** | stopper ladningen og holder laderen stoppet – også hvis den startes et andet sted |
 | **Slip laderen** | Wattlas slipper laderen og sender intet. **En ladning, der er i gang, kører videre** – vælg *Stop* for at stoppe. Brug laderens eller bilens egen app |
 
 **Kun fra elnettet** (kontakt på fanen Elbil): husbatteriet aflader ikke, mens bilen lader. Bilen får strøm fra nettet og solen, og batteriet må stadig lades.
-Imens køber hele huset fra nettet, også i dyre timer. Slået fra følger batteriet planen som ellers og kan også dække bilen.
+Imens køber hele huset fra nettet, også i dyre timer. Slået fra følger batteriet planen som ellers og kan også dække bilen. I *Solladning* afgør den altså, om
+tilskuddet kommer fra nettet alene eller også fra husbatteriet.
 
-Wattlas lader med **fuld strøm eller slet ikke**. Strømmen skrues kun ned, når faserne eller importloftet kræver det (eller solen i *Kun sol*). Lader batteriet
+Wattlas lader med **fuld strøm eller slet ikke**. Strømmen skrues kun ned, når faserne eller importloftet kræver det (eller solen og tilskuddet i *Solladning*). Lader batteriet
 fra nettet, viger det for bilen.
 
 ## Hvad skal laderen kunne?

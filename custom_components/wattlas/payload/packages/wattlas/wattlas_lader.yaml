@@ -41,6 +41,15 @@ input_number:
     mode: box
     unit_of_measurement: "%"
     icon: mdi:solar-power
+  # Solladning: så meget må bilen tage fra nettet eller husbatteriet oven i solen (0 = kun sol). "Kun fra elnettet" afgør hvorfra
+  wattlas_lader_tilskud_w:
+    name: Wattlas · elbil solladning tilskud
+    min: 0
+    max: 22000
+    step: 100
+    mode: box
+    unit_of_measurement: W
+    icon: mdi:transmission-tower-import
   # lagt ind, siden bilen blev tilsluttet. Nulstilles af Wattlas, når bilen kobles fra
   wattlas_lader_ladet:
     name: Wattlas · elbil-lader ladet
@@ -90,6 +99,7 @@ template:
           tilsluttet: "{{ trigger.event.data.tilsluttet }}"
           rest_kwh: "{{ trigger.event.data.rest_kwh }}"
           p_maks_w: "{{ trigger.event.data.p_maks_w }}"
+          p_min_w: "{{ trigger.event.data.p_min_w }}"
           klar: "{{ trigger.event.data.klar }}"
           noed: "{{ trigger.event.data.noed }}"
           bil_soc: "{{ trigger.event.data.bil_soc }}"

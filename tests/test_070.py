@@ -421,6 +421,16 @@ def ladetid_test():
     assert p.returncode == 0, p.stderr
     assert json.loads(p.stdout) == ['ca. 1 t 50 min', 'ca. 30 min', 'ca. 2 t', '', '', '', 'ca. 30 min'], p.stdout
     print('Ladetid: OK')
+    fn = re.search(r"\n  const solstart = .*?\n    return .*?\n", kort)
+    assert fn, 'solstart findes ikke i kortet'
+    js = fn.group(0) + "console.log(JSON.stringify([solstart(4140, 11040, 0), solstart(4140, 11040, 3000), solstart(4140, 11040, 5000), solstart(4140, 11040, 11040), solstart(undefined, 11040, 0), solstart(4140, 11040, NaN)]));"
+    p = subprocess.run([node, '-'], input=js, capture_output=True, text=True, encoding='utf-8')
+    assert p.returncode == 0, p.stderr
+    nb = ' '  # hårdt mellemrum, så "kW" ikke knækker væk fra tallet
+    assert json.loads(p.stdout) == [f'starter ved ca. 4,1{nb}kW overskud · fuld strøm ved 11,0{nb}kW', f'starter ved ca. 1,1{nb}kW overskud · fuld strøm ved 8,0{nb}kW',
+                                    f'lader også uden sol · fuld strøm ved 6,0{nb}kW overskud', 'lader med fuld strøm, også uden sol', '',
+                                    f'starter ved ca. 4,1{nb}kW overskud · fuld strøm ved 11,0{nb}kW'], p.stdout
+    print('Solladning-skøn: OK')
 
 
 asyncio.run(main())

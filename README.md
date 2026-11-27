@@ -56,7 +56,7 @@ Wattlas er open source. Idéer og ønsker er meget velkomne – opret et issue, 
 
 ## Elbil (eksperimentel)
 
-Vælg din lader under *Konfigurer*, lad Wattlas prøve den af, og styr den fra fanen **Elbil**: lad nu, klar til et klokkeslæt, kun sol eller stop.
+Vælg din lader under *Konfigurer*, lad Wattlas prøve den af, og styr den fra fanen **Elbil**: lad nu, klar til et klokkeslæt, solladning (med det tilskud fra nettet, du vælger) eller stop.
 Har du bilen i Home Assistant, vises dens batteri og rækkevidde, mens den sidder i laderen. Fanen og bilen på forsiden vises kun, når en lader er valgt.
 Se [docs/ELBIL.md](docs/ELBIL.md).
 

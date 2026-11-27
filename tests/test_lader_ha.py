@@ -64,7 +64,7 @@ async def main():
 
     def verden(**k):
         fysik.update(k)
-        w = fysik['a'] * 690 if fysik['til'] and fysik['bil'] else 0
+        w = fysik['a'] * 230 * fysik['f'] if fysik['til'] and fysik['bil'] else 0
         S('sensor.lader_w', round(w), {'unit_of_measurement': 'W'})
         S('sensor.lader_status', 'charging' if w else 'connected' if fysik['bil'] else 'disconnected')
         m = w if fysik['maal'] else 0
@@ -105,7 +105,7 @@ async def main():
     await saet('input_number', 'input_number.wattlas_lader_kwh', value=20)
 
     async def ny(**konf):
-        fysik.update(a=16, til=False, adlyd=True, adlyd_a=True, fejl=False, bil=True, hus=500, maal=True, omvendt=False)
+        fysik.update(a=16, f=3, til=False, adlyd=True, adlyd_a=True, fejl=False, bil=True, hus=500, maal=True, omvendt=False)
         S('number.lader_a', 16)
         await til('fra')
         await M.aktiver(hass, types.SimpleNamespace(data={'lader': {**KONF, **konf}}))
@@ -361,6 +361,25 @@ async def main():
     fysik['sol'] = 0
     S('sensor.wattlas_lader_plan', 0)
     print('Bilen i HA: OK')
+
+    # Solladning med tilskud: 3000 W sol − 1500 W hus = 2 A (for lidt); + 3000 W tilskud = 6 A. Tilskuddet gælder ikke "Klar til tid"
+    await ny(); await til('sol'); st = await trin(3, sol=3000)
+    assert not fysik['til'], ('uden tilskud: for lidt sol', st)
+    await saet('input_number', 'input_number.wattlas_lader_tilskud_w', value=3000); st = await trin(40, sol=3000)
+    assert fysik['til'] and st.attributes['ordre_a'] == 6, ('sol + tilskud = 6 A', st)
+    assert st.attributes['p_min_w'] == 6 * 3 * 230, st
+    S('sensor.wattlas_lader_plan', 0); await saet('input_number', 'input_number.wattlas_lader_ladet', value=25)  # færdig: kun gratis sol
+    await til('klar'); st = await trin(3, sol=3000)
+    assert not fysik['til'], ('Klar til tid tager ikke tilskuddet', st)
+    await saet('input_number', 'input_number.wattlas_lader_tilskud_w', value=0); await saet('input_number', 'input_number.wattlas_lader_ladet', value=0)
+    # en bil, der kun lader på én fase: 6 A er 1380 W, ikke 4140 W. Starten regner forsigtigt med tre faser ((4000 − 1500 + 2000) W / 690 = 6 A),
+    # derefter med den ene, der måles: 4500 W / 230 V = 19 A → højeste strøm 16 A
+    await ny(); fysik['f'] = 1; await til('sol'); await saet('input_number', 'input_number.wattlas_lader_tilskud_w', value=2000)
+    st = await trin(40, sol=4000)
+    assert fysik['til'] and st.attributes['ordre_a'] == 16, ('én fase: solen regnes pr. målt fase', st)
+    await saet('input_number', 'input_number.wattlas_lader_tilskud_w', value=0); fysik['f'] = 3
+    fysik['sol'] = 0
+    print('Solladning med tilskud: OK')
 
     # knapper, valg, omvendt kontakt, kun 0 A og OCPP
     await ny(til_fra=None, start='button.start', stop='button.stop'); await til('lad_nu'); await trin(2)

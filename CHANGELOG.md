@@ -2,6 +2,15 @@
 
 Wattlas er i **alpha**: den kører dagligt hos udvikleren, men er ikke afprøvet i mange huse endnu.
 
+## 0.7.2
+- **Elbil: *Kun sol* hedder nu *Solladning*, og du vælger selv blandingen.** Ny indstilling *Tilskud fra net/batteri* (W): så meget
+  må bilen tage oven i solens overskud. 0 W er kun sol, som før. Med fx 3 kW starter en trefaset 11 kW-lader på 6 A allerede ved ca. 1,1 kW
+  overskud i stedet for 4,1 kW. Appen viser, ved hvilket overskud den starter og når fuld strøm. *Kun fra elnettet* afgør, om tilskuddet
+  kommer fra nettet alene eller også fra husbatteriet. **Er tilskuddet større end laderens laveste effekt, lader den også uden sol**, til den pris,
+  strømmen har – vil du have de billige timer, så brug *Klar til tid*. Dér er solen stadig kun gratis overskud
+- **Rettet: sol til en bil, der kun lader på én fase.** Solens overskud blev delt på laderens tre faser, så en enfaset bil fik en tredjedel af
+  den sol, den kunne bruge. Nu regnes der efter den fase, bilen faktisk lader på, når ladningen er i gang (starten regner stadig forsigtigt med tre)
+
 ## 0.7.1
 - **Rettet: elbilens højeste strøm i appen.** *Højeste strøm* på fanen Elbil kunne trykkes op til 32 A, selv om laderen er sat op til
   fx 16 A. Wattlas har hele tiden brugt den laveste af de to, men nu sættes tallet tilbage, så appen viser den grænse, der gælder

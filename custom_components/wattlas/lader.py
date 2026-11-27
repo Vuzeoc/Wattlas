@@ -32,6 +32,7 @@ UDENFOR_S = 60       # så længe må laderen trække, uden at husets måling vi
 LANGSOM_S = 900      # sky-ladere hæves højst hvert kvarter (sænkes altid straks)
 PLAN_S = 720         # planens højeste alder
 TUR = "input_boolean.wattlas_lader_tur"  # "100 % til næste tur"
+TILSKUD, TILSKUD_MAKS_W = "input_number.wattlas_lader_tilskud_w", 22000.0  # Solladning: så meget må komme fra net/batteri (hjælperens max)
 PROBLEMER = ("lader_stopper_ikke", "lader_over_graense", "lader_udenfor", "lader_svarer_ikke")
 FRI = {"disconnected", "not_connected", "no_ev_connected", "unplugged", "available", "idle", "charger_free", "a_not_connected", "free", "ready", "locked", "a", "1"}  # Wallbox: Ready/Locked uden bil ("Locked, car connected" med)
 MAAL_V = 230.0
@@ -306,10 +307,12 @@ class Styring:
         # lader bilen kun på én fase (mange biler), regnes tiden ud fra det målte, ikke fra opsætningens faser
         antal_e = 1 if antal == 3 and self.sendt and effekt is not None and logik.TOMGANG_W < effekt < 1.5 * self.sendt * volt else antal
         faerdig, noed = logik.noedvendig(rest, maks, antal_e, volt, timer) if maks > 0 else (False, False)
-        # solens overskud: det, huset ikke selv bruger, og som planen ikke lader husbatteriet med (planens tal, ikke det målte – bilen ændrer det målte)
+        # solens overskud pr. fase, bilen lader på (antal_e: tre, til en enfaset bil er målt): det, huset ikke selv bruger, og som planen ikke lader husbatteriet med (planens tal, ikke det målte – bilen ændrer det målte)
         styrer = all(self.hass.states.is_state(e, "on") for e in ("input_boolean.emhass_styring_aktiv", "input_boolean.emhass_har_overtaget", "input_boolean.emhass_plan_gyldig"))
         batt = max(0.0, -self._v("input_number.emhass_plan_batteri_w", 0.0)) if styrer else 0.0  # en gammel planværdi tæller ikke
-        sol = (self._v("sensor.emhass_solproduktion_samlet", 0.0) - self._v("sensor.emhass_m_load_w_totalpower", 1e9) + egen - batt) / (antal * volt)
+        # Solladning: brugerens tilskud fra net/batteri lægges oven i (0 = kun sol). Ikke i "Klar til tid", hvor solen skal være gratis
+        tilskud = min(max(0.0, self._v(TILSKUD, 0.0)), TILSKUD_MAKS_W) if tilstand == "sol" else 0.0
+        sol = (self._v("sensor.emhass_solproduktion_samlet", 0.0) - self._v("sensor.emhass_m_load_w_totalpower", 1e9) + egen - batt + tilskud) / (antal_e * volt)
         ind = logik.Ind(nu=nu, tilstand=tilstand, tilsluttet=tilsluttet, maks_a=maks, min_a=mini, plads_a=rum, over_sikring=over,
                         plan=self._plan(), noed=noed, faerdig=faerdig, sol_a=sol, sol_faerdig=rest_sol is not None and rest_sol <= 0.05, vent_op_s=LANGSOM_S if self.d.get("langsom") else logik.VENT_OP_S)
         if effekt is None or not self.hass.states.is_state("binary_sensor.wattlas_konfigureret", "on"):
@@ -320,7 +323,7 @@ class Styring:
         await self._udfoer(nu, None if skygge else ordre, effekt, antal, volt)  # skygge: laderen slippes (som "fra") og vises kun
         await self._reserve(0 if skygge or ordre is None or grund in ("bilen tager ikke imod", "effekten mangler", "hviler") else logik._oensket(ind), ordre or 0)
         self._meld({"grund": grund, "ordre_a": ordre, "effekt_w": None if effekt is None else round(effekt), "plads_a": None if rum is None else round(rum, 1),
-                    "tilsluttet": tilsluttet, "rest_kwh": round(rest, 1), "bil_soc": soc, "bil_km": self._v(self.d.get("bil_km") or "") if soc is not None else None, "klar": klar, "p_maks_w": round(maks * antal_e * volt), "noed": noed and tilstand == "klar",
+                    "tilsluttet": tilsluttet, "rest_kwh": round(rest, 1), "bil_soc": soc, "bil_km": self._v(self.d.get("bil_km") or "") if soc is not None else None, "klar": klar, "p_maks_w": round(maks * antal_e * volt), "p_min_w": round(mini * antal_e * volt), "noed": noed and tilstand == "klar",
                     "skygge": skygge, "fejl": self.fejl, "fast_a": fast, "hold_kan": self.hold_kan})
 
     def _undtagelser(self, nu: float, ordre, grund, effekt, egen, tilsluttet):
