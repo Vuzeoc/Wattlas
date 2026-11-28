@@ -52,7 +52,7 @@ script:
         discharge_limit: '{{ states(''sensor.emhass_ui_plan_afladegraense_w'')|float(0) }}'
     - if:
       - condition: template
-        value_template: '{{ not (15 <= soc <= 100) }}'
+        value_template: '{{ not (((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15) <= soc <= 100) }}'
       then:
       - stop: SOC mangler eller er uden for 15–100 procent.
         error: true
@@ -246,11 +246,11 @@ script:
           prod_price_forecast: '{{ prognose.salg }}'
           soc_init: '{{ soc / 100 }}'
           # Wattlas-indstillinger (wattlas_styring.yaml). Reserve højst nuværende SOC, ellers kan EMHASS ikke løse opgaven.
-          battery_minimum_state_of_charge: "{{ ([15, [states('input_number.wattlas_reserve') | float(15), soc | float(15)] | min] | max) / 100 }}"
+          battery_minimum_state_of_charge: "{{ ([((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15), [states('input_number.wattlas_reserve') | float(15), soc | float(15)] | min] | max) / 100 }}"
           battery_maximum_state_of_charge: "{{ ([maks_soc, soc | float(0)] | max) / 100 }}"
           maximum_power_to_grid: "{{ (states('input_number.wattlas_maks_eksport_w')|float(0)) | int }}"
           compute_curtailment: "{{ prognose.pv | max > states('input_number.wattlas_maks_eksport_w')|float(0) }}"
-          soc_final: "{{ ([[states('input_number.wattlas_slut_soc') | float(30), maks_soc] | min, [15, [states('input_number.wattlas_reserve') | float(15), soc | float(15)] | min] | max] | max) / 100 }}"
+          soc_final: "{{ ([[states('input_number.wattlas_slut_soc') | float(30), maks_soc] | min, [((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15), [states('input_number.wattlas_reserve') | float(15), soc | float(15)] | min] | max] | max) / 100 }}"
           battery_nominal_energy_capacity: "{{ (states('input_number.wattlas_batteri_kwh')|float(0) * 1000) | int }}"
           battery_charge_power_max: '{{ charge_limit|int }}'
           battery_discharge_power_max: '{{ discharge_limit|int }}'
@@ -299,7 +299,7 @@ script:
              custom_deferrable_forecast_id=cid.v) }}{% else %}{{ {} }}{% endif %}
         hh_ekstra: >-
           {% if hh is none %}{{ {} }}{% else %}
-          {% set r = [15, [hh.get('reserve', 15) | float(15), soc | float(15)] | min] | max %}
+          {% set r = [((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15), [hh.get('reserve', 15) | float(15), soc | float(15)] | min] | max %}
           {% set ka = states('input_number.wattlas_batteri_kwh') | float(0) %}
           {% set kn = hh.get('batteri_kwh', ka) | float(ka) %}
           {% set f = ka / kn if kn >= 1 and ka > 0 else 1 %}
@@ -315,7 +315,7 @@ script:
         storm_ekstra: >-
           {% set s = states.binary_sensor.wattlas_storm %}
           {% if hh is none and s is not none and s.state == 'on' %}
-          {% set r = [15, [[states('input_number.wattlas_reserve') | float(15), 80] | max, maks_soc | float(100), soc | float(15)] | min] | max %}
+          {% set r = [((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15), [[states('input_number.wattlas_reserve') | float(15), 80] | max, maks_soc | float(100), soc | float(15)] | min] | max %}
           {% set kap = states('input_number.wattlas_batteri_kwh') | float(0) * 1000 %}
           {% set fart = [charge_limit | float(0), beregning_basis.maximum_power_from_grid | float(0) - (hus.liste | map('float', 0) | max if hus.ok else 3000)] | min %}
           {% set naa = soc | float(0) + ([0, fart] | max * 0.95 * (prognose.intervaller | int) / 2 / kap * 100 if kap > 0 else 0) - 5 %}
@@ -627,7 +627,7 @@ script:
       continue_on_timeout: false
     - variables:
         # brugerens reserve (og stormens 80 %) gælder også i fejlsituationen
-        min_soc: "{{ [[15, states('input_number.wattlas_reserve') | float(15), 80 if is_state('binary_sensor.wattlas_storm', 'on') and is_state('input_boolean.emhass_styring_aktiv', 'on') else 0] | max, 100] | min | int }}"
+        min_soc: "{{ [[((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15), states('input_number.wattlas_reserve') | float(15), 80 if is_state('binary_sensor.wattlas_storm', 'on') and is_state('input_boolean.emhass_styring_aktiv', 'on') else 0] | max, 100] | min | int }}"
         # den målte grænse – eller, når batterispændingen er ukendt, planens (fast spænding). 0 W må aldrig skrives (se nedenfor)
         aflad_w: "{{ (states('sensor.emhass_ui_afladegraense_w') | float(0)) or (states('sensor.emhass_ui_plan_afladegraense_w') | float(0)) }}"
     - repeat:
@@ -691,7 +691,7 @@ script:
         p_net: '{{ selected.row[2] if selected.valid else 0 }}'
         maal: '{{ selected.row[3] if selected.valid else 15 }}'
         drift_ok: '{{ is_state(''binary_sensor.wattlas_konfigureret'',''on'') and selected.valid and is_state(''binary_sensor.emhass_ui_data_frisk'',''on'') and is_state(''binary_sensor.emhass_styrekanal_ok'',''on'')
-          and 15<=soc<=100 }}'
+          and ((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15)<=soc<=100 }}'
     # Har batteriet ikke stået fuldt i 1 time i 7 dage: lad op om natten og hvil 1 time i toppen (emhass_fuldladning.yaml)
     - variables:
         fuld_kraevet: >-
@@ -756,7 +756,7 @@ script:
         maal: >-
           {% if ts == 'lad' %}{{ ts_soc if soc < ts_soc else maal }}
           {% elif ts == 'gem' %}{{ [100, [maal | float(15), (soc / 5) | round(0, 'ceil') * 5] | max] | min }}
-          {% elif ts == 'brug' %}{{ [15, states('input_number.wattlas_reserve') | float(15)] | max }}
+          {% elif ts == 'brug' %}{{ [((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15), states('input_number.wattlas_reserve') | float(15)] | max }}
           {% else %}{{ maal }}{% endif %}
     # elbilen lader: ingen afladning, ladning er stadig tilladt (wattlas_elbil.yaml)
     - variables:
@@ -849,7 +849,7 @@ script:
       - action: script.emhass_skriv_tal
         data:
           entitet: number.wattlas_program_{{ periode }}_soc
-          vaerdi: '{{ [100, [15, (maal / 5) | round(0,''ceil'') * 5] | max] | min }}'
+          vaerdi: '{{ [100, [((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15), (maal / 5) | round(0,''ceil'') * 5] | max] | min }}'
       - if:
         - condition: template
           value_template: "{{ is_state('input_boolean.wattlas_skygge', 'on') and not is_state('input_boolean.emhass_har_overtaget', 'on') }}"
@@ -887,7 +887,7 @@ script:
       - action: script.emhass_skriv_tal
         data:
           entitet: number.wattlas_program_{{ periode }}_soc
-          vaerdi: '{{ 100 if soc >= 99 and p_batt <= 150 else [100, [15, (maal / 5) | round(0,''floor'') * 5] | max] | min }}'
+          vaerdi: '{{ 100 if soc >= 99 and p_batt <= 150 else [100, [((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15), (maal / 5) | round(0,''floor'') * 5] | max] | min }}'
       - action: script.emhass_skriv_tal
         data:
           entitet: number.wattlas_program_{{ periode }}_power
@@ -896,7 +896,7 @@ script:
             {% set g=p_net %}
             {# hele 500 W, så Deyes tidsplan ikke skrives om for hver lille ændring #}
             {% set cap=((states('sensor.emhass_ui_afladegraense_w')|float(0)) / 500) | round(0,'floor') * 500 %}
-            {% set kap=[100, [15, (maal / 5) | round(0,'floor') * 5] | max] | min %}
+            {% set kap=[100, [((states.input_number.wattlas_mindste_soc.state | float(15)) if states.input_number.wattlas_mindste_soc else 15), (maal / 5) | round(0,'floor') * 5] | max] | min %}
             {% if b>150 and g is not none and g|abs<=50 %}
               {{ cap }}
             {% elif kap >= 100 or soc <= kap or (soc >= 99 and b <= 150) %}
