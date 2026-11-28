@@ -9,7 +9,8 @@
 # Sådan styres batteriet:
 #  - Netladning: manual mode (EM_OperatingMode=1) og ladnings-setpoint i W (POST /api/v2/setpoint/charge/{W}).
 #    Wattlas skriver strøm i A; kanalen ganger med batterispændingen (Ubat). Slås netladningen fra, ryddes setpointene,
-#    og batteriet går i selvforbrug (mode 2).
+#    og batteriet får sin egen driftstilstand tilbage (husket første gang kanalen overtager – fx mode 10 = tidsplan;
+#    ukendt eller ugyldig værdi giver mode 2 = selvforbrug).
 #  - Fasegrænse: batteriet måler kun husets forbrug pr. fase. Sonnen eco er enfaset, men kernen regner med en trefaset
 #    inverter (3 × fasens plads). Derfor sætter kanalen netladestrømmens maks. til det, den VÆRSTE fase har plads til:
 #    (fasegrænse × V − husets forbrug på fasen) × 0,95 / Ubat. Kernen går aldrig over maks.
@@ -57,6 +58,12 @@ input_number:
     max: 400
     step: 1
     unit_of_measurement: A
+  # batteriets egen driftstilstand huskes, så den kan gives tilbage, når Wattlas slipper
+  wattlas_sonnen_egen_driftstilstand:
+    name: Wattlas Sonnen – din egen driftstilstand (husket)
+    min: 0
+    max: 10
+    step: 1
   wattlas_sonnen_p1_soc:
     name: Wattlas Sonnen program 1 SOC (husket)
     min: 0
@@ -173,6 +180,14 @@ template:
         availability: "{{ has_value('sensor.min_sonnen_status') }}"
         state: "{{ state_attr('sensor.min_sonnen_status', 'OperatingMode') | int(-1) == 1 }}"
         turn_on:
+          # husk batteriets egen driftstilstand (10 = tidsplan, 6 = backup, 2 = selvforbrug),
+          # så den kan gives tilbage i turn_off. Kun når vi ikke allerede står i manual mode,
+          # ellers ville vi gemme vores egen 1'er og give den tilbage for evigt.
+          - if: "{{ state_attr('sensor.min_sonnen_status', 'OperatingMode') | int(-1) != 1 }}"
+            then:
+              - action: input_number.set_value
+                target: {entity_id: input_number.wattlas_sonnen_egen_driftstilstand}
+                data: {value: "{{ state_attr('sensor.min_sonnen_status', 'OperatingMode') | int(2) }}"}
           - action: rest_command.sonnen_saet_mode
             data: {mode: 1}
           - action: rest_command.sonnen_lad
@@ -184,7 +199,12 @@ template:
           - action: rest_command.sonnen_aflad
             data: {watt: 0}
           - action: rest_command.sonnen_saet_mode
-            data: {mode: 2}
+            data:
+              # giv batteriet sin egen driftstilstand tilbage (fx 10 = tidsplan) i stedet
+              # for altid at tvinge selvforbrug. Ukendt eller ugyldig værdi -> 2.
+              mode: >-
+                {% set husket = states('input_number.wattlas_sonnen_egen_driftstilstand') | int(0) %}
+                {{ husket if husket in [2, 6, 10] else 2 }}
       - name: Wattlas solsalg
         unique_id: wattlas_solsalg
         default_entity_id: switch.wattlas_solsalg
@@ -199,6 +219,10 @@ template:
         state: "{{ states('input_number.wattlas_sonnen_netladestroem') | float(0) }}"
         min: 0
         # den værste fase: (fasegrænse × V − husets forbrug) med 5 % ladetab, i A ved batteriets spænding
+        # husets forbrug pr. fase kommer fra Sonnens egen forbrugsmåler (WM271, direction=consumption).
+        # Den måler huset BAG batteriet og udelader batteriets eget træk — præcis det formlen skal have.
+        # Elmåleren (Watts Live) ser nettet og inkluderer batteri og sol; den bruges som uafhængigt værn
+        # (sensor.wattlas_fase_maks_a / binary_sensor.wattlas_fase_vaern), ikke som input her.
         max: >-
           {% set v = state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) %}
           {% set ns = namespace(plads=999999) %}
@@ -331,14 +355,99 @@ template:
         unique_id: wattlas_maks_ladestroem
         default_entity_id: sensor.wattlas_maks_ladestroem
         unit_of_measurement: A
-        availability: "{{ state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) > 0 and is_number(state_attr('sensor.min_sonnen_konfiguration', 'IC_InverterMaxPower_w')) }}"
-        state: "{{ (state_attr('sensor.min_sonnen_konfiguration', 'IC_InverterMaxPower_w') | float(0) / state_attr('sensor.min_sonnen_status', 'Ubat') | float(1)) | round(0) }}"
+        availability: "{{ state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) > 0 and is_number(states('sensor.min_sonnen_konfiguration')) }}"
+        state: "{{ (states('sensor.min_sonnen_konfiguration') | float(0) / state_attr('sensor.min_sonnen_status', 'Ubat') | float(1)) | round(0) }}"
       - name: Wattlas maks. afladestrøm
         unique_id: wattlas_maks_afladestroem
         default_entity_id: sensor.wattlas_maks_afladestroem
         unit_of_measurement: A
-        availability: "{{ state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) > 0 and is_number(state_attr('sensor.min_sonnen_konfiguration', 'IC_InverterMaxPower_w')) }}"
-        state: "{{ (state_attr('sensor.min_sonnen_konfiguration', 'IC_InverterMaxPower_w') | float(0) / state_attr('sensor.min_sonnen_status', 'Ubat') | float(1)) | round(0) }}"
+        availability: "{{ state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) > 0 and is_number(states('sensor.min_sonnen_konfiguration')) }}"
+        state: "{{ (states('sensor.min_sonnen_konfiguration') | float(0) / state_attr('sensor.min_sonnen_status', 'Ubat') | float(1)) | round(0) }}"
+      # Fase-data til sikringsbeskyttelsen. Elmåleren (Watts Live) er sandheden: batteriets
+      # egen fase-måling udelader sin EGEN ladestrøm på den fase den lader på, og dens
+      # fasesum stemmer ikke med dens egen total. Sonnens tal bruges kun som fallback.
+      # Udskiftes måleren, rettes serienummeret ét sted: wattlas_fase_kilde nedenfor.
+      - name: Wattlas faseeffekt L1
+        unique_id: wattlas_fase_w_l1
+        default_entity_id: sensor.wattlas_fase_w_l1
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set p = states(wl ~ 'positive_active_power_l1') %}
+          {% set n = states(wl ~ 'negative_active_power_l1') %}
+          {% if is_number(p) and is_number(n) %}{{ (p | float(0)) - (n | float(0)) }}
+          {% else %}{{ states('sensor.min_sonnen_maaler_w_l1') }}{% endif %}
+      - name: Wattlas faseeffekt L2
+        unique_id: wattlas_fase_w_l2
+        default_entity_id: sensor.wattlas_fase_w_l2
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set p = states(wl ~ 'positive_active_power_l2') %}
+          {% set n = states(wl ~ 'negative_active_power_l2') %}
+          {% if is_number(p) and is_number(n) %}{{ (p | float(0)) - (n | float(0)) }}
+          {% else %}{{ states('sensor.min_sonnen_maaler_w_l2') }}{% endif %}
+      - name: Wattlas faseeffekt L3
+        unique_id: wattlas_fase_w_l3
+        default_entity_id: sensor.wattlas_fase_w_l3
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set p = states(wl ~ 'positive_active_power_l3') %}
+          {% set n = states(wl ~ 'negative_active_power_l3') %}
+          {% if is_number(p) and is_number(n) %}{{ (p | float(0)) - (n | float(0)) }}
+          {% else %}{{ states('sensor.min_sonnen_maaler_w_l3') }}{% endif %}
+      - name: Wattlas fasespænding L1
+        unique_id: wattlas_fase_v_l1
+        default_entity_id: sensor.wattlas_fase_v_l1
+        unit_of_measurement: V
+        device_class: voltage
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set v = states(wl ~ 'voltage_l1') | float(0) %}
+          {% if v > 100 %}{{ v }}{% else %}{{ states('sensor.min_sonnen_maaler_v_l1') }}{% endif %}
+      - name: Wattlas fasespænding L2
+        unique_id: wattlas_fase_v_l2
+        default_entity_id: sensor.wattlas_fase_v_l2
+        unit_of_measurement: V
+        device_class: voltage
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set v = states(wl ~ 'voltage_l2') | float(0) %}
+          {% if v > 100 %}{{ v }}{% else %}{{ states('sensor.min_sonnen_maaler_v_l2') }}{% endif %}
+      - name: Wattlas fasespænding L3
+        unique_id: wattlas_fase_v_l3
+        default_entity_id: sensor.wattlas_fase_v_l3
+        unit_of_measurement: V
+        device_class: voltage
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set v = states(wl ~ 'voltage_l3') | float(0) %}
+          {% if v > 100 %}{{ v }}{% else %}{{ states('sensor.min_sonnen_maaler_v_l3') }}{% endif %}
+      - name: Wattlas højeste fasestrøm
+        unique_id: wattlas_fase_maks_a
+        default_entity_id: sensor.wattlas_fase_maks_a
+        unit_of_measurement: A
+        device_class: current
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.watts_live_11d1001230017230_voltage_l1')) }}"
+        state: >-
+          {% set ns = namespace(maks=0) %}
+          {% for i in range(1, 4) %}
+            {% set v = states('sensor.wattlas_fase_v_l' ~ i) | float(0) %}
+            {% set w = states('sensor.wattlas_fase_w_l' ~ i) | float(0) %}
+            {% if v > 100 %}{% set ns.maks = [ns.maks, ([0, w] | max) / v] | max %}{% endif %}
+          {% endfor %}
+          {{ ns.maks | round(1) }}
       - name: EMHASS Solproduktion samlet
         unique_id: emhass_solproduktion_samlet
         default_entity_id: sensor.emhass_solproduktion_samlet
@@ -396,6 +505,99 @@ template:
         unique_id: wattlas_pv_maaling_ok
         default_entity_id: binary_sensor.wattlas_pv_maaling_ok
         state: "{{ is_number(state_attr('sensor.min_sonnen_status', 'Production_W')) }}"
+      # uafhængigt værn: elmåleren (Watts Live) måler hvad der FAKTISK løber gennem sikringen,
+      # uanset hvad batteriet selv mener. Slår til 2 A under fasegrænsen, så der er tid til at reagere.
+      - name: Wattlas faseværn
+        unique_id: wattlas_fase_vaern
+        default_entity_id: binary_sensor.wattlas_fase_vaern
+        device_class: problem
+        state: >-
+          {{ is_number(states('sensor.wattlas_fase_maks_a')) and
+             (states('sensor.wattlas_fase_maks_a') | float(0)) >= (states('input_number.wattlas_fase_graense_a') | float(25) - 2) }}
+
+  # Teknik-fanen i energikortet læser Deye-navne under inverter_prefix. Her mappes de til
+  # det, en Sonnen faktisk melder, så fanen viser tal i stedet for streger. Navne uden
+  # Sonnen-modstykke (mikroinverter, tabstal, energimønster) oprettes ikke med vilje.
+  - sensor:
+      - name: min_sonnen connection
+        unique_id: min_sonnen_connection
+        state: "{{ states('binary_sensor.wattlas_forbindelse') }}"
+      - name: min_sonnen device
+        unique_id: min_sonnen_device
+        state: "SonnenBatterie"
+      - name: min_sonnen device_state
+        unique_id: min_sonnen_device_state
+        state: "{{ state_attr('sensor.min_sonnen_status','SystemStatus') or 'ukendt' }}"
+      - name: min_sonnen device_alarm
+        unique_id: min_sonnen_device_alarm
+        state: "{{ states('sensor.min_sonnen_batteri_alarm') }}"
+      - name: min_sonnen device_fault
+        unique_id: min_sonnen_device_fault
+        state: "{{ states('sensor.min_sonnen_batteri_advarsel') }}"
+      - name: min_sonnen output_ac_power
+        unique_id: min_sonnen_output_ac_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ state_attr('sensor.min_sonnen_status','Pac_total_W') | float(0) | round(0) }}"
+      - name: min_sonnen pv_power
+        unique_id: min_sonnen_pv_power
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: "{{ state_attr('sensor.min_sonnen_status','Production_W') | float(0) | round(0) }}"
+      - name: min_sonnen output_frequency
+        unique_id: min_sonnen_output_frequency
+        unit_of_measurement: Hz
+        device_class: frequency
+        state_class: measurement
+        state: "{{ state_attr('sensor.min_sonnen_status','Fac') | float(0) }}"
+      - name: min_sonnen temperature
+        unique_id: min_sonnen_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ states('sensor.min_sonnen_inverter_temperatur') }}"
+      - name: min_sonnen dc_temperature
+        unique_id: min_sonnen_dc_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ states('sensor.min_sonnen_batteri_temperatur') }}"
+      - name: min_sonnen update_interval
+        unique_id: min_sonnen_update_interval
+        unit_of_measurement: s
+        state: "5"
+      - name: min_sonnen work_mode
+        unique_id: min_sonnen_work_mode
+        state: "{{ state_attr('sensor.min_sonnen_status','OperatingMode') or 'ukendt' }}"
+      - name: min_sonnen total_battery_life_cycles
+        unique_id: min_sonnen_total_battery_life_cycles
+        state: "{{ states('sensor.min_sonnen_cyklusser') }}"
+      - name: min_sonnen today_battery_charge
+        unique_id: min_sonnen_today_battery_charge
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ states('sensor.wattlas_batteri_ladet_i_dag') }}"
+      - name: min_sonnen today_battery_discharge
+        unique_id: min_sonnen_today_battery_discharge
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ states('sensor.wattlas_batteri_afladet_i_dag') }}"
+      - name: min_sonnen today_production
+        unique_id: min_sonnen_today_production
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ states('sensor.wattlas_produktion_i_dag') }}"
+      - name: min_sonnen total_production
+        unique_id: min_sonnen_total_production
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: "{{ states('sensor.wattlas_total_produktion') }}"
 
 # Sonnen har ingen dagstællere og ingen totaler i API'et – de laves her med HA's egne værktøjer.
 sensor:
