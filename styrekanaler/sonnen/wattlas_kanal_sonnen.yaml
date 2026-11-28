@@ -219,6 +219,10 @@ template:
         state: "{{ states('input_number.wattlas_sonnen_netladestroem') | float(0) }}"
         min: 0
         # den værste fase: (fasegrænse × V − husets forbrug) med 5 % ladetab, i A ved batteriets spænding
+        # husets forbrug pr. fase kommer fra Sonnens egen forbrugsmåler (WM271, direction=consumption).
+        # Den måler huset BAG batteriet og udelader batteriets eget træk — præcis det formlen skal have.
+        # Elmåleren (Watts Live) ser nettet og inkluderer batteri og sol; den bruges som uafhængigt værn
+        # (sensor.wattlas_fase_maks_a / binary_sensor.wattlas_fase_vaern), ikke som input her.
         max: >-
           {% set v = state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) %}
           {% set ns = namespace(plads=999999) %}
@@ -359,6 +363,91 @@ template:
         unit_of_measurement: A
         availability: "{{ state_attr('sensor.min_sonnen_status', 'Ubat') | float(0) > 0 and is_number(states('sensor.min_sonnen_konfiguration')) }}"
         state: "{{ (states('sensor.min_sonnen_konfiguration') | float(0) / state_attr('sensor.min_sonnen_status', 'Ubat') | float(1)) | round(0) }}"
+      # Fase-data til sikringsbeskyttelsen. Elmåleren (Watts Live) er sandheden: batteriets
+      # egen fase-måling udelader sin EGEN ladestrøm på den fase den lader på, og dens
+      # fasesum stemmer ikke med dens egen total. Sonnens tal bruges kun som fallback.
+      # Udskiftes måleren, rettes serienummeret ét sted: wattlas_fase_kilde nedenfor.
+      - name: Wattlas faseeffekt L1
+        unique_id: wattlas_fase_w_l1
+        default_entity_id: sensor.wattlas_fase_w_l1
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set p = states(wl ~ 'positive_active_power_l1') %}
+          {% set n = states(wl ~ 'negative_active_power_l1') %}
+          {% if is_number(p) and is_number(n) %}{{ (p | float(0)) - (n | float(0)) }}
+          {% else %}{{ states('sensor.min_sonnen_maaler_w_l1') }}{% endif %}
+      - name: Wattlas faseeffekt L2
+        unique_id: wattlas_fase_w_l2
+        default_entity_id: sensor.wattlas_fase_w_l2
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set p = states(wl ~ 'positive_active_power_l2') %}
+          {% set n = states(wl ~ 'negative_active_power_l2') %}
+          {% if is_number(p) and is_number(n) %}{{ (p | float(0)) - (n | float(0)) }}
+          {% else %}{{ states('sensor.min_sonnen_maaler_w_l2') }}{% endif %}
+      - name: Wattlas faseeffekt L3
+        unique_id: wattlas_fase_w_l3
+        default_entity_id: sensor.wattlas_fase_w_l3
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set p = states(wl ~ 'positive_active_power_l3') %}
+          {% set n = states(wl ~ 'negative_active_power_l3') %}
+          {% if is_number(p) and is_number(n) %}{{ (p | float(0)) - (n | float(0)) }}
+          {% else %}{{ states('sensor.min_sonnen_maaler_w_l3') }}{% endif %}
+      - name: Wattlas fasespænding L1
+        unique_id: wattlas_fase_v_l1
+        default_entity_id: sensor.wattlas_fase_v_l1
+        unit_of_measurement: V
+        device_class: voltage
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set v = states(wl ~ 'voltage_l1') | float(0) %}
+          {% if v > 100 %}{{ v }}{% else %}{{ states('sensor.min_sonnen_maaler_v_l1') }}{% endif %}
+      - name: Wattlas fasespænding L2
+        unique_id: wattlas_fase_v_l2
+        default_entity_id: sensor.wattlas_fase_v_l2
+        unit_of_measurement: V
+        device_class: voltage
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set v = states(wl ~ 'voltage_l2') | float(0) %}
+          {% if v > 100 %}{{ v }}{% else %}{{ states('sensor.min_sonnen_maaler_v_l2') }}{% endif %}
+      - name: Wattlas fasespænding L3
+        unique_id: wattlas_fase_v_l3
+        default_entity_id: sensor.wattlas_fase_v_l3
+        unit_of_measurement: V
+        device_class: voltage
+        state_class: measurement
+        state: >-
+          {% set wl = 'sensor.watts_live_11d1001230017230_' %}
+          {% set v = states(wl ~ 'voltage_l3') | float(0) %}
+          {% if v > 100 %}{{ v }}{% else %}{{ states('sensor.min_sonnen_maaler_v_l3') }}{% endif %}
+      - name: Wattlas højeste fasestrøm
+        unique_id: wattlas_fase_maks_a
+        default_entity_id: sensor.wattlas_fase_maks_a
+        unit_of_measurement: A
+        device_class: current
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.watts_live_11d1001230017230_voltage_l1')) }}"
+        state: >-
+          {% set ns = namespace(maks=0) %}
+          {% for i in range(1, 4) %}
+            {% set v = states('sensor.wattlas_fase_v_l' ~ i) | float(0) %}
+            {% set w = states('sensor.wattlas_fase_w_l' ~ i) | float(0) %}
+            {% if v > 100 %}{% set ns.maks = [ns.maks, ([0, w] | max) / v] | max %}{% endif %}
+          {% endfor %}
+          {{ ns.maks | round(1) }}
       - name: EMHASS Solproduktion samlet
         unique_id: emhass_solproduktion_samlet
         default_entity_id: sensor.emhass_solproduktion_samlet
@@ -416,6 +505,15 @@ template:
         unique_id: wattlas_pv_maaling_ok
         default_entity_id: binary_sensor.wattlas_pv_maaling_ok
         state: "{{ is_number(state_attr('sensor.min_sonnen_status', 'Production_W')) }}"
+      # uafhængigt værn: elmåleren (Watts Live) måler hvad der FAKTISK løber gennem sikringen,
+      # uanset hvad batteriet selv mener. Slår til 2 A under fasegrænsen, så der er tid til at reagere.
+      - name: Wattlas faseværn
+        unique_id: wattlas_fase_vaern
+        default_entity_id: binary_sensor.wattlas_fase_vaern
+        device_class: problem
+        state: >-
+          {{ is_number(states('sensor.wattlas_fase_maks_a')) and
+             (states('sensor.wattlas_fase_maks_a') | float(0)) >= (states('input_number.wattlas_fase_graense_a') | float(25) - 2) }}
 
   # Teknik-fanen i energikortet læser Deye-navne under inverter_prefix. Her mappes de til
   # det, en Sonnen faktisk melder, så fanen viser tal i stedet for streger. Navne uden

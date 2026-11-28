@@ -330,6 +330,11 @@ hver opdatering. Får batteriet en ny adresse eller et nyt token, rettes det und
 - **Fasegrænse:** batteriet måler kun husets forbrug pr. fase, ikke nettet, og Sonnen eco er enfaset (kernens fasebudget regner
   med en trefaset inverter). Kanalen sætter derfor netladestrømmens maks. til det, den værste fase har plads til:
   (fasegrænse × V − husets forbrug på fasen) × 0,95 / batterispændingen – uden fradrag for sol. Forsigtigt, men aldrig for meget.
+- **Uafhængigt faseværn (valgfrit):** har du en elmåler på MQTT (fx *Watts Live*, topic `watts/<serienummer>/measurement`),
+  giver `sensor.wattlas_fase_maks_a` og `binary_sensor.wattlas_fase_vaern` et værn, der måler hvad der *faktisk* løber gennem
+  sikringen — uafhængigt af hvad batteriet selv mener. Værnet slår til 2 A under fasegrænsen. Elmåleren bruges **ikke** som
+  input til pladsberegningen: den ser nettet inkl. batteri og sol, så batteriets eget træk ville æde sin egen plads og give
+  en savtak. Sæt serienummeret ét sted i kanalen (`watts_live_<serienummer>_`); uden måler falder sensorene tilbage til batteriet.
 - **Går Home Assistant ned under netladning,** bliver batteriet i manual mode og lader videre med det sidste setpoint,
   til det er fuldt. Sonnen har ingen nedtælling som Huawei og Growatt. *Nyere enheder har en:* API-dokumentationen
   beskriver `PUT /api/v2/site/setpoint` med en `duration` (standard `PT30S`), men den svarer
