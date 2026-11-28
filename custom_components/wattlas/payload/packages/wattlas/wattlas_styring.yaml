@@ -20,14 +20,23 @@ input_number:
     icon: mdi:battery-arrow-up
   wattlas_reserve:
     name: Wattlas · reserve (laveste batteriniveau)
-    min: 15
+    min: 5
     max: 80
     step: 5
     unit_of_measurement: "%"
     icon: mdi:battery-lock
+  wattlas_mindste_soc:
+    # det absolutte gulv for planen. Reserve og slut-SOC kan ikke komme under det.
+    # 15 som standard (som før); sæt den lavere, hvis batteriet gerne må tømmes længere ned.
+    name: Wattlas · mindste batteriniveau (gulv)
+    min: 5
+    max: 50
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-alert-variant-outline
   wattlas_slut_soc:
     name: Wattlas · batteriniveau ved planens slutning
-    min: 15
+    min: 5
     max: 100
     step: 5
     unit_of_measurement: "%"
